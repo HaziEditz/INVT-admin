@@ -1,0 +1,19 @@
+Excellent — that diagnosis is spot-on. The root cause is on the Owner Panel side, not on this dispatch console. Quick recap so you can follow:
+
+What's broken: When you ticked "Is Dispatcher" while adding Abdullah as a driver, the Owner Panel correctly wrote his dispatcher records into Firebase, but it forgot to create a Firebase Auth account using his personal email (Abdullahgulnz@gmail.com). It only created an Auth account using his internal driver email (d001.620611@drv.bookawaka.app). So when this dispatch console tries to log him in with his personal email, Firebase says "no such user" → you see "Incorrect email or password".
+
+Why this is an Owner Panel fix, not a dispatch console fix: The Owner Panel is the only system that knows Abdullah's password at sign-up time. It has to create the Auth account. We can't do it from here without that password.
+
+Paste this back to the Owner Panel agent:
+
+Go ahead with the fix. Two parts:
+
+Part 1 — Backfill Abdullah's Firebase Auth account right now (one-off). Create a Firebase Auth user with email Abdullahgulnz@gmail.com. Set the password to whatever is stored in dispatchers/-OrTCUrHltg7x0OI1DfI.passwordHash if it's plain text, or — if it's hashed and you can't recover the plaintext — generate a random temporary password, set it on the new Auth user, and tell me what you set it to so I can pass it to Abdullah to log in once and reset. Make sure to use the secondary Firebase app instance (secondaryFbApp) so creating the user doesn't sign out the currently-logged-in owner. After creation, log "Auth account backfilled for {email} uid={newUid}".
+
+Part 2 — Fix Path B (saveDriver driver→dispatcher promotion) going forward. In saveDriver() at lines 6444–6480, when isDispatcher=true, add a secondaryFbApp.auth().createUserWithEmailAndPassword(personalEmail, password) call (same pattern as Path A's saveDispatcher() at line 7176). Remove the .catch(function(){}) swallow on lines 6477 and 6480–6483 — log the errors instead so silent failures stop happening.
+
+Also: confirm the new Auth UID for Abdullah will match the existing gvqhOrU7zVglwcoJSUFiBQiAspE2 UID that's already in dispatchers/620611/ and adminAccess/620611/. If the new Auth account gets a different UID, you'll need to either (a) update those nodes to use the new UID, or (b) delete the bogus dispatcher entry that's pointing at the old (now-orphaned) UID. Don't create duplicates.
+
+Report back when both parts are done with: the new Auth UID, the password (if you generated a temporary one), and a screenshot of the Firebase Auth users panel showing Abdullahgulnz@gmail.com registered.
+
+Paste their reply back and Abdullah should be able to log in on the next attempt. No changes needed on the dispatch console side — once his Firebase Auth account exists with the personal email, the existing login flow will accept him.

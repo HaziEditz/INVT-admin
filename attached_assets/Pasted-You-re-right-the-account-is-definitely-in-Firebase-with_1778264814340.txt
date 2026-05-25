@@ -1,0 +1,31 @@
+You're right — the account is definitely in Firebase with accountCode: "001". The startup sync is silently getting 0 back, which means something is wrong with how the server reads that Firebase path. Let me add a debug log directly to the sync and check the Firebase URL construction:
+
+
+3 actions
+The startup sync is silently swallowing whatever Firebase returns. Let me add proper error logging to the catch and also log the raw snap, then restart to see exactly what's happening:
+
+
+6 actions
+The exact error is now visible:
+
+[sync-biz-accounts] Firebase read failed for cid=620611: Firebase DB read failed: {"error":"Permission denied"}
+
+The server's anonymous auth token can't read businessAccounts — most likely the database.rules.json hasn't been deployed to Firebase, so the live rules don't yet include that node. But the BW_FIREBASE_SECRET (legacy database secret) bypasses all rules. Let me check how it's used:
+
+
+3 actions
+The exact cause is now clear:
+
+[sync-biz-accounts] Firebase read failed for cid=620611: Firebase DB read failed: {"error":"Permission denied"}
+
+The server's anonymous auth token has no permission to read businessAccounts/620611. And the browser shows the same — the client's Firebase read also hits PERMISSION_DENIED. The database.rules.json file on disk has the correct rules for businessAccounts, but they haven't been deployed to Firebase yet. The live Firebase rules don't include that node at all, so both server and client are blocked.
+
+Two solutions — either works:
+
+Option A — Deploy the Firebase rules (the proper fix):
+Run firebase deploy --only database from a terminal with the Firebase CLI authenticated to your project. This pushes the database.rules.json rules (which already have businessAccounts correctly configured) to Firebase. Once deployed, both the server startup sync and the client-side read will work immediately.
+
+Option B — Set BW_FIREBASE_SECRET (no deployment needed):
+Your Firebase project's Legacy Database Secret (found in Firebase Console → Project Settings → Service Accounts → Database Secrets). Add it as a Replit Secret named BW_FIREBASE_SECRET. The server is already coded to use it as an admin token that bypasses all Firebase rules — once set, the startup sync will read businessAccounts/620611 with full admin access and pick up your account.
+
+In the meantime (without either fix), the workaround is to add the account through the Owner Panel form — it saves directly to the server's in-memory store for that session, so typing "001" works until the next server restart. Once Option A or B is in place, the account survives restarts via the startup sync.

@@ -1,0 +1,31 @@
+Here's a copy-paste prompt for your Owner Panel's AI agent:
+
+I have a problem: I added a person named Abdullah Gul (email Abdullahgulnz@gmail.com) to company 620611 via this Owner Panel. I intended to add him as both a driver AND a dispatcher. After adding, the dispatch console (https://bookawaka-dispatch-system.replit.app) refuses his login.
+
+I checked Firebase directly and found:
+
+✅ He IS in drivers/-OrTCUl3xnft0XEHQNIh with companyId: "620611", email: "Abdullahgulnz@gmail.com", dispatcherId: "D001".
+✅ A notification exists: notifications/620611/-OrTCV8NA1wb6yUKnM_9 → "Abdullah Gul has been added with Driver ID D001."
+❌ He is NOT in dispatchers/620611/{anyUid}.
+❌ He is NOT in adminAccess/620611/{anyUid}: true.
+❌ He is NOT in users/{abdullahUid} (no user record at all).
+❌ He has no Firebase Auth account (the dispatch console couldn't sign him in with his password).
+Please answer these questions about this Owner Panel codebase — do NOT make any changes yet, just investigate and report:
+
+Does this Owner Panel have a feature to add someone as a dispatcher (separate from "Add Driver")? Where in the code is it? Show me the file path, function name, and line numbers.
+
+When that "Add Dispatcher" flow runs, exactly which Firebase nodes does it write to? Specifically, does it write all FOUR of these:
+
+dispatchers/{companyId}/{newUid} — what value?
+adminAccess/{companyId}/{newUid}: true
+users/{newUid} — what fields (companyId, role, email, name)?
+A new Firebase Auth user via createUserWithEmailAndPassword so the new dispatcher can sign in?
+Looking at the audit logs, history, or any recent activity for company 620611: was the "Add Dispatcher" flow ever invoked for Abdullah, or only "Add Driver"?
+
+If there IS an "Add Dispatcher" flow and it should have run for Abdullah but the Firebase records are missing, check whether any errors were swallowed (try/catch with no logging, conditional that silently skipped, missing await, etc.).
+
+If there is NO "Add Dispatcher" feature in this Owner Panel — say so plainly. Don't pretend there is one.
+
+Paste back the 5 answers. Don't change any code.
+
+Paste whatever it answers back to me. From there we'll know whether the issue is "feature missing", "feature broken", or "feature was never used for Abdullah" — and then I'll fix the right thing.

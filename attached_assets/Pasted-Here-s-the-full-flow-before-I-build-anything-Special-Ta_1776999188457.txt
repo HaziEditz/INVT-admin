@@ -1,0 +1,57 @@
+Here's the full flow before I build anything:
+
+Special Tariff — Proposed Flow
+What it is
+A separate tab inside the Tariff section called "Special Tariffs" with 3 sub-categories:
+
+Passenger (for the passenger app)
+Food Delivery
+Freight / Courier
+Tab Layout
+[ Tariff Schedule ]  [ Special Tariffs ]   ← two tabs
+
+Inside Special Tariffs, a sub-tab for each type:
+
+[ Passenger ]  [ Food Delivery ]  [ Freight/Courier ]
+
+Each category has:
+1. Master ON/OFF switch
+A big toggle at the top — when OFF, this entire special tariff category is disabled and the passenger/delivery app ignores it and falls back to normal tariff. When ON, it's live.
+
+2. Flat-rate distance table
+A list of rows — each row is a distance + price pair:
+
+Distance (km)	Price ($)	
+1	$5.00	✕ Remove
+2	$10.00	✕ Remove
+5	$20.00	✕ Remove
++ Add Row		
+Distance: number input or dropdown (1, 2, 3… or custom)
+Price: dollar input
+Add button adds a new empty row
+Remove button on each row
+Rows are sorted by distance automatically
+3. Fallback rule
+A label at the bottom stating: "If trip distance is not in this list, the normal tariff applies." — this is automatic, no config needed.
+
+4. Save button
+One save button per category — writes to Firebase immediately.
+
+Firebase structure it saves to:
+specialTariffs/1216/
+  passenger/
+    enabled: true
+    rates: { "1": 5, "2": 10, "5": 20 }
+  foodDelivery/
+    enabled: false
+    rates: { ... }
+  freight/
+    enabled: false
+    rates: { ... }
+
+How the passenger/delivery app reads it:
+Check specialTariffs/1216/passenger/enabled — if false, use normal tariff
+If true, get the trip distance in km, round to nearest km (or exact match)
+Look up that km in rates — if found, use that flat price
+If not found, fall back to normal tariff calculation
+One question before I build: For the km lookup — should it be exact km match (e.g. only applies if trip is exactly 1km, 2km, 5km), or should it be "up to X km" pricing (e.g. any trip 1km–1.99km = $5, 2km–2.99km = $10)?

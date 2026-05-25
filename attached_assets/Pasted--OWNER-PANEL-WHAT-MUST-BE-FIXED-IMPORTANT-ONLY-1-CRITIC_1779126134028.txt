@@ -1,0 +1,163 @@
+🟦 OWNER PANEL — WHAT MUST BE FIXED (IMPORTANT ONLY)
+🔴 1. CRITICAL FIX: OWNER PANEL MUST STOP DIRECT DATA EDITING
+Problem in your current system:
+
+Pages like:
+
+Jobs Editor.aspx
+Users-Registration.aspx
+Vehicle-Registration.aspx
+
+can directly modify:
+
+jobs
+drivers
+vehicles
+
+❌ This bypasses your new command system
+
+✅ FIX REQUIRED:
+Rule:
+
+Owner panel MUST NOT directly write to job lifecycle fields.
+
+Instead:
+Action	Fix
+Edit job	MUST call /api/job/command (UPDATE)
+Cancel job	MUST call /api/job/command (CANCEL)
+Reassign	MUST call /api/job/command (ASSIGN)
+Fix fare	MUST go through UPDATE event
+🧠 Why this matters:
+
+If owner panel bypasses backend rules:
+
+version lock breaks
+events break
+driver app desync returns
+🟡 2. FIX: “JOBS EDITOR” PAGE IS DANGEROUS
+Current issue:
+
+Jobs Editor.aspx likely allows:
+
+direct fare edits
+direct status edits
+manual corrections
+REQUIRED CHANGE:
+Convert Jobs Editor into:
+“JOB CORRECTION TOOL (SAFE MODE)”
+
+It must:
+
+✔ only allow:
+
+correction requests
+not direct overwrite
+
+✔ send:
+
+UPDATE_COMMAND → backend → event → apply
+
+❌ NEVER:
+
+write Firebase directly
+change status manually
+🟡 3. FIX: PRUNE / GHOST JOB BUTTON (SAFETY ISSUE)
+Current:
+
+“Prune Ghosts” wipes jobs directly
+
+Problem:
+
+This can:
+
+delete jobs mid-event
+break driver reconciliation
+cause missing revenue records
+FIX:
+Replace with:
+“SAFE CLEANUP MODE”
+
+It must:
+
+only remove jobs where:
+status = null OR orphaned
+no driver assigned
+no active event history
+🟡 4. FIX: SUPER ADMIN WRITE ACCESS (DANGER AREA)
+
+These APIs are dangerous:
+
+/api/admin-write
+/api/admin-read
+/api/purge-company-data
+REQUIRED FIX:
+
+Add rule:
+
+Even super admin writes must go through /api/job/command
+for anything related to jobs/drivers/dispatch
+🟡 5. FIX: REPORT PAGES (DATA CONSISTENCY)
+
+Pages like:
+
+ClosedJobsReports.aspx
+DriverReports.aspx
+DispatchSummary.aspx
+ISSUE:
+
+They may read raw Firebase data that is:
+
+unversioned
+unfiltered
+pre-event-processing
+FIX:
+Reports must use:
+
+✔ processed data layer OR
+✔ “final state only” filter:
+
+status IN (Completed, Cancelled)
+AND version = latest
+AND event chain complete
+🟢 6. GOOD NEWS: WHAT YOU DO NOT NEED TO CHANGE
+
+You DO NOT need to touch:
+
+dashboard UI layout
+billing pages
+subscription pages
+SA analytics pages
+onboarding pages
+login system
+
+These are fine.
+
+🔥 FINAL SUMMARY (OWNER PANEL ONLY)
+YOU ONLY FIX 4 THINGS:
+🔴 1. Stop direct job edits
+
+→ everything goes through command API
+
+🔴 2. Jobs Editor becomes “correction tool”
+
+→ not direct database editor
+
+🟡 3. Prune Ghosts becomes safe cleanup
+
+→ no destructive deletion
+
+🟡 4. Reports must use final-state data only
+
+→ no raw Firebase mixed state
+
+🧠 SIMPLE TRUTH
+
+Your owner panel is NOT broken.
+
+👉 It’s just currently:
+
+“too powerful compared to your new controlled booking engine”
+
+So the fix is:
+
+“reduce direct write power, increase controlled API usage”

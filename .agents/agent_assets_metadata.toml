@@ -1,0 +1,20 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "0nVYgCoNAy0mBuAw_Uiw9"
+uri = "file://TM_MODULE_HANDOFF.md"
+type = "text"
+title = "Total Mobility Module — Super Admin Handoff Document"
+
+[[outputs]]
+id = "rf-5EhrQM-ODffNLLc6ER"
+uri = "file://SPECIAL_TARIFFS_HANDOFF.md"
+type = "text"
+title = "Special Tariffs Module — Super Admin Handoff Document"
+
+[[outputs]]
+id = "m9FSwwrEJCrd0qZ34iuM8"
+uri = "file://DEV_REFERENCE.md"
+type = "text"
+title = "Dev Team Reference & Data Integrity Checklist"

@@ -1,0 +1,32 @@
+BookaWaka E2E Test — Owner Portal Bug Report (2026-05-06)
+These bugs were found during a solo end-to-end test run. Please fix and confirm when done.
+
+HIGH — Security
+BUG 1 — Driver passwords stored in plain text Driver passwords created via the Owner Portal are stored in plain text in Firebase. This is a serious security issue. Fix: hash passwords before storing (SHA-256 minimum, bcrypt preferred). The SA portal already uses SHA-256 for its own portal passwords as a reference.
+
+BUG 2 — Driver creation form blocks with "fill in all required fields" even when all fields are filled The form validates ALL tabs on save, including the EID / National ID field. In NZ, this field is not used and drivers don't have an EID. This makes it impossible to create a driver via the form without entering a dummy value. Fix: make the EID / National ID field optional (not required) when the company's country is NZ. Or make it optional globally.
+
+BUG 3 — Vehicle field name mismatch with driver app When saving a driver with an assigned vehicle, the Owner Portal writes:
+
+allocatedVehicles: {"Taxi02": true} (object)
+allocatedTaxi: "Taxi02"
+The driver app reads:
+
+assignedVehicles: ["Taxi02"] (array)
+vehicleId: "TAXI02" (uppercase string)
+Result: drivers created via Owner Portal show "No vehicles available" in the driver app. Fix: write assignedVehicles: [vehicleId] and vehicleId: vehicleId.toUpperCase() when saving a driver. Keep allocatedVehicles as well for backward compat if needed.
+
+HIGH — Data
+BUG 4 — Full data missing in closed job reports Completed job reports (both hail and dispatch) are missing trip data: fare, distance, duration, payment type, driver name, passenger info. Firebase paths: completedJobs/{cid}/{bookingId} (hail), allbookings/{cid}/{bookingId} (dispatch) Key fields to display: fare, distanceKm, durationLabel, paymentType, driverId, driverName, pickupAddress, dropAddress, completedAt_ISO
+
+BUG 5 — Driver trip history showing wrong or missing data The driver trip history panel in the Owner Portal is not showing the correct completed trips for drivers. Fix: read from completedJobs/{cid} filtered by driverId, and also from allbookings/{cid} filtered by driverId and status: 'Completed'.
+
+LOW
+BUG 6 — Duplicate driver ID (dispatcherId) not enforced The uniqueness check for driver ID / dispatcherId does not catch all duplicates, allowing two drivers to have the same ID. Fix: when saving a new driver, query all existing drivers for the company and confirm the dispatcherId / id field is unique before saving.
+
+Owner Portal — Firebase field contract reminders
+Driver record path: drivers/{cid}/{uid} (nested, NOT flat push key)
+Required driver fields: name, email, phone, companyId, id (dispatcherId), systemEmail, assignedVehicles (array), vehicleId (uppercase), active, status, allowedServices, uid
+Vehicle assignment: also update the vehicle record at vehicles/{pushKey} → set assignedDriver, assignedDriverKey
+Cash toggle: hide cash if EITHER bwConfig/paymentMethods/cashEnabled OR companySettings/{cid}/paymentMethods/cashEnabled is false
+Driver ratings: driverRatings/{cid}/{bookingId} — universal path for all job types

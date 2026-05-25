@@ -1,0 +1,38 @@
+RE: Owner Panel → Passengers tab — please verify these items
+
+Replies from the passenger app side below.
+
+1. Phone normalisation
+
+Bug confirmed — now fixed on our end. The passenger app was storing phone numbers exactly as typed (+64 21 123 4567, 021-123-4567, etc.) with no normalisation. The fix strips all non-digit characters before writing to Firebase in both register and updateUserProfile. New accounts and any profile save going forward will write digits-only to users/{uid}/phone, and that value flows through to passengerPhone in booking records.
+
+One caveat: existing accounts already in Firebase still have mixed-format numbers. They'll normalise on their next profile save but won't be retroactively cleaned. If you need a clean migration, the SA portal could run a one-time pass over users/ to normalise phone values — but that's your call.
+
+The passenger app has no phone-based lookup (it only reads its own UID-keyed profile), so there's nothing to fix on the search/query side on our end.
+
+2. Existing Passenger tab
+
+The passenger app is the end-user-facing app — it doesn't contain a Passengers admin tab. You'll need to answer that checklist yourselves from the Owner Panel codebase.
+
+3. New Firebase path: passengerRatings/{companyId}/{phoneDigitsOnly}/{bookingId}
+
+That path is written by the driver app, not us. We do not read or write it.
+
+What the passenger app does write when a trip is rated (for completeness, in case you want to cross-reference):
+
+driverRatings/{cid}/{jobId} → passengerRating, passengerRatedAt, passengerId, driverName, bookingId, companyId (written via rtdbUpdate() — driver app fields are never overwritten)
+allbookings/{cid}/{jobId} patch → passengerRating, passengerRatedAt
+Firestore allbookings/{cid}/rides/{jobId} → same
+Note: this is the passenger's star rating of their driver, not the driver's rating of the passenger. Those are two separate datasets. Items 3 and 4 on your list are entirely Owner Panel / SA Portal work reading passengerRatings/.
+
+4. Watch-list / repeat-offender flag
+
+Not a passenger app concern — no action needed on our side.
+
+5. Backward compatibility
+
+Confirmed safe. Our writes to driverRatings/{cid}/{jobId} use rtdbUpdate() not rtdbSet(), so new driver-added fields (reasons[], comment, source) are never clobbered. The passenger app doesn't read those fields anywhere, so they're purely additive from our perspective. Nothing breaks.
+
+6. Firebase auth context
+
+The passenger app uses the Firebase Auth SDK (firebase/auth) — signInWithEmailAndPassword for registered users, signInAnonymously for guests. All RTDB reads and writes go through the Firebase client SDK authenticated with the current user's Firebase ID token. No DB secret or service account is used anywhere in the passenger app. Standard per-user auth rules will work fine.
