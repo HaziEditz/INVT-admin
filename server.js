@@ -615,6 +615,158 @@ window._tzTodayStart = function(tz) {
 window._tzTodayStr = function(tz) {
   return new Date().toLocaleDateString('en-CA', {timeZone: tz || window.COMPANY_TZ || 'Pacific/Auckland'});
 };
+
+// ── Driver ↔ Vehicle allocation sync (Owner Panel ↔ Driver App) ─────────────
+// Model: allocatedVehicles / allocatedDrivers = who MAY use a vehicle (multi).
+//        vehicleId + assignedDriverKey = current shift (one driver, one vehicle).
+window._bwNormTaxi = function(t) { return String(t || '').trim().toUpperCase(); };
+
+window._bwDriverAllocMap = function(d) {
+  var map = {};
+  if (!d || typeof d !== 'object') return map;
+  if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object' && !Array.isArray(d.allocatedVehicles)) {
+    Object.keys(d.allocatedVehicles).forEach(function(v) {
+      if (d.allocatedVehicles[v]) map[window._bwNormTaxi(v)] = true;
+    });
+  } else if (d.allocatedTaxi) {
+    map[window._bwNormTaxi(d.allocatedTaxi)] = true;
+  }
+  return map;
+};
+
+window._bwBuildAllocObject = function(allocatedVehicles) {
+  var out = {};
+  Object.keys(allocatedVehicles || {}).forEach(function(v) {
+    if (allocatedVehicles[v]) out[window._bwNormTaxi(v)] = true;
+  });
+  return out;
+};
+
+window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
+  var uid = profile.uid || (window.allDrivers && window.allDrivers[driverKey] && window.allDrivers[driverKey].uid);
+  var cId = profile.companyId || window.COMPANY_ID;
+  if (!uid || !cId) return Promise.resolve();
+  var allocMap = window._bwBuildAllocObject(profile.allocatedVehicles || {});
+  var vehKeys = Object.keys(allocMap);
+  var prev = window.allDrivers && window.allDrivers[driverKey];
+  var prevShift = window._bwNormTaxi(prev && (prev.currentVehicleId || prev.vehicleId));
+  var currentShift = (prevShift && allocMap[prevShift])
+    ? prevShift
+    : (profile.allocatedTaxi ? window._bwNormTaxi(profile.allocatedTaxi) : (vehKeys[0] || ''));
+  var _svcList = (profile.foodDelivery || '').split(',').filter(Boolean);
+  var allowedServicesMap = {
+    taxi:    _svcList.indexOf('taxi')    !== -1,
+    food:    _svcList.indexOf('food')    !== -1,
+    freight: _svcList.indexOf('freight') !== -1,
+    tm:      _svcList.indexOf('tm')      !== -1
+  };
+  return window.adminWrite('drivers/' + cId + '/' + uid, 'PATCH', {
+    vehicleId:          currentShift,
+    allocatedVehicles:  allocMap,
+    assignedVehicles:   vehKeys,
+    id:                 profile.dispatcherId || '',
+    allowedServices:    allowedServicesMap
+  });
+};
+
+window._bwRebuildVehicleAllocatedDrivers = function(vehKey, taxiNumber, companyId, opts) {
+  opts = opts || {};
+  if (!vehKey || !taxiNumber) return Promise.resolve();
+  var taxiUp = window._bwNormTaxi(taxiNumber);
+  var allocatedDrivers = {};
+  Object.keys(window.allDrivers || {}).forEach(function(dk) {
+    var d = window.allDrivers[dk];
+    if (!d || typeof d !== 'object') return;
+    if (d.companyId && companyId && d.companyId !== companyId) return;
+    if (window._bwDriverAllocMap(d)[taxiUp]) {
+      allocatedDrivers[dk] = { name: d.name || '', uid: d.uid || '' };
+    }
+  });
+  var patch = { allocatedDrivers: allocatedDrivers };
+  var veh = (window.allVehicles && window.allVehicles[vehKey]) || {};
+  if (opts.setCurrentShiftDriverKey !== undefined) {
+    if (opts.setCurrentShiftDriverKey) {
+      var sd = (window.allDrivers && window.allDrivers[opts.setCurrentShiftDriverKey]) || {};
+      patch.assignedDriverKey = opts.setCurrentShiftDriverKey;
+      patch.assignedDriver = sd.name || '';
+    } else {
+      patch.assignedDriverKey = '';
+      patch.assignedDriver = '';
+    }
+  } else if (veh.assignedDriverKey && !allocatedDrivers[veh.assignedDriverKey]) {
+    patch.assignedDriverKey = '';
+    patch.assignedDriver = '';
+  }
+  return window.adminWrite('vehicles/' + vehKey, 'PATCH', patch).then(function() {
+    if (window.allVehicles && window.allVehicles[vehKey]) {
+      window.allVehicles[vehKey] = Object.assign(window.allVehicles[vehKey], patch);
+    }
+  }).catch(function(e) { console.warn('[alloc] vehicle rebuild failed:', e && e.message); });
+};
+
+window._bwSyncAllVehiclesForDriver = function(driverKey, profile, companyId) {
+  var newSet = window._bwDriverAllocMap(profile);
+  var tasks = [];
+  var seen = {};
+  function _scan(vehData) {
+    if (!vehData) return;
+    Object.keys(vehData).forEach(function(vk) {
+      if (/^\d+$/.test(vk)) return;
+      var veh = vehData[vk];
+      if (!veh || typeof veh !== 'object') return;
+      if (veh.companyId && companyId && veh.companyId !== companyId) return;
+      var taxiUp = window._bwNormTaxi(veh.taxiNumber);
+      if (!taxiUp || seen[vk]) return;
+      seen[vk] = true;
+      var opts = {};
+      if (newSet[taxiUp]) {
+        if (!veh.assignedDriverKey) {
+          opts.setCurrentShiftDriverKey = driverKey;
+        }
+      } else if (veh.assignedDriverKey === driverKey) {
+        opts.setCurrentShiftDriverKey = '';
+      }
+      tasks.push(window._bwRebuildVehicleAllocatedDrivers(vk, veh.taxiNumber, companyId, opts));
+    });
+  }
+  if (window.allVehicles && Object.keys(window.allVehicles).length) {
+    _scan(window.allVehicles);
+  } else {
+    return window.adminRead('vehicles').then(function(data) {
+      _scan(data);
+      return Promise.all(tasks);
+    });
+  }
+  return Promise.all(tasks);
+};
+
+window._bwAddVehicleToDriverFromVehicleTab = function(driverKey, taxiNumber, companyId, setAsCurrentShift) {
+  if (!driverKey || !taxiNumber) return Promise.resolve();
+  var d = window.allDrivers && window.allDrivers[driverKey];
+  if (!d) return Promise.resolve();
+  var taxi = String(taxiNumber).trim();
+  var alloc = {};
+  if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object' && !Array.isArray(d.allocatedVehicles)) {
+    Object.keys(d.allocatedVehicles).forEach(function(v) { if (d.allocatedVehicles[v]) alloc[v] = true; });
+  } else if (d.allocatedTaxi) {
+    alloc[d.allocatedTaxi] = true;
+  }
+  alloc[taxi] = true;
+  var profile = Object.assign({}, d, {
+    allocatedVehicles: alloc,
+    allocatedTaxi: d.allocatedTaxi || taxi,
+    companyId: companyId || d.companyId || window.COMPANY_ID
+  });
+  if (setAsCurrentShift) profile.currentVehicleId = window._bwNormTaxi(taxi);
+  return window.adminWrite('drivers/' + driverKey, 'PATCH', {
+    allocatedVehicles: alloc,
+    allocatedTaxi: profile.allocatedTaxi,
+    updatedAt: Date.now()
+  }).then(function() {
+    window.allDrivers[driverKey] = Object.assign(window.allDrivers[driverKey] || {}, profile);
+    return window._bwSyncDriverCompanyAlloc(driverKey, profile);
+  });
+};
 </script>
 <style>
 .notif-panel{position:fixed;top:58px;right:12px;width:360px;max-height:500px;background:#fff;border-radius:8px;box-shadow:0 6px 28px rgba(0,0,0,.18),0 1px 6px rgba(0,0,0,.1);z-index:99999;display:none;flex-direction:column;overflow:hidden;}
@@ -6859,68 +7011,21 @@ function saveDriver() {
       renderDriversTable();
       closeDriverModal();
 
-      // Write vehicleId + id to drivers/{companyId}/{uid} so driver app can read them
+      // Write vehicleId + allocatedVehicles to drivers/{companyId}/{uid} for driver app
       var uid = (allDrivers[key] && allDrivers[key].uid) || profile.uid;
       var cId  = profile.companyId || COMPANY_ID;
       if (uid) {
-        // vehicleId = primary/default (backward compat); assignedVehicles = array read by driver app
-        var vehArray = Object.keys(profile.allocatedVehicles || {}).filter(function(v){ return (profile.allocatedVehicles||{})[v]; });
-        var _svcList = (profile.foodDelivery || '').split(',').filter(Boolean);
-        // Boolean map for the 4 canonical services expected by the Dispatch App
-        var allowedServicesMap = {
-          taxi:    _svcList.indexOf('taxi')    !== -1,
-          food:    _svcList.indexOf('food')    !== -1,
-          freight: _svcList.indexOf('freight') !== -1,
-          tm:      _svcList.indexOf('tm')      !== -1
-        };
-        adminWrite('drivers/' + cId + '/' + uid, 'PATCH', {
-          vehicleId:        (profile.allocatedTaxi || '').toUpperCase(),
-          assignedVehicles: vehArray.map(function(v){ return v.toUpperCase(); }),
-          id:               profile.dispatcherId || '',
-          allowedServices:  allowedServicesMap
-        });
+        window._bwSyncDriverCompanyAlloc(key, Object.assign({}, profile, { uid: uid }));
         // Write sharedWith to the flat drivers/{uid}/sharedWith path
-        // (consumed by driver app on next login — null removes the node)
         adminWrite('drivers/' + uid + '/sharedWith', 'PUT',
           (_drvSharedWith && _drvSharedWith.length) ? _drvSharedWith : null
         ).catch(function(){});
       }
 
-      // ── Sync vehicle fleet "assignedDriver" field ──────────────────────
-      // Build set of allocated taxi numbers (uppercase) for this driver
-      var newVehSet = {};
-      Object.keys(profile.allocatedVehicles || {}).forEach(function(v) {
-        if ((profile.allocatedVehicles||{})[v]) newVehSet[v.trim().toUpperCase()] = true;
-      });
-      function _syncVehicleAssignments(vehData) {
-        if (!vehData) return;
-        Object.keys(vehData).forEach(function(vk) {
-          if (/^\d+$/.test(vk)) return; // skip driver-app tracking nodes
-          var veh = vehData[vk];
-          if (!veh || typeof veh !== 'object') return;
-          // Company isolation
-          if (veh.companyId && veh.companyId !== (profile.companyId || COMPANY_ID)) return;
-          var taxiUp = (veh.taxiNumber || '').trim().toUpperCase();
-          var isNowAllocated = !!newVehSet[taxiUp];
-          var wasThisDriver  = veh.assignedDriverKey === key;
-          if (isNowAllocated) {
-            var patch = { assignedDriver: name, assignedDriverKey: key };
-            adminWrite('vehicles/' + vk, 'PATCH', patch).catch(function(){});
-            if (allVehicles[vk]) allVehicles[vk] = Object.assign(allVehicles[vk], patch);
-          } else if (wasThisDriver) {
-            var patch = { assignedDriver: '', assignedDriverKey: '' };
-            adminWrite('vehicles/' + vk, 'PATCH', patch).catch(function(){});
-            if (allVehicles[vk]) allVehicles[vk] = Object.assign(allVehicles[vk], patch);
-          }
-        });
+      // ── Sync vehicle fleet allocatedDrivers + current shift ───────────────
+      window._bwSyncAllVehiclesForDriver(key, profile, cId).then(function() {
         if (typeof renderVehiclesTable === 'function') renderVehiclesTable();
-      }
-      // If allVehicles already loaded use it directly; otherwise fetch fresh
-      if (Object.keys(allVehicles).length) {
-        _syncVehicleAssignments(allVehicles);
-      } else {
-        adminRead('vehicles').then(_syncVehicleAssignments).catch(function(){});
-      }
+      }).catch(function(){});
       // ──────────────────────────────────────────────────────────────────
 
       // If editing and a new password was provided, sync to Firebase Auth too
@@ -7729,10 +7834,11 @@ function vehiclesPage(companyId, isSA) {
       </div>
 
       <div class="section-title">Driver Assignment</div>
-      <div class="field-group"><label>Assign to Driver</label>
+      <div class="field-group"><label>Current Shift Driver</label>
         <select id="v-driver">
-          <option value="">— Not assigned —</option>
+          <option value="">— No driver on shift —</option>
         </select>
+        <small style="color:#757575;font-size:11px;display:block;margin-top:4px">Adds this driver to the vehicle's allocated pool and marks them as the active shift driver. Other drivers can also be allocated via the Users tab.</small>
       </div>
       <div id="veh-modal-error" style="display:none;background:#FFEBEE;color:#C62828;padding:10px 14px;border-radius:4px;font-size:13px;margin-top:8px"></div>
     </div>
@@ -7827,23 +7933,35 @@ function expiryBadge(dateStr) {
   return '<span style="color:#388E3C">' + dateStr + '</span>';
 }
 
-function _driversForVehicle(taxiNumber) {
-  // Return list of driver names who have this taxi number in their allocatedVehicles
+function _driversForVehicle(taxiNumber, vehRecord) {
+  // Return list of driver names allocated to this vehicle (multi-driver pool)
   var taxiUp = (taxiNumber||'').trim().toUpperCase();
   var names = [];
-  Object.keys(allDrivers).forEach(function(dk) {
-    var d = allDrivers[dk];
-    if (!d || !d.name) return;
-    var vehs = {};
-    if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object') {
-      vehs = d.allocatedVehicles;
-    } else if (d.allocatedTaxi) {
-      vehs[d.allocatedTaxi.trim()] = true;
-    }
-    var match = Object.keys(vehs).some(function(v){ return v.trim().toUpperCase() === taxiUp && vehs[v]; });
-    if (match) names.push(d.name);
-  });
+  var seen = {};
+  // Prefer vehicle's allocatedDrivers map (authoritative after sync)
+  if (vehRecord && vehRecord.allocatedDrivers && typeof vehRecord.allocatedDrivers === 'object') {
+    Object.keys(vehRecord.allocatedDrivers).forEach(function(dk) {
+      var entry = vehRecord.allocatedDrivers[dk];
+      var nm = (entry && entry.name) || (allDrivers[dk] && allDrivers[dk].name) || '';
+      if (nm && !seen[nm]) { seen[nm] = true; names.push(nm); }
+    });
+  }
+  if (!names.length) {
+    Object.keys(allDrivers).forEach(function(dk) {
+      var d = allDrivers[dk];
+      if (!d || !d.name) return;
+      if (window._bwDriverAllocMap(d)[taxiUp]) {
+        if (!seen[d.name]) { seen[d.name] = true; names.push(d.name); }
+      }
+    });
+  }
   return names;
+}
+
+function _currentShiftLabel(vehRecord) {
+  if (!vehRecord || !vehRecord.assignedDriverKey) return '';
+  var d = allDrivers[vehRecord.assignedDriverKey];
+  return (d && d.name) || vehRecord.assignedDriver || '';
 }
 
 function renderVehiclesTable() {
@@ -7856,18 +7974,18 @@ function renderVehiclesTable() {
   keys.forEach(function(id, i) {
     var v = allVehicles[id];
     var statusCls = v.status === 'active' ? 'active' : (v.status === 'maintenance' ? 'maintenance' : 'inactive');
-    // Build assigned-driver cell: look up live from allDrivers for accuracy
-    var assignedNames = _driversForVehicle(v.taxiNumber);
-    // Fall back to stored assignedDriver if allDrivers not yet loaded
+    // Build assigned-driver cell: allocated pool + current shift indicator
+    var assignedNames = _driversForVehicle(v.taxiNumber, v);
     if (!assignedNames.length && v.assignedDriver) assignedNames = [v.assignedDriver];
+    var shiftName = _currentShiftLabel(v);
     var driverCell;
     if (assignedNames.length === 0) {
       driverCell = '<span style="color:#bbb">Unassigned</span>';
-    } else if (assignedNames.length === 1) {
-      driverCell = '<span style="color:#388E3C;font-weight:600">' + assignedNames[0] + '</span>';
     } else {
-      driverCell = assignedNames.map(function(n, idx) {
-        return '<span style="color:#388E3C;font-weight:600;display:inline-block;margin-right:4px">' + n + '</span>';
+      driverCell = assignedNames.map(function(n) {
+        var onShift = shiftName && n === shiftName;
+        return '<span style="color:#388E3C;font-weight:' + (onShift ? '700' : '600') + ';display:inline-block;margin-right:4px"' +
+          (onShift ? ' title="Current shift"' : '') + '>' + n + (onShift ? ' ●' : '') + '</span>';
       }).join('<span style="color:#9e9e9e;font-size:11px">/ </span>');
     }
     var tr = document.createElement('tr');
@@ -7979,6 +8097,22 @@ function saveVehicle() {
   if (!editId) vehicle.createdAt = Date.now();
   adminWrite('vehicles/' + key, 'PATCH', vehicle).then(function() {
     allVehicles[key] = Object.assign(allVehicles[key]||{}, vehicle);
+    var syncTasks = [];
+    // Bidirectional sync: vehicle tab → driver profile + company-scoped Firebase path
+    if (selectedDriverKey) {
+      syncTasks.push(
+        window._bwAddVehicleToDriverFromVehicleTab(selectedDriverKey, taxiNo, savedCid, true)
+      );
+      syncTasks.push(
+        window._bwRebuildVehicleAllocatedDrivers(key, taxiNo, savedCid, { setCurrentShiftDriverKey: selectedDriverKey })
+      );
+    } else {
+      syncTasks.push(
+        window._bwRebuildVehicleAllocatedDrivers(key, taxiNo, savedCid, { setCurrentShiftDriverKey: '' })
+      );
+    }
+    return Promise.all(syncTasks);
+  }).then(function() {
     renderVehiclesTable();
     closeVehicleModal();
     showToast('Vehicle saved!', 'success');
