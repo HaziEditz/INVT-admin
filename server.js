@@ -661,6 +661,39 @@ window._bwResolveDriverUid = function(profile, driverKey) {
   });
 };
 
+// Look up Firebase Auth UID by email(s) via Admin SDK getUserByEmail (case-insensitive).
+window._bwLookupAuthUidByEmails = function(emails) {
+  var list = [];
+  (Array.isArray(emails) ? emails : [emails]).forEach(function(e) {
+    if (e && String(e).indexOf('@') !== -1) list.push(String(e).trim());
+  });
+  if (!list.length) return Promise.resolve(null);
+  return fetch('/api/lookup-auth-uid', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ emails: list })
+  }).then(function(r) { return r.json(); }).then(function(j) {
+    return (j && j.uid) ? { uid: String(j.uid), email: j.email || list[0] } : null;
+  }).catch(function() { return null; });
+};
+
+window._bwSyncAuthPassword = function(uid, password) {
+  if (!uid || !password) return Promise.resolve();
+  return fetch('/api/reset-driver-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uid: uid, password: password })
+  }).catch(function() {});
+};
+
+window._bwEnsureSecondaryFbApp = function() {
+  if (!secondaryFbApp) {
+    try { secondaryFbApp = firebase.initializeApp(FIREBASE_CONFIG, 'DriverCreation'); }
+    catch(ex) { secondaryFbApp = firebase.app('DriverCreation'); }
+  }
+  return secondaryFbApp;
+};
+
 window._bwFindEmailDuplicateKeys = function(email, companyId, keepKey) {
   var emailLow = String(email || '').trim().toLowerCase();
   if (!emailLow) return [];
@@ -7307,30 +7340,52 @@ function saveDriver() {
     var cid = (profile.companyId || COMPANY_ID || 'bw').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
     var systemEmail = 'd' + dispNum + '.' + cid + '@drv.bookawaka.app';
     profile.systemEmail = systemEmail;
-    try {
-      if (!secondaryFbApp) {
-        secondaryFbApp = firebase.initializeApp(FIREBASE_CONFIG, 'DriverCreation');
-      }
-      // Always create Firebase Auth with the generated system email — never the personal email
-      secondaryFbApp.auth().createUserWithEmailAndPassword(systemEmail, password).then(function(cred) {
-        profile.uid = cred.user.uid;
-        var companyId = profile.companyId || COMPANY_ID;
-        // displayName = companyId so the driver app connects to the right company on login
-        return cred.user.updateProfile({ displayName: String(companyId) }).then(function() {
-          return secondaryFbApp.auth().signOut();
+    var companyId = profile.companyId || COMPANY_ID;
+    var emailsToCheck = [systemEmail];
+    if (email && email.indexOf('@') !== -1) emailsToCheck.unshift(email);
+
+    window._bwLookupAuthUidByEmails(emailsToCheck).then(function(existing) {
+      if (existing && existing.uid) {
+        console.log('[saveDriver] Reusing existing Firebase Auth account:', existing.email, existing.uid);
+        profile.uid = existing.uid;
+        return window._bwSyncAuthPassword(existing.uid, password).then(function() {
+          var key = fbDB.ref('drivers').push().key;
+          finish(key, true);
         });
-      }).then(function() {
-        var key = fbDB.ref('drivers').push().key;
-        finish(key, true);
-      }).catch(function(err) {
-        console.warn('[Drivers] Auth creation failed:', err.message);
+      }
+      try {
+        window._bwEnsureSecondaryFbApp();
+        return secondaryFbApp.auth().createUserWithEmailAndPassword(systemEmail, password).then(function(cred) {
+          profile.uid = cred.user.uid;
+          return cred.user.updateProfile({ displayName: String(companyId) }).then(function() {
+            return secondaryFbApp.auth().signOut();
+          });
+        }).then(function() {
+          var key = fbDB.ref('drivers').push().key;
+          finish(key, true);
+        }).catch(function(err) {
+          if (err && err.code === 'auth/email-already-in-use') {
+            return window._bwLookupAuthUidByEmails(emailsToCheck).then(function(retry) {
+              if (retry && retry.uid) {
+                profile.uid = retry.uid;
+                return window._bwSyncAuthPassword(retry.uid, password).then(function() {
+                  finish(fbDB.ref('drivers').push().key, true);
+                });
+              }
+              throw err;
+            });
+          }
+          throw err;
+        });
+      } catch(e) {
         var key = fbDB.ref('drivers').push().key;
         finish(key, false);
-      });
-    } catch(e) {
+      }
+    }).catch(function(err) {
+      console.warn('[Drivers] Auth lookup/create failed:', err && err.message);
       var key = fbDB.ref('drivers').push().key;
       finish(key, false);
-    }
+    });
   }
   } // end _doSaveDriver
 } // end saveDriver
@@ -7902,23 +7957,41 @@ function saveDispatcher() {
       btn.disabled = false;
       btn.textContent = 'Save Dispatcher';
     }
-    try {
-      if (!secondaryFbApp) {
-        try { secondaryFbApp = firebase.initializeApp(FIREBASE_CONFIG, 'DriverCreation'); }
-        catch(ex) { secondaryFbApp = firebase.app('DriverCreation'); }
+    window._bwLookupAuthUidByEmails([email]).then(function(existing) {
+      if (existing && existing.uid) {
+        console.log('[saveDispatcher] Reusing existing Firebase Auth account:', existing.email, existing.uid);
+        profile.uid = existing.uid;
+        return window._bwSyncAuthPassword(existing.uid, password).then(function() {
+          finish(fbDB.ref('dispatchers').push().key);
+        });
       }
-      secondaryFbApp.auth().createUserWithEmailAndPassword(email, password).then(function(cred) {
-        profile.uid = cred.user.uid;
-        return secondaryFbApp.auth().signOut();
-      }).then(function() {
-        var key = fbDB.ref('dispatchers').push().key;
-        finish(key);
-      }).catch(function(e) {
+      try {
+        window._bwEnsureSecondaryFbApp();
+        return secondaryFbApp.auth().createUserWithEmailAndPassword(email, password).then(function(cred) {
+          profile.uid = cred.user.uid;
+          return secondaryFbApp.auth().signOut();
+        }).then(function() {
+          finish(fbDB.ref('dispatchers').push().key);
+        }).catch(function(e) {
+          if (e && e.code === 'auth/email-already-in-use') {
+            return window._bwLookupAuthUidByEmails([email]).then(function(retry) {
+              if (retry && retry.uid) {
+                profile.uid = retry.uid;
+                return window._bwSyncAuthPassword(retry.uid, password).then(function() {
+                  finish(fbDB.ref('dispatchers').push().key);
+                });
+              }
+              authFailed(e);
+            });
+          }
+          authFailed(e);
+        });
+      } catch(e) {
         authFailed(e);
-      });
-    } catch(e) {
+      }
+    }).catch(function(e) {
       authFailed(e);
-    }
+    });
   }
   }); // end _dspHashReady.then
 }
