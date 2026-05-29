@@ -823,22 +823,24 @@ window._bwSyncAllocatedVehiclesRegistry = function(profile, companyId) {
 
 window._bwDispatcherRoleLabel = function(dsp) {
   if (!dsp || typeof dsp !== 'object') return 'DISPATCHER';
-  var driverId = '';
+  var dspCid = String(dsp.companyId || window.COMPANY_ID || '');
   if (dsp.fromDriverId && window.allDrivers && window.allDrivers[dsp.fromDriverId]) {
-    driverId = window.allDrivers[dsp.fromDriverId].dispatcherId || '';
+    return 'DRIVER & DISPATCHER';
   }
-  if (!driverId) {
+  var dspEmail = String(dsp.email || '').trim().toLowerCase();
+  if (dspEmail) {
+    var matched = false;
     Object.keys(window.allDrivers || {}).forEach(function(k) {
-      if (driverId) return;
+      if (matched) return;
       var dr = window.allDrivers[k];
-      if (!dr || !dr.dispatcherId) return;
-      if (dsp.uid && dr.uid === dsp.uid) driverId = dr.dispatcherId;
-      else if (dsp.email && dr.email && String(dr.email).trim().toLowerCase() === String(dsp.email).trim().toLowerCase()) {
-        driverId = dr.dispatcherId;
-      }
+      if (!dr || typeof dr !== 'object') return;
+      if (dr.companyId && dspCid && String(dr.companyId) !== dspCid) return;
+      if (!dr.email) return;
+      if (String(dr.email).trim().toLowerCase() === dspEmail) matched = true;
     });
+    if (matched) return 'DRIVER & DISPATCHER';
   }
-  return (driverId && /^[Dd]\d+$/.test(String(driverId))) ? 'DRIVER & DISPATCHER' : 'DISPATCHER';
+  return 'DISPATCHER';
 };
 
 // Write vehicles/{companyId}/{vehicleNo} — structured registry the Driver App reads.
