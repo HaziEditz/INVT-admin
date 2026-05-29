@@ -660,11 +660,13 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
     freight: _svcList.indexOf('freight') !== -1,
     tm:      _svcList.indexOf('tm')      !== -1
   };
+  var drvId = String(profile.dispatcherId || profile.id || '').trim();
   return window.adminWrite('drivers/' + cId + '/' + uid, 'PATCH', {
     vehicleId:          currentShift,
     allocatedVehicles:  allocMap,
     assignedVehicles:   vehKeys,
-    id:                 profile.dispatcherId || '',
+    id:                 drvId,
+    driverId:           drvId,
     allowedServices:    allowedServicesMap
   });
 };
