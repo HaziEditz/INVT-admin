@@ -694,6 +694,74 @@ window._bwEnsureSecondaryFbApp = function() {
   return secondaryFbApp;
 };
 
+// Find a driver profile linked to this email or Firebase Auth UID.
+window._bwFindDriverByEmailOrUid = function(email, uid) {
+  var emailLow = String(email || '').trim().toLowerCase();
+  var found = null;
+  Object.keys(window.allDrivers || {}).forEach(function(k) {
+    if (found) return;
+    var d = window.allDrivers[k];
+    if (!d || typeof d !== 'object') return;
+    if (d.companyId && d.companyId !== window.COMPANY_ID) return;
+    if (uid && d.uid && String(d.uid) === String(uid)) { found = { key: k, driver: d }; return; }
+    if (emailLow && d.email && String(d.email).trim().toLowerCase() === emailLow) found = { key: k, driver: d };
+  });
+  return found;
+};
+
+window._bwGrantDispatcherRoleToDriver = function(driverKey) {
+  if (!driverKey) return Promise.resolve();
+  return window.adminWrite('drivers/' + driverKey, 'PATCH', { isDispatcher: true, updatedAt: Date.now() }).then(function() {
+    if (window.allDrivers && window.allDrivers[driverKey]) window.allDrivers[driverKey].isDispatcher = true;
+    if (typeof window.renderDriversTable === 'function') window.renderDriversTable();
+  }).catch(function() {});
+};
+
+// Resolve Firebase Auth UID for an email — reuse existing account, create only if missing.
+window._bwResolveAuthUidForEmail = function(email, password, authFailed) {
+  var emailNorm = String(email || '').trim();
+  var emailLow = emailNorm.toLowerCase();
+  function _done(uid, reused) {
+    return window._bwSyncAuthPassword(uid, password).then(function() {
+      return { uid: String(uid), reused: !!reused };
+    });
+  }
+  return window._bwLookupAuthUidByEmails([emailNorm, emailLow]).then(function(existing) {
+    if (existing && existing.uid) {
+      console.log('[Auth] Reusing existing account for', existing.email || emailNorm, existing.uid);
+      return _done(existing.uid, true);
+    }
+    try {
+      window._bwEnsureSecondaryFbApp();
+      return secondaryFbApp.auth().createUserWithEmailAndPassword(emailNorm, password).then(function(cred) {
+        var uid = cred.user.uid;
+        return secondaryFbApp.auth().signOut().then(function() {
+          return { uid: String(uid), reused: false };
+        });
+      }).catch(function(e) {
+        if (e && (e.code === 'auth/email-already-in-use' || e.code === 'auth/email-already-exists')) {
+          return window._bwLookupAuthUidByEmails([emailNorm, emailLow]).then(function(retry) {
+            if (retry && retry.uid) {
+              console.log('[Auth] Linked after email-already-in-use:', retry.uid);
+              return _done(retry.uid, true);
+            }
+            if (authFailed) authFailed(e, true);
+            return null;
+          });
+        }
+        if (authFailed) authFailed(e, false);
+        return null;
+      });
+    } catch(e) {
+      if (authFailed) authFailed(e, false);
+      return null;
+    }
+  }).catch(function(e) {
+    if (authFailed) authFailed(e, false);
+    return null;
+  });
+};
+
 window._bwFindEmailDuplicateKeys = function(email, companyId, keepKey) {
   var emailLow = String(email || '').trim().toLowerCase();
   if (!emailLow) return [];
@@ -7878,14 +7946,14 @@ function saveDispatcher() {
 
   function finish(key) {
     adminWrite('dispatchers/' + key, 'PATCH', profile).then(function() {
-      // Backfill the three lookup nodes the dispatch console requires:
-      //   adminAccess/{cid}/{uid} = true
-      //   dispatchers/{cid}/{uid} = {pushKey}
-      //   users/{uid}/companyId   = {cid}
-      // On edit, profile.uid is not populated by the form — derive it from the
-      // existing record. Only backfill for ACTIVE dispatchers so suspended/disabled
-      // ones do not get their access re-granted by a routine edit.
       var lookupUid = profile.uid || (allDispatchers[key] && allDispatchers[key].uid) || null;
+      // If this email/uid belongs to an existing driver, grant dual DRIVER & DISPATCHER role
+      var linkedDriver = window._bwFindDriverByEmailOrUid(email, lookupUid);
+      if (linkedDriver && !editId) {
+        profile.fromDriverId = linkedDriver.key;
+        adminWrite('dispatchers/' + key, 'PATCH', { fromDriverId: linkedDriver.key, uid: lookupUid || profile.uid }).catch(function(){});
+        window._bwGrantDispatcherRoleToDriver(linkedDriver.key);
+      }
       if (lookupUid && status === 'active') {
         adminWrite('adminAccess/' + COMPANY_ID + '/' + lookupUid, 'PUT', true).catch(function(){});
         adminWrite('dispatchers/' + COMPANY_ID + '/' + lookupUid, 'PUT', key).catch(function(){});
@@ -7925,8 +7993,13 @@ function saveDispatcher() {
       }
       closeDispatcherModal();
       if (!editId) {
-        showToast('Dispatcher created! ID: ' + dspCode, 'success');
-        if (window._writeNotif) _writeNotif('success', 'New dispatcher added', name + ' has been added with Dispatcher ID ' + dspCode + '.');
+        var _createMsg = profile._authReused
+          ? 'Dispatcher linked to existing login account! ID: ' + dspCode +
+            (linkedDriver ? ' (also marked as DRIVER & DISPATCHER)' : '')
+          : 'Dispatcher created! ID: ' + dspCode;
+        showToast(_createMsg, 'success');
+        if (window._writeNotif) _writeNotif('success', profile._authReused ? 'Dispatcher linked' : 'New dispatcher added',
+          name + (profile._authReused ? ' linked to existing Firebase Auth account with ID ' : ' has been added with Dispatcher ID ') + dspCode + '.');
       } else {
         showToast('Dispatcher saved successfully!', 'success');
       }
@@ -7943,54 +8016,26 @@ function saveDispatcher() {
     finish(editId);
   } else {
     profile.createdAt = Date.now();
-    function authFailed(e) {
+    function authFailed(e, emailAlreadyExists) {
       var msg = (e && e.message) ? e.message : 'Unknown error';
-      if (e && e.code === 'auth/email-already-in-use') {
-        msg = 'That email is already registered in Firebase. Use a different email or ask your admin to reset the existing account.';
+      if (emailAlreadyExists) {
+        msg = 'This email already has a Firebase login account but the server could not look up its UID. ' +
+              'Ensure FIREBASE_SERVICE_ACCOUNT is configured, then try again.';
       } else if (e && e.code === 'auth/weak-password') {
         msg = 'Password is too weak — use at least 6 characters.';
       } else if (e && e.code === 'auth/invalid-email') {
         msg = 'The email address is not valid.';
       }
-      errEl.textContent = 'Could not create login account: ' + msg;
+      errEl.textContent = 'Could not set up login account: ' + msg;
       errEl.style.display = 'block';
       btn.disabled = false;
       btn.textContent = 'Save Dispatcher';
     }
-    window._bwLookupAuthUidByEmails([email]).then(function(existing) {
-      if (existing && existing.uid) {
-        console.log('[saveDispatcher] Reusing existing Firebase Auth account:', existing.email, existing.uid);
-        profile.uid = existing.uid;
-        return window._bwSyncAuthPassword(existing.uid, password).then(function() {
-          finish(fbDB.ref('dispatchers').push().key);
-        });
-      }
-      try {
-        window._bwEnsureSecondaryFbApp();
-        return secondaryFbApp.auth().createUserWithEmailAndPassword(email, password).then(function(cred) {
-          profile.uid = cred.user.uid;
-          return secondaryFbApp.auth().signOut();
-        }).then(function() {
-          finish(fbDB.ref('dispatchers').push().key);
-        }).catch(function(e) {
-          if (e && e.code === 'auth/email-already-in-use') {
-            return window._bwLookupAuthUidByEmails([email]).then(function(retry) {
-              if (retry && retry.uid) {
-                profile.uid = retry.uid;
-                return window._bwSyncAuthPassword(retry.uid, password).then(function() {
-                  finish(fbDB.ref('dispatchers').push().key);
-                });
-              }
-              authFailed(e);
-            });
-          }
-          authFailed(e);
-        });
-      } catch(e) {
-        authFailed(e);
-      }
-    }).catch(function(e) {
-      authFailed(e);
+    window._bwResolveAuthUidForEmail(email, password, authFailed).then(function(result) {
+      if (!result || !result.uid) return;
+      profile.uid = result.uid;
+      profile._authReused = result.reused;
+      finish(fbDB.ref('dispatchers').push().key);
     });
   }
   }); // end _dspHashReady.then
