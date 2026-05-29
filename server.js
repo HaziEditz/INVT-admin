@@ -642,32 +642,102 @@ window._bwBuildAllocObject = function(allocatedVehicles) {
   return out;
 };
 
+// Resolve Firebase Auth UID from profile or by email (system + personal) via Admin SDK.
+window._bwResolveDriverUid = function(profile, driverKey) {
+  var uid = profile.uid || (driverKey && window.allDrivers && window.allDrivers[driverKey] && window.allDrivers[driverKey].uid);
+  if (uid) return Promise.resolve(String(uid));
+  var emails = [];
+  if (profile.email && String(profile.email).indexOf('@') !== -1) emails.push(String(profile.email).trim());
+  if (profile.systemEmail && String(profile.systemEmail).indexOf('@') !== -1) emails.push(String(profile.systemEmail).trim());
+  if (!emails.length) return Promise.resolve(null);
+  return fetch('/api/lookup-auth-uid', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ emails: emails })
+  }).then(function(r) { return r.json(); }).then(function(j) {
+    return (j && j.uid) ? String(j.uid) : null;
+  }).catch(function(e) {
+    console.warn('[bwResolveDriverUid] lookup failed:', e && e.message);
+    return null;
+  });
+};
+
+// Write vehicles/{companyId}/{vehicleNo} — structured registry the Driver App reads.
+window._bwSyncVehicleCompanyRegistry = function(vehKey, vehicle) {
+  var cId = String(vehicle.companyId || window.COMPANY_ID || '').trim();
+  var vehicleNo = window._bwNormTaxi(vehicle.taxiNumber);
+  if (!cId || !vehicleNo) return Promise.resolve();
+  var cap = parseInt(String(vehicle.capacity || '4'), 10) || 4;
+  var isActive = (vehicle.status || 'active') === 'active';
+  var registry = Object.assign({}, vehicle, {
+    active:            isActive,
+    companyId:         cId,
+    vehicleNo:         vehicleNo,
+    taxiNumber:        vehicleNo,
+    seatCapacity:      cap,
+    seats:             cap,
+    vehicleTypeCode:   vehicle.vehicleType || vehicle.vehicleTypeCode || '',
+    updatedAt:         Date.now()
+  });
+  if (vehKey) registry.fleetKey = vehKey;
+  return window.adminWrite('vehicles/' + cId + '/' + vehicleNo, 'PATCH', registry);
+};
+
+// Write drivers/{companyId}/{uid} + drivers/{uid} for Driver App discovery and login.
 window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
-  var uid = profile.uid || (window.allDrivers && window.allDrivers[driverKey] && window.allDrivers[driverKey].uid);
-  var cId = profile.companyId || window.COMPANY_ID;
-  if (!uid || !cId) return Promise.resolve();
-  var allocMap = window._bwBuildAllocObject(profile.allocatedVehicles || {});
-  var vehKeys = Object.keys(allocMap);
-  var prev = window.allDrivers && window.allDrivers[driverKey];
-  var prevShift = window._bwNormTaxi(prev && (prev.currentVehicleId || prev.vehicleId));
-  var currentShift = (prevShift && allocMap[prevShift])
-    ? prevShift
-    : (profile.allocatedTaxi ? window._bwNormTaxi(profile.allocatedTaxi) : (vehKeys[0] || ''));
-  var _svcList = (profile.foodDelivery || '').split(',').filter(Boolean);
-  var allowedServicesMap = {
-    taxi:    _svcList.indexOf('taxi')    !== -1,
-    food:    _svcList.indexOf('food')    !== -1,
-    freight: _svcList.indexOf('freight') !== -1,
-    tm:      _svcList.indexOf('tm')      !== -1
-  };
-  var drvId = String(profile.dispatcherId || profile.id || '').trim();
-  return window.adminWrite('drivers/' + cId + '/' + uid, 'PATCH', {
-    vehicleId:          currentShift,
-    allocatedVehicles:  allocMap,
-    assignedVehicles:   vehKeys,
-    id:                 drvId,
-    driverId:           drvId,
-    allowedServices:    allowedServicesMap
+  return window._bwResolveDriverUid(profile, driverKey).then(function(uid) {
+    var cId = profile.companyId || window.COMPANY_ID;
+    if (!uid || !cId) {
+      if (!uid) console.warn('[bwSyncDriverCompanyAlloc] No Firebase Auth UID — skipping Driver App path sync');
+      return null;
+    }
+    profile.uid = uid;
+    if (driverKey && window.allDrivers && window.allDrivers[driverKey]) {
+      window.allDrivers[driverKey].uid = uid;
+    }
+    var allocMap = window._bwBuildAllocObject(profile.allocatedVehicles || {});
+    var vehKeys = Object.keys(allocMap);
+    var prev = window.allDrivers && window.allDrivers[driverKey];
+    var prevShift = window._bwNormTaxi(prev && (prev.currentVehicleId || prev.vehicleId));
+    var currentShift = (prevShift && allocMap[prevShift])
+      ? prevShift
+      : (profile.allocatedTaxi ? window._bwNormTaxi(profile.allocatedTaxi) : (vehKeys[0] || ''));
+    var _svcList = (profile.foodDelivery || '').split(',').filter(Boolean);
+    var allowedServicesMap = {
+      taxi:    _svcList.indexOf('taxi')    !== -1,
+      food:    _svcList.indexOf('food')    !== -1,
+      freight: _svcList.indexOf('freight') !== -1,
+      tm:      _svcList.indexOf('tm')      !== -1
+    };
+    var drvId = String(profile.dispatcherId || profile.id || '').trim();
+    var approved = profile.approved === false ? false : (profile.status === 'pending' ? false : true);
+    var companyPatch = {
+      email:             profile.email || '',
+      companyId:         cId,
+      uid:               uid,
+      id:                drvId,
+      driverId:          drvId,
+      name:              profile.name || '',
+      phone:             profile.phone || '',
+      approved:          approved,
+      vehicleId:         currentShift,
+      allocatedVehicles: allocMap,
+      assignedVehicles:  vehKeys,
+      allowedServices:   allowedServicesMap,
+      updatedAt:         Date.now()
+    };
+    var tasks = [
+      window.adminWrite('drivers/' + cId + '/' + uid, 'PATCH', companyPatch),
+      window.adminWrite('drivers/' + uid, 'PATCH', {
+        companyId: cId,
+        uid:       uid,
+        email:     profile.email || ''
+      })
+    ];
+    if (driverKey) {
+      tasks.push(window.adminWrite('drivers/' + driverKey, 'PATCH', { uid: uid, updatedAt: Date.now() }).catch(function(){}));
+    }
+    return Promise.all(tasks).then(function() { return uid; });
   });
 };
 
@@ -7045,16 +7115,20 @@ function saveDriver() {
       renderDriversTable();
       closeDriverModal();
 
-      // Write vehicleId + allocatedVehicles to drivers/{companyId}/{uid} for driver app
-      var uid = (allDrivers[key] && allDrivers[key].uid) || profile.uid;
+      // Write Driver App paths: drivers/{companyId}/{uid} + drivers/{uid}
       var cId  = profile.companyId || COMPANY_ID;
-      if (uid) {
-        window._bwSyncDriverCompanyAlloc(key, Object.assign({}, profile, { uid: uid }));
-        // Write sharedWith to the flat drivers/{uid}/sharedWith path
-        adminWrite('drivers/' + uid + '/sharedWith', 'PUT',
-          (_drvSharedWith && _drvSharedWith.length) ? _drvSharedWith : null
-        ).catch(function(){});
-      }
+      var syncProfile = Object.assign({}, profile, { uid: (allDrivers[key] && allDrivers[key].uid) || profile.uid });
+      window._bwSyncDriverCompanyAlloc(key, syncProfile).then(function(resolvedUid) {
+        var uid = resolvedUid || syncProfile.uid;
+        if (uid && allDrivers[key]) allDrivers[key].uid = uid;
+        if (uid) {
+          adminWrite('drivers/' + uid + '/sharedWith', 'PUT',
+            (_drvSharedWith && _drvSharedWith.length) ? _drvSharedWith : null
+          ).catch(function(){});
+        }
+      }).catch(function(e) {
+        console.warn('[saveDriver] Driver App path sync failed:', e && e.message);
+      });
 
       // ── Sync vehicle fleet allocatedDrivers + current shift ───────────────
       window._bwSyncAllVehiclesForDriver(key, profile, cId).then(function() {
@@ -7064,7 +7138,7 @@ function saveDriver() {
 
       // If editing and a new password was provided, sync to Firebase Auth too
       if (editId && password) {
-        uid = (allDrivers[key] && allDrivers[key].uid) || profile.uid;
+        var uid = (allDrivers[key] && allDrivers[key].uid) || profile.uid;
         if (uid) {
           fetch('/api/reset-driver-password', {
             method: 'POST',
@@ -8132,9 +8206,15 @@ function saveVehicle() {
   var editId = document.getElementById('edit-veh-id').value;
   var key = editId || fbDB.ref('vehicles').push().key;
   if (!editId) vehicle.createdAt = Date.now();
+  var oldTaxiNo = (editId && allVehicles[editId]) ? window._bwNormTaxi(allVehicles[editId].taxiNumber) : '';
   adminWrite('vehicles/' + key, 'PATCH', vehicle).then(function() {
     allVehicles[key] = Object.assign(allVehicles[key]||{}, vehicle);
     var syncTasks = [];
+    // Driver App registry: vehicles/{companyId}/{vehicleNo}
+    syncTasks.push(window._bwSyncVehicleCompanyRegistry(key, vehicle));
+    if (oldTaxiNo && oldTaxiNo !== window._bwNormTaxi(taxiNo)) {
+      syncTasks.push(adminWrite('vehicles/' + savedCid + '/' + oldTaxiNo, 'DELETE', null).catch(function(){}));
+    }
     // Bidirectional sync: vehicle tab → driver profile + company-scoped Firebase path
     if (selectedDriverKey) {
       syncTasks.push(
@@ -19621,6 +19701,51 @@ const server = http.createServer((req, res) => {
     // All other ASPX pages — Firebase-connected table view
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
     res.end(withSa(withCid(firebaseTablePage(filename), cid), isSA));
+    return;
+  }
+
+  // ── API: lookup Firebase Auth UID by email (for Driver App path sync) ─────
+  if (urlPath === '/api/lookup-auth-uid') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+    let rawBody = '';
+    req.on('data', chunk => { rawBody += chunk; });
+    req.on('end', async () => {
+      try {
+        const body = JSON.parse(rawBody || '{}');
+        const emails = Array.isArray(body.emails) ? body.emails : (body.email ? [body.email] : []);
+        const cleaned = emails.map(e => String(e || '').trim()).filter(e => e.includes('@'));
+        if (!cleaned.length) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'email or emails required' })); return;
+        }
+        if (!firebaseAdmin) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ uid: null, note: 'Admin SDK not configured' })); return;
+        }
+        for (const em of cleaned) {
+          try {
+            const user = await firebaseAdmin.auth().getUserByEmail(em);
+            if (user && user.uid) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ uid: user.uid, email: em })); return;
+            }
+          } catch (e) {
+            if (e.code !== 'auth/user-not-found') {
+              console.warn('[lookup-auth-uid] getUserByEmail failed:', em, e.code || e.message);
+            }
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ uid: null }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
     return;
   }
 
