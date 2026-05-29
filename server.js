@@ -6524,7 +6524,8 @@ function renderDriversTable() {
       '<td><span class="driver-status ' + statusCls + '">' + (d.status||'active') + '</span></td>' +
       '<td>' +
         '<a data-key="' + id + '" title="View Record" onclick="viewDriver(this.dataset.key)" style="cursor:pointer;margin-right:6px" class="md-icon material-icons">&#xE8F4;</a>' +
-        '<a data-key="' + id + '" title="Edit" onclick="openDriverModal(this.dataset.key)" style="cursor:pointer" class="md-icon material-icons">&#xE3C9;</a>' +
+        '<a data-key="' + id + '" title="Edit" onclick="openDriverModal(this.dataset.key)" style="cursor:pointer;margin-right:6px" class="md-icon material-icons">&#xE3C9;</a>' +
+        '<a data-key="' + id + '" title="Delete" onclick="deleteDriver(this.dataset.key)" style="cursor:pointer;color:#e53935" class="md-icon material-icons">&#xE872;</a>' +
       '</td>';
     tbody.appendChild(tr);
   });
@@ -6873,14 +6874,31 @@ function saveDriver() {
     .then(function(dupRes) {
       var dups = (dupRes && dupRes.duplicates) || [];
       if (dups.length > 0) {
-        var d0 = dups[0];
-        var fieldVal = d0.field === 'email' ? email : d0.field === 'phone' ? phone : d0.field === 'licence' ? license : d0.field === 'dispatcherId' ? dispId : taxiLic;
-        var label = d0.field + ' (' + fieldVal + ')';
-        var sameCo = d0.companyId === COMPANY_ID ? '' : ' under company ' + d0.companyId;
-        errEl.textContent = 'Duplicate: a driver named \u201C' + d0.name + '\u201D' + sameCo + ' already has this ' + label + '. Each driver\u2019s email, phone, licences and Dispatcher ID must be unique across all companies.';
-        errEl.style.display = 'block';
-        btn.disabled = false; btn.textContent = 'Save Driver';
-        return;
+        // Same company + same email on a new save → update existing profile instead of duplicating
+        if (!editId && email) {
+          var emailDupSameCo = null;
+          for (var di = 0; di < dups.length; di++) {
+            if (dups[di].field === 'email' && String(dups[di].companyId) === String(COMPANY_ID)) {
+              emailDupSameCo = dups[di];
+              break;
+            }
+          }
+          if (emailDupSameCo) {
+            editId = emailDupSameCo.key;
+            document.getElementById('edit-driver-id').value = emailDupSameCo.key;
+            console.log('[saveDriver] Email already exists — updating driver', editId, 'instead of creating duplicate');
+          }
+        }
+        if (!editId) {
+          var d0 = dups[0];
+          var fieldVal = d0.field === 'email' ? email : d0.field === 'phone' ? phone : d0.field === 'licence' ? license : d0.field === 'dispatcherId' ? dispId : taxiLic;
+          var label = d0.field + ' (' + fieldVal + ')';
+          var sameCo = d0.companyId === COMPANY_ID ? '' : ' under company ' + d0.companyId;
+          errEl.textContent = 'Duplicate: a driver named \u201C' + d0.name + '\u201D' + sameCo + ' already has this ' + label + '. Each driver\u2019s email, phone, licences and Dispatcher ID must be unique across all companies.';
+          errEl.style.display = 'block';
+          btn.disabled = false; btn.textContent = 'Save Driver';
+          return;
+        }
       }
       btn.textContent = 'Saving…';
       _doSaveDriver();
@@ -6890,6 +6908,20 @@ function saveDriver() {
   function _doSaveDriver() {
 
   var companyId   = (document.getElementById('d-company-id') && document.getElementById('d-company-id').value.trim()) || COMPANY_ID;
+
+  // Safety net: if adding a new driver but email already exists in this company, update instead
+  if (!editId && email) {
+    var emailLow = email.toLowerCase();
+    Object.keys(allDrivers).forEach(function(k) {
+      if (editId) return;
+      var ex = allDrivers[k];
+      if (!ex || !ex.email) return;
+      if (ex.email.toLowerCase() === emailLow && String(ex.companyId || COMPANY_ID) === String(companyId)) {
+        editId = k;
+        document.getElementById('edit-driver-id').value = k;
+      }
+    });
+  }
 
   var profile = {
     name: name, email: email, phone: phone, address: address,
@@ -7339,8 +7371,11 @@ function deleteDriver(id) {
   var companyId = d.companyId || COMPANY_ID;
   // 1. Delete full profile
   adminWrite('drivers/' + id, 'DELETE', null).catch(function(){});
-  // 2. Delete lookup node drivers/{companyId}/{uid}
-  if (uid) adminWrite('drivers/' + companyId + '/' + uid, 'DELETE', null).catch(function(){});
+  // 2. Delete lookup nodes drivers/{companyId}/{uid} and drivers/{uid}
+  if (uid) {
+    adminWrite('drivers/' + companyId + '/' + uid, 'DELETE', null).catch(function(){});
+    adminWrite('drivers/' + uid, 'DELETE', null).catch(function(){});
+  }
   // 3. Delete Firebase Auth account server-side
   if (uid) {
     fetch('/api/delete-driver-auth', {
