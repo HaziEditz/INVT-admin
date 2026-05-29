@@ -656,10 +656,88 @@ window._bwResolveDriverUid = function(profile, driverKey) {
     body: JSON.stringify({ emails: emails })
   }).then(function(r) { return r.json(); }).then(function(j) {
     return (j && j.uid) ? String(j.uid) : null;
-  }).catch(function(e) {
-    console.warn('[bwResolveDriverUid] lookup failed:', e && e.message);
+  }).catch(function() {
     return null;
   });
+};
+
+window._bwFindEmailDuplicateKeys = function(email, companyId, keepKey) {
+  var emailLow = String(email || '').trim().toLowerCase();
+  if (!emailLow) return [];
+  var keys = [];
+  Object.keys(window.allDrivers || {}).forEach(function(k) {
+    if (keepKey && k === keepKey) return;
+    var d = window.allDrivers[k];
+    if (!d || !d.email) return;
+    if (String(d.companyId || window.COMPANY_ID) !== String(companyId)) return;
+    if (String(d.email).trim().toLowerCase() === emailLow) keys.push(k);
+  });
+  return keys;
+};
+
+window._bwPurgeDriverRecord = function(id, opts) {
+  opts = opts || {};
+  var d = window.allDrivers && window.allDrivers[id];
+  var uid = (d && d.uid) || '';
+  var companyId = (d && d.companyId) || window.COMPANY_ID;
+  window.adminWrite('drivers/' + id, 'DELETE', null).catch(function(){});
+  if (uid) {
+    window.adminWrite('drivers/' + companyId + '/' + uid, 'DELETE', null).catch(function(){});
+    window.adminWrite('drivers/' + uid, 'DELETE', null).catch(function(){});
+    if (opts.deleteAuth && uid !== opts.exceptUid) {
+      fetch('/api/delete-driver-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: uid })
+      }).catch(function(){});
+    }
+  }
+  if (window.allDrivers && window.allDrivers[id]) delete window.allDrivers[id];
+};
+
+window._bwSyncAllocatedVehiclesRegistry = function(profile, companyId) {
+  var alloc = window._bwDriverAllocMap(profile);
+  var tasks = [];
+  var synced = {};
+  Object.keys(alloc).forEach(function(taxiUp) {
+    var matched = false;
+    Object.keys(window.allVehicles || {}).forEach(function(vk) {
+      var v = window.allVehicles[vk];
+      if (!v || typeof v !== 'object') return;
+      if (v.companyId && companyId && v.companyId !== companyId) return;
+      if (window._bwNormTaxi(v.taxiNumber) !== taxiUp) return;
+      matched = true;
+      synced[taxiUp] = true;
+      tasks.push(window._bwSyncVehicleCompanyRegistry(vk, v));
+    });
+    if (!matched && !synced[taxiUp]) {
+      synced[taxiUp] = true;
+      tasks.push(window.adminWrite('vehicles/' + companyId + '/' + taxiUp, 'PATCH', {
+        active: true, companyId: companyId, vehicleNo: taxiUp, taxiNumber: taxiUp, updatedAt: Date.now()
+      }));
+    }
+  });
+  return Promise.all(tasks);
+};
+
+window._bwDispatcherRoleLabel = function(dsp) {
+  if (!dsp || typeof dsp !== 'object') return 'DISPATCHER';
+  var driverId = '';
+  if (dsp.fromDriverId && window.allDrivers && window.allDrivers[dsp.fromDriverId]) {
+    driverId = window.allDrivers[dsp.fromDriverId].dispatcherId || '';
+  }
+  if (!driverId) {
+    Object.keys(window.allDrivers || {}).forEach(function(k) {
+      if (driverId) return;
+      var dr = window.allDrivers[k];
+      if (!dr || !dr.dispatcherId) return;
+      if (dsp.uid && dr.uid === dsp.uid) driverId = dr.dispatcherId;
+      else if (dsp.email && dr.email && String(dr.email).trim().toLowerCase() === String(dsp.email).trim().toLowerCase()) {
+        driverId = dr.dispatcherId;
+      }
+    });
+  }
+  return (driverId && /^[Dd]\d+$/.test(String(driverId))) ? 'DRIVER & DISPATCHER' : 'DISPATCHER';
 };
 
 // Write vehicles/{companyId}/{vehicleNo} — structured registry the Driver App reads.
@@ -688,7 +766,6 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
   return window._bwResolveDriverUid(profile, driverKey).then(function(uid) {
     var cId = profile.companyId || window.COMPANY_ID;
     if (!uid || !cId) {
-      if (!uid) console.warn('[bwSyncDriverCompanyAlloc] No Firebase Auth UID — skipping Driver App path sync');
       return null;
     }
     profile.uid = uid;
@@ -6579,9 +6656,13 @@ function renderDriversTable() {
       ? '<span style="color:#D32F2F;font-weight:600">' + expiry + ' &#x26A0;</span>'
       : expiry;
     var statusCls = d.status === 'active' ? 'active' : (d.status === 'suspended' ? 'suspended' : 'inactive');
-    var dspBadge = d.isDispatcher
-      ? ' <span title="Also a Dispatcher" style="display:inline-block;background:#E8EAF6;color:#3949AB;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle">DISPATCHER</span>'
-      : '';
+    var dspBadge = '';
+    if (d.isDispatcher) {
+      var roleLabel = (d.dispatcherId && /^[Dd]\d+$/.test(String(d.dispatcherId)))
+        ? 'DRIVER &amp; DISPATCHER'
+        : 'DISPATCHER';
+      dspBadge = ' <span title="' + roleLabel + '" style="display:inline-block;background:#E8EAF6;color:#3949AB;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle">' + roleLabel + '</span>';
+    }
     var tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + (i+1) + '</td>' +
@@ -6865,6 +6946,7 @@ function saveDriver() {
   var btn = document.getElementById('save-driver-btn');
   var errEl = document.getElementById('modal-error');
   errEl.style.display = 'none';
+  window._pendingDupDeletes = [];
 
   var name        = document.getElementById('d-name').value.trim();
   var email       = document.getElementById('d-email').value.trim();
@@ -6946,19 +7028,31 @@ function saveDriver() {
     .then(function(dupRes) {
       var dups = (dupRes && dupRes.duplicates) || [];
       if (dups.length > 0) {
-        // Same company + same email on a new save → update existing profile instead of duplicating
-        if (!editId && email) {
-          var emailDupSameCo = null;
+        // Same company + same email (case-insensitive) → update canonical record, purge duplicates
+        if (email) {
+          var emailDupKeys = [];
           for (var di = 0; di < dups.length; di++) {
             if (dups[di].field === 'email' && String(dups[di].companyId) === String(COMPANY_ID)) {
-              emailDupSameCo = dups[di];
-              break;
+              emailDupKeys.push(dups[di].key);
             }
           }
-          if (emailDupSameCo) {
-            editId = emailDupSameCo.key;
-            document.getElementById('edit-driver-id').value = emailDupSameCo.key;
-            console.log('[saveDriver] Email already exists — updating driver', editId, 'instead of creating duplicate');
+          Object.keys(allDrivers).forEach(function(k) {
+            var ex = allDrivers[k];
+            if (!ex || !ex.email) return;
+            if (String(ex.companyId || COMPANY_ID) !== String(COMPANY_ID)) return;
+            if (ex.email.trim().toLowerCase() === email.trim().toLowerCase() && emailDupKeys.indexOf(k) === -1) {
+              emailDupKeys.push(k);
+            }
+          });
+          if (emailDupKeys.length > 0) {
+            if (!editId) {
+              editId = emailDupKeys[0];
+              document.getElementById('edit-driver-id').value = editId;
+            }
+            window._pendingDupDeletes = emailDupKeys.filter(function(k) { return k !== editId; });
+            if (window._pendingDupDeletes.length) {
+              console.log('[saveDriver] Will purge', window._pendingDupDeletes.length, 'duplicate driver record(s) for email', email);
+            }
           }
         }
         if (!editId) {
@@ -6981,18 +7075,30 @@ function saveDriver() {
 
   var companyId   = (document.getElementById('d-company-id') && document.getElementById('d-company-id').value.trim()) || COMPANY_ID;
 
-  // Safety net: if adding a new driver but email already exists in this company, update instead
-  if (!editId && email) {
-    var emailLow = email.toLowerCase();
-    Object.keys(allDrivers).forEach(function(k) {
-      if (editId) return;
-      var ex = allDrivers[k];
-      if (!ex || !ex.email) return;
-      if (ex.email.toLowerCase() === emailLow && String(ex.companyId || COMPANY_ID) === String(companyId)) {
-        editId = k;
-        document.getElementById('edit-driver-id').value = k;
+  // Safety net: case-insensitive email match in this company → update canonical, queue dup deletes
+  if (email) {
+    var emailLow = email.trim().toLowerCase();
+    var localDupKeys = window._bwFindEmailDuplicateKeys(email, companyId, editId);
+    if (!editId) {
+      Object.keys(allDrivers).forEach(function(k) {
+        if (editId) return;
+        var ex = allDrivers[k];
+        if (!ex || !ex.email) return;
+        if (ex.email.trim().toLowerCase() === emailLow && String(ex.companyId || COMPANY_ID) === String(companyId)) {
+          editId = k;
+          document.getElementById('edit-driver-id').value = k;
+        }
+      });
+    }
+    if (editId) {
+      localDupKeys = window._bwFindEmailDuplicateKeys(email, companyId, editId);
+      if (localDupKeys.length) {
+        window._pendingDupDeletes = (window._pendingDupDeletes || []).concat(localDupKeys);
+        window._pendingDupDeletes = window._pendingDupDeletes.filter(function(k, i, arr) {
+          return k !== editId && arr.indexOf(k) === i;
+        });
       }
-    });
+    }
   }
 
   var profile = {
@@ -7084,7 +7190,7 @@ function saveDriver() {
           }).then(function(r){ return r.json(); }).then(function(j){
             // Treat BOTH outright failure AND authSynced=false (Admin SDK missing) as a real
             // problem — otherwise the toast says success but the dispatcher still cannot log in.
-            if (!j.ok || j.authSynced === false) {
+            if (!j.ok || (j.authSynced === false && !j.skipped)) {
               var reason = j.error || j.note || 'Admin SDK not available';
               console.error('[promotion] Auth email sync failed:', reason, j.code || '');
               showToast('Dispatcher records saved, but Firebase Auth email could not be synced: ' + reason + '. The dispatcher will NOT be able to log in to Dispatch HQ until this is resolved.', 'error');
@@ -7126,9 +7232,18 @@ function saveDriver() {
             (_drvSharedWith && _drvSharedWith.length) ? _drvSharedWith : null
           ).catch(function(){});
         }
-      }).catch(function(e) {
-        console.warn('[saveDriver] Driver App path sync failed:', e && e.message);
-      });
+      }).catch(function() {});
+
+      window._bwSyncAllocatedVehiclesRegistry(profile, cId).catch(function() {});
+
+      // Purge case-insensitive email duplicates in the same company
+      if (window._pendingDupDeletes && window._pendingDupDeletes.length) {
+        var canonUid = (allDrivers[key] && allDrivers[key].uid) || profile.uid || '';
+        window._pendingDupDeletes.forEach(function(dupKey) {
+          if (dupKey !== key) window._bwPurgeDriverRecord(dupKey, { deleteAuth: true, exceptUid: canonUid });
+        });
+        window._pendingDupDeletes = [];
+      }
 
       // ── Sync vehicle fleet allocatedDrivers + current shift ───────────────
       window._bwSyncAllVehiclesForDriver(key, profile, cId).then(function() {
@@ -7538,10 +7653,12 @@ function renderDispatchersTable() {
     var authBadge = hasAuth
       ? '<span title="Firebase login account exists" style="display:inline-flex;align-items:center;gap:3px;background:#E8F5E9;color:#388E3C;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600"><i class="material-icons" style="font-size:13px">lock</i>Can login</span>'
       : '<span title="No Firebase login account — delete and re-add this dispatcher" style="display:inline-flex;align-items:center;gap:3px;background:#FBE9E7;color:#C62828;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600"><i class="material-icons" style="font-size:13px">lock_open</i>No login</span>';
+    var roleLabel = window._bwDispatcherRoleLabel(d);
+    var roleBadge = '<span title="' + roleLabel + '" style="display:inline-block;background:#E8EAF6;color:#3949AB;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle">' + roleLabel + '</span>';
     var tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + (i+1) + '</td>' +
-      '<td><strong>' + (d.name||'—') + '</strong></td>' +
+      '<td><strong>' + (d.name||'—') + '</strong>' + roleBadge + '</td>' +
       '<td>' + (d.phone||'—') + '</td>' +
       '<td style="font-size:12px">' + (d.email||'—') + '</td>' +
       '<td><code style="background:#F5F5F5;padding:2px 6px;border-radius:3px">' + (d.dispatcherCode||'—') + '</code></td>' +
@@ -7741,7 +7858,7 @@ function saveDispatcher() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(_body)
           }).then(function(r){ return r.json(); }).then(function(j){
-            if (!j.ok || j.authSynced === false) {
+            if (!j.ok || (j.authSynced === false && !j.skipped)) {
               var reason = j.error || j.note || 'Admin SDK not available';
               console.error('[saveDispatcher edit] Auth sync failed:', reason, j.code || '');
               showToast('Dispatcher saved, but Firebase Auth sync failed: ' + reason + '. The dispatcher may not be able to log in until this is resolved.', 'error');
@@ -18944,37 +19061,85 @@ const server = http.createServer((req, res) => {
           _sendLoginResponse([]);
         } else {
           const companyId = matchProfile.companyId || '';
-          proxyFirebaseRead('vehicles/' + companyId, function(vErr, vData) {
+          const _normTaxiUp = (t) => String(t || '').trim().toUpperCase();
+          const taxiKeys = allocKeys.map(_normTaxiUp).filter(Boolean);
+
+          function _buildVehicleStatus(vData) {
             const vehicleStatus = [];
-            if (!vErr && vData && typeof vData === 'object') {
-              Object.keys(vData).forEach(function(vk) {
-                const v = vData[vk];
-                if (!v) return;
-                // Match by taxi number (key used in allocatedVehicles) or registration
-                const vTaxiNo = v.taxiNumber || v.taxiNo || vk;
-                if (!allocVehs[vTaxiNo] && !allocVehs[v.registration]) return;
-                const vExpiredDocs = [], vWarningDocs = [];
-                [
-                  { label: 'Vehicle Registration', date: v.regoExpiry },
-                  { label: 'Certificate of Fitness (CoF)', date: v.cofExpiry }
-                ].forEach(function(vd) {
-                  if (!vd.date) return;
-                  const dd = new Date(vd.date); // "YYYY-MM-DD" → UTC midnight
-                  const diff = Math.ceil((dd - today) / 86400000);
-                  if (diff < 0) vExpiredDocs.push({ label: vd.label, date: vd.date, daysOverdue: Math.abs(diff) });
-                  else if (diff <= WARN_DAYS) vWarningDocs.push({ label: vd.label, date: vd.date, daysLeft: diff });
-                });
-                vehicleStatus.push({
-                  taxiNumber: vTaxiNo,
-                  registration: v.registration || '',
-                  make: v.make || '', model: v.model || '',
-                  usable: vExpiredDocs.length === 0,
-                  expiredDocs: vExpiredDocs,
-                  warnings: vWarningDocs
-                });
+            if (!vData || typeof vData !== 'object') return vehicleStatus;
+            Object.keys(vData).forEach(function(vk) {
+              const v = vData[vk];
+              if (!v) return;
+              const vTaxiNo = _normTaxiUp(v.taxiNumber || v.taxiNo || v.vehicleNo || vk);
+              if (!allocVehs[vTaxiNo] && !allocVehs[v.registration] && !allocVehs[vk]) return;
+              const vExpiredDocs = [], vWarningDocs = [];
+              [
+                { label: 'Vehicle Registration', date: v.regoExpiry },
+                { label: 'Certificate of Fitness (CoF)', date: v.cofExpiry }
+              ].forEach(function(vd) {
+                if (!vd.date) return;
+                const dd = new Date(vd.date);
+                const diff = Math.ceil((dd - today) / 86400000);
+                if (diff < 0) vExpiredDocs.push({ label: vd.label, date: vd.date, daysOverdue: Math.abs(diff) });
+                else if (diff <= WARN_DAYS) vWarningDocs.push({ label: vd.label, date: vd.date, daysLeft: diff });
+              });
+              vehicleStatus.push({
+                taxiNumber: vTaxiNo,
+                registration: v.registration || '',
+                make: v.make || '', model: v.model || '',
+                usable: vExpiredDocs.length === 0,
+                expiredDocs: vExpiredDocs,
+                warnings: vWarningDocs
+              });
+            });
+            return vehicleStatus;
+          }
+
+          // Ensure vehicles/{companyId}/{vehicleNo} exists with active:true for Driver App onboarding
+          proxyFirebaseRead('vehicles', function(fleetErr, allVeh) {
+            const fleetByTaxi = {};
+            if (!fleetErr && allVeh && typeof allVeh === 'object') {
+              Object.keys(allVeh).forEach(function(k) {
+                const node = allVeh[k];
+                if (!node || typeof node !== 'object') return;
+                if (node.taxiNumber || node.registration || node.make) {
+                  const tn = _normTaxiUp(node.taxiNumber);
+                  if (tn) fleetByTaxi[tn] = Object.assign({ fleetKey: k }, node);
+                }
               });
             }
-            _sendLoginResponse(vehicleStatus);
+            let pendingWrites = taxiKeys.length;
+            if (!pendingWrites) {
+              _sendLoginResponse([]);
+              return;
+            }
+            taxiKeys.forEach(function(vehicleNo) {
+              const fleet = fleetByTaxi[vehicleNo];
+              const cap = fleet ? (parseInt(String(fleet.capacity || fleet.seatCapacity || '4'), 10) || 4) : 4;
+              const registry = fleet ? Object.assign({}, fleet, {
+                active: true,
+                companyId: companyId,
+                vehicleNo: vehicleNo,
+                taxiNumber: vehicleNo,
+                seatCapacity: cap,
+                seats: cap,
+                vehicleTypeCode: fleet.vehicleType || fleet.vehicleTypeCode || '',
+                updatedAt: Date.now()
+              }) : {
+                active: true,
+                companyId: companyId,
+                vehicleNo: vehicleNo,
+                taxiNumber: vehicleNo,
+                updatedAt: Date.now()
+              };
+              proxyFirebaseWrite('PATCH', 'vehicles/' + companyId + '/' + vehicleNo, registry, function() {
+                if (--pendingWrites === 0) {
+                  proxyFirebaseRead('vehicles/' + companyId, function(vErr, vData) {
+                    _sendLoginResponse(_buildVehicleStatus(vData));
+                  });
+                }
+              });
+            });
           });
         }
       });
@@ -19021,7 +19186,11 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, authSynced: true, updated: Object.keys(update) }));
       } catch(e) {
-        // Surface Firebase Auth error codes so callers can react (email-already-exists, user-not-found, etc.)
+        if (e.code === 'auth/user-not-found') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, authSynced: false, skipped: true }));
+          return;
+        }
         console.warn('[reset-driver-password] failed:', e.code || '', e.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message, code: e.code || null }));
@@ -19724,26 +19893,31 @@ const server = http.createServer((req, res) => {
         }
         if (!firebaseAdmin) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ uid: null, note: 'Admin SDK not configured' })); return;
+          res.end(JSON.stringify({ uid: null, skipped: true })); return;
         }
-        for (const em of cleaned) {
-          try {
-            const user = await firebaseAdmin.auth().getUserByEmail(em);
-            if (user && user.uid) {
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ uid: user.uid, email: em })); return;
-            }
-          } catch (e) {
-            if (e.code !== 'auth/user-not-found') {
-              console.warn('[lookup-auth-uid] getUserByEmail failed:', em, e.code || e.message);
+        const seen = new Set();
+        for (const raw of cleaned) {
+          const variants = [String(raw).trim(), String(raw).trim().toLowerCase()];
+          for (const em of variants) {
+            const norm = em.toLowerCase();
+            if (!em || seen.has(norm)) continue;
+            seen.add(norm);
+            try {
+              const user = await firebaseAdmin.auth().getUserByEmail(em);
+              if (user && user.uid) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ uid: user.uid, email: user.email || em })); return;
+              }
+            } catch (e) {
+              if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-email') continue;
             }
           }
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ uid: null }));
+        res.end(JSON.stringify({ uid: null, skipped: true }));
       } catch (e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ uid: null, skipped: true }));
       }
     });
     return;
