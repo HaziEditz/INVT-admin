@@ -753,6 +753,7 @@ window._bwFindDriverByEmailOrUid = function(email, uid, companyId) {
     if (found) return;
     var d = window.allDrivers[k];
     if (!d || typeof d !== 'object') return;
+    if (!window._bwIsDriverProfileRecord(d, k)) return;
     if (cid && d.companyId && String(d.companyId) !== cid) return;
     if (uid && d.uid && String(d.uid) === String(uid)) { found = { key: k, driver: d }; return; }
     if (emailLow && d.email && String(d.email).trim().toLowerCase() === emailLow) found = { key: k, driver: d };
@@ -925,6 +926,25 @@ window._bwDriverRoleLabel = function(d) {
 };
 
 // Resolve existing drivers/{key} for save — never create a second profile for same person.
+window._bwLooksLikeFirebaseUid = function(key) {
+  return typeof key === 'string' && /^[A-Za-z0-9]{20,128}$/.test(key) && key.charAt(0) !== '-';
+};
+
+// UID lookup nodes (drivers/{uid}) are for the Driver App — not owner-panel profile rows.
+window._bwIsDriverUidLookupRecord = function(d, key) {
+  if (!d || typeof d !== 'object') return false;
+  if (d._lookup === true || d._nodeType === 'uidLookup') return true;
+  if (window._bwLooksLikeFirebaseUid(key) && !String(d.name || '').trim() && (d.uid || d.email)) return true;
+  return false;
+};
+
+window._bwIsDriverProfileRecord = function(d, key) {
+  if (!d || typeof d !== 'object') return false;
+  if (/^\d+$/.test(String(key || ''))) return false;
+  if (window._bwIsDriverUidLookupRecord(d, key)) return false;
+  return !!String(d.name || '').trim();
+};
+
 window._bwResolveCanonicalDriverKey = function(opts) {
   opts = opts || {};
   var editId = opts.editId || '';
@@ -1038,9 +1058,13 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
         throw e;
       }),
       window.adminWrite(pathUid, 'PATCH', {
+        _lookup:   true,
+        _nodeType: 'uidLookup',
         companyId: cId,
         uid:       uid,
-        email:     profile.email || ''
+        email:     profile.email || '',
+        name:      profile.name || '',
+        phone:     profile.phone || ''
       }).then(function(res) {
         _logWrite(pathUid, 'PATCH', true);
         return res;
@@ -6848,6 +6872,7 @@ function loadDrivers() {
         if (/^\d+$/.test(k)) return; // skip numeric companyId sub-nodes
         var d = data[k];
         if (!d || typeof d !== 'object') return;
+        if (!window._bwIsDriverProfileRecord(d, k)) return; // skip UID lookup / empty orphans
         if (d.companyId && d.companyId !== cid) return;
         if (!d.companyId && !IS_SUPER_ADMIN) return;
         allDrivers[k] = d;
@@ -7406,6 +7431,12 @@ function saveDriver() {
   };
 
   function finish(key, authOk) {
+    if (!String(profile.name || '').trim()) {
+      errEl.textContent = 'Driver name is required — cannot save an empty profile.';
+      errEl.style.display = 'block';
+      btn.disabled = false; btn.textContent = editId ? 'Save Changes' : 'Save Driver';
+      return;
+    }
     if (password) {
       // Store SHA-256 hash only — never store plaintext password in the database
       profile.passwordHash = _passwordHashHex || password;
@@ -8425,6 +8456,7 @@ function loadDriversForDropdown() {
       if (/^\d+$/.test(k)) return; // skip companyId sub-nodes (e.g. drivers/374161/...)
       var d = data[k];
       if (!d || typeof d !== 'object') return;
+      if (!window._bwIsDriverProfileRecord(d, k)) return;
       // Company isolation
       if (d.companyId && d.companyId !== COMPANY_ID) return;
       if (!d.companyId && !IS_SUPER_ADMIN) return;
@@ -18922,6 +18954,99 @@ function getPageCompanyId(req) {
   return getCookieCompanyId(req) || envCompanyIdFallback();
 }
 
+// ── DRIVER RECORD HELPERS ───────────────────────────────────────────────────
+function looksLikeFirebaseUid(key) {
+  return typeof key === 'string' && /^[A-Za-z0-9]{20,128}$/.test(key) && key.charAt(0) !== '-';
+}
+
+function isDriverUidLookupRecord(d, key) {
+  if (!d || typeof d !== 'object') return false;
+  if (d._lookup === true || d._nodeType === 'uidLookup') return true;
+  if (looksLikeFirebaseUid(key) && !String(d.name || '').trim() && (d.uid || d.email)) return true;
+  return false;
+}
+
+function isDriverProfileRecord(d, key) {
+  if (!d || typeof d !== 'object') return false;
+  if (/^\d+$/.test(String(key || ''))) return false;
+  if (isDriverUidLookupRecord(d, key)) return false;
+  return !!String(d.name || '').trim();
+}
+
+const DRIVER_PARTIAL_WRITE_FIELDS = new Set([
+  'uid', 'updatedAt', 'isDispatcher', 'licenseFileUrl',
+  'allocatedVehicles', 'allocatedTaxi', 'currentVehicleId',
+  'passwordHash', 'systemEmail', 'approved', 'vehicleId', 'allowedServices',
+  'assignedVehicles', 'sharedWith'
+]);
+
+function validateDriverAdminWrite(nodePath, data, method) {
+  const parts = String(nodePath || '').split('/').filter(Boolean);
+  if (parts[0] !== 'drivers') return null;
+  const fbMethod = String(method || '').toUpperCase();
+  if (fbMethod === 'DELETE') return null;
+
+  // drivers/{companyId}/{uid} — company registry for Driver App
+  if (parts.length === 3 && /^\d+$/.test(parts[1])) return null;
+
+  // drivers/{uid}/sharedWith or other child paths
+  if (parts.length >= 3) return null;
+
+  if (!data || typeof data !== 'object') return null;
+  const keys = Object.keys(data);
+
+  // drivers/{firebaseUid} — UID lookup node for Driver App login routing
+  if (parts.length === 2 && looksLikeFirebaseUid(parts[1])) {
+    const lookupFields = new Set(['_lookup', '_nodeType', 'companyId', 'uid', 'email', 'name', 'phone', 'updatedAt']);
+    if (keys.every(k => lookupFields.has(k))) return null;
+  }
+
+  const isPartialOnly = keys.length > 0 && keys.every(k => DRIVER_PARTIAL_WRITE_FIELDS.has(k));
+  if (isPartialOnly) return null;
+
+  // Explicitly tagged lookup node at any top-level key
+  if (parts.length === 2 && (data._lookup === true || data._nodeType === 'uidLookup')) return null;
+
+  const name = String(data.name || '').trim();
+  if (!name) {
+    return 'Driver profile requires a non-empty name field (path: ' + nodePath + ')';
+  }
+  return null;
+}
+
+function cleanupOrphanDriverProfiles() {
+  if (!process.env.FIREBASE_DB_SECRET) return;
+  proxyFirebaseRead('drivers', (err, allData) => {
+    if (err || !allData) {
+      console.warn('[cleanup-drivers] could not read drivers node:', err || 'null');
+      return;
+    }
+    const toDelete = [];
+    Object.keys(allData).forEach(key => {
+      if (/^\d+$/.test(key)) return;
+      const d = allData[key];
+      if (!d || typeof d !== 'object') return;
+      if (isDriverProfileRecord(d, key)) return;
+      if (isDriverUidLookupRecord(d, key)) return;
+      const hasEmail = !!(d.email && String(d.email).trim());
+      const noName = !String(d.name || '').trim();
+      const noPhone = !String(d.phone || '').trim();
+      const noDispId = !String(d.dispatcherId || d.driverId || d.id || '').trim();
+      if (hasEmail && noName && noPhone && noDispId) toDelete.push(key);
+    });
+    if (!toDelete.length) {
+      console.log('[cleanup-drivers] no orphan driver profiles found');
+      return;
+    }
+    console.log('[cleanup-drivers] removing', toDelete.length, 'orphan driver record(s):', toDelete.join(', '));
+    toDelete.forEach(key => {
+      proxyFirebaseWrite('DELETE', 'drivers/' + key, null, (wErr) => {
+        if (wErr) console.warn('[cleanup-drivers] delete failed drivers/' + key + ':', wErr);
+      });
+    });
+  });
+}
+
 // Injects var IS_SUPER_ADMIN into the <head> of a rendered page.
 // Called after withCid (or on its own for pages that self-inject COMPANY_ID).
 function withSa(html, isSA) {
@@ -19861,6 +19986,18 @@ const server = http.createServer((req, res) => {
           console.warn('[admin-write] bypassJobGuard used for', nodePath, 'method', fbMethod);
         }
 
+        // ── DRIVER PROFILE GUARD ───────────────────────────────────────────
+        if (String(nodePath).startsWith('drivers/')) {
+          console.log('[admin-write][drivers]', fbMethod, nodePath, '| fields:', data && typeof data === 'object' ? Object.keys(data).join(',') : '(none)');
+          const driverErr = validateDriverAdminWrite(nodePath, data, fbMethod);
+          if (driverErr) {
+            console.warn('[admin-write][drivers] BLOCKED:', driverErr);
+            res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: driverErr, path: nodePath }));
+            return;
+          }
+        }
+
         // If writing a dispatcher record, validate the target company is approved in adminAccess
         const isDispatcherWrite = nodePath.startsWith('dispatchers/') && data && typeof data === 'object' && data.companyId;
         if (isDispatcherWrite) {
@@ -20526,8 +20663,9 @@ const server = http.createServer((req, res) => {
         const d = allData[key];
         if (!d || typeof d !== 'object') return;
         if (key === skipKey) return; // skip self on edit
-        // Skip company-lookup sub-trees (those have uid-keyed children, not driver profiles)
-        if (d.name === undefined && d.email === undefined) return;
+        if (/^\d+$/.test(key)) return; // skip company sub-trees
+        if (isDriverUidLookupRecord(d, key)) return; // skip Driver App UID lookup nodes
+        if (!isDriverProfileRecord(d, key)) return; // skip empty/orphan records
         var field = null;
         if (chkEmail   && d.email           && d.email.toLowerCase()           === chkEmail)   field = 'email';
         if (chkPhone   && d.phone           && d.phone.replace(/\s/g,'').trim() === chkPhone)   field = field || 'phone';
@@ -20724,6 +20862,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running at http://0.0.0.0:${PORT}`);
   // Defer slightly so the listen log prints first and the server is fully ready.
   setTimeout(healDispatcherLookups, 1500);
+  setTimeout(cleanupOrphanDriverProfiles, 2000);
 });
 
 // ── JOB WATCHDOG (listener-based, zero repeat reads) ─────────────────────────
