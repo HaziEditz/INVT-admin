@@ -836,6 +836,7 @@ window._bwPurgeDriverRecord = function(id, opts) {
   window.adminWrite('drivers/' + id, 'DELETE', null).catch(function(){});
   if (uid) {
     window.adminWrite('drivers/' + companyId + '/' + uid, 'DELETE', null).catch(function(){});
+    window.adminWrite('drivers/' + companyId + '/' + id, 'DELETE', null).catch(function(){});
     window.adminWrite('drivers/' + uid, 'DELETE', null).catch(function(){});
     if (opts.deleteAuth && uid !== opts.exceptUid) {
       fetch('/api/delete-driver-auth', {
@@ -993,7 +994,7 @@ window._bwSyncVehicleCompanyRegistry = function(vehKey, vehicle) {
   return window.adminWrite('vehicles/' + cId + '/' + vehicleNo, 'PATCH', registry);
 };
 
-// Write drivers/{companyId}/{uid} + drivers/{uid} for Driver App discovery and login.
+// Write drivers/{companyId}/{uid} + drivers/{companyId}/{pushKey} + drivers/{uid} for Driver App.
 window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
   console.log('[bwSyncDriverCompanyAlloc] start — driverKey:', driverKey,
     '| profile.companyId:', profile && profile.companyId,
@@ -1041,48 +1042,54 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
       allowedServices:   allowedServicesMap,
       updatedAt:         Date.now()
     };
+    if (driverKey) companyPatch.fleetKey = driverKey;
     function _logWrite(path, method, ok, err) {
       if (ok) console.log('[bwSyncDriverCompanyAlloc] Firebase write OK —', method, path);
       else console.error('[bwSyncDriverCompanyAlloc] Firebase write FAILED —', method, path, '|', err && err.message ? err.message : err);
     }
-    var pathCompany = 'drivers/' + cId + '/' + uid;
-    var pathUid     = 'drivers/' + uid;
-    var pathKey     = driverKey ? ('drivers/' + driverKey) : null;
-    console.log('[bwSyncDriverCompanyAlloc] writing paths:', [pathCompany, pathUid].concat(pathKey ? [pathKey] : []).join(', '));
-    var tasks = [
-      window.adminWrite(pathCompany, 'PATCH', companyPatch).then(function(res) {
-        _logWrite(pathCompany, 'PATCH', true);
+    function _writePath(path, patch) {
+      return window.adminWrite(path, 'PATCH', patch).then(function(res) {
+        _logWrite(path, 'PATCH', true);
         return res;
       }).catch(function(e) {
-        _logWrite(pathCompany, 'PATCH', false, e);
+        _logWrite(path, 'PATCH', false, e);
         throw e;
-      }),
-      window.adminWrite(pathUid, 'PATCH', {
-        _lookup:   true,
-        _nodeType: 'uidLookup',
-        companyId: cId,
-        uid:       uid,
-        email:     profile.email || '',
-        name:      profile.name || '',
-        phone:     profile.phone || ''
-      }).then(function(res) {
-        _logWrite(pathUid, 'PATCH', true);
+      });
+    }
+    var pathCompanyUid = 'drivers/' + cId + '/' + uid;
+    var pathCompanyKey = driverKey ? ('drivers/' + cId + '/' + driverKey) : null;
+    var pathUidLookup  = 'drivers/' + uid;
+    var pathFlatKey    = driverKey ? ('drivers/' + driverKey) : null;
+    var writePaths = [pathCompanyUid];
+    if (pathCompanyKey && pathCompanyKey !== pathCompanyUid) writePaths.push(pathCompanyKey);
+    console.log('[bwSyncDriverCompanyAlloc] writing paths:', writePaths.concat([pathUidLookup]).concat(pathFlatKey ? [pathFlatKey] : []).join(', '));
+    var tasks = writePaths.map(function(p) { return _writePath(p, companyPatch); });
+    tasks.push(window.adminWrite(pathUidLookup, 'PATCH', {
+      _lookup:   true,
+      _nodeType: 'uidLookup',
+      companyId: cId,
+      uid:       uid,
+      email:     profile.email || '',
+      name:      profile.name || '',
+      phone:     profile.phone || '',
+      fleetKey:  driverKey || ''
+    }).then(function(res) {
+      _logWrite(pathUidLookup, 'PATCH', true);
+      return res;
+    }).catch(function(e) {
+      _logWrite(pathUidLookup, 'PATCH', false, e);
+      throw e;
+    }));
+    if (pathFlatKey) {
+      tasks.push(window.adminWrite(pathFlatKey, 'PATCH', { uid: uid, updatedAt: Date.now(), fleetKey: driverKey }).then(function(res) {
+        _logWrite(pathFlatKey, 'PATCH', true);
         return res;
       }).catch(function(e) {
-        _logWrite(pathUid, 'PATCH', false, e);
-        throw e;
-      })
-    ];
-    if (pathKey) {
-      tasks.push(window.adminWrite(pathKey, 'PATCH', { uid: uid, updatedAt: Date.now() }).then(function(res) {
-        _logWrite(pathKey, 'PATCH', true);
-        return res;
-      }).catch(function(e) {
-        _logWrite(pathKey, 'PATCH', false, e);
+        _logWrite(pathFlatKey, 'PATCH', false, e);
       }));
     }
     return Promise.all(tasks).then(function() {
-      console.log('[bwSyncDriverCompanyAlloc] complete — uid:', uid, 'companyId:', cId);
+      console.log('[bwSyncDriverCompanyAlloc] complete — uid:', uid, 'companyId:', cId, 'driverKey:', driverKey || '(none)');
       return uid;
     });
   });
@@ -7539,7 +7546,7 @@ function saveDriver() {
       renderDriversTable();
       closeDriverModal();
 
-      // Write Driver App paths: drivers/{companyId}/{uid} + drivers/{uid}
+      // Write Driver App paths: drivers/{companyId}/{uid} + drivers/{companyId}/{pushKey} + drivers/{uid}
       var cId  = profile.companyId || COMPANY_ID;
       var syncProfile = Object.assign({}, profile, { uid: (allDrivers[key] && allDrivers[key].uid) || profile.uid });
       window._bwSyncDriverCompanyAlloc(key, syncProfile).then(function(resolvedUid) {
@@ -7916,9 +7923,10 @@ function deleteDriver(id) {
   var companyId = d.companyId || COMPANY_ID;
   // 1. Delete full profile
   adminWrite('drivers/' + id, 'DELETE', null).catch(function(){});
-  // 2. Delete lookup nodes drivers/{companyId}/{uid} and drivers/{uid}
+  // 2. Delete company-scoped + lookup nodes
   if (uid) {
     adminWrite('drivers/' + companyId + '/' + uid, 'DELETE', null).catch(function(){});
+    adminWrite('drivers/' + companyId + '/' + id, 'DELETE', null).catch(function(){});
     adminWrite('drivers/' + uid, 'DELETE', null).catch(function(){});
   }
   // 3. Delete Firebase Auth account server-side
