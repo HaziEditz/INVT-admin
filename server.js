@@ -119,12 +119,23 @@ const FIREBASE_SCRIPTS = `
   // so it updates automatically once the auth flow stores bw_cid.
   (function(){
     var _fallback = '';
-    try { _fallback = sessionStorage.getItem('bw_cid') || ''; } catch(e) {}
+    try { _fallback = sessionStorage.getItem('bw_cid') || localStorage.getItem('bw_cid') || ''; } catch(e) {}
+    // Seed session from server-injected bw_cid cookie (withCid) when storage is empty.
+    if (!_fallback && typeof COMPANY_ID !== 'undefined' && COMPANY_ID && /^\\d+$/.test(String(COMPANY_ID))) {
+      _fallback = String(COMPANY_ID);
+    }
+    window._bwStoreCompanyId = function(cid) {
+      if (!cid || !/^\\d+$/.test(String(cid))) return;
+      cid = String(cid);
+      try { sessionStorage.setItem('bw_cid', cid); localStorage.setItem('bw_cid', cid); } catch(e) {}
+      _fallback = cid;
+    };
+    if (_fallback) window._bwStoreCompanyId(_fallback);
     try {
       Object.defineProperty(window, 'COMPANY_ID', {
         get: function() {
           var v = '';
-          try { v = sessionStorage.getItem('bw_cid') || ''; } catch(e) {}
+          try { v = sessionStorage.getItem('bw_cid') || localStorage.getItem('bw_cid') || ''; } catch(e) {}
           return v || _fallback || '';
         },
         set: function() { /* locked — page scripts cannot override with the env fallback */ },
@@ -139,6 +150,37 @@ const FIREBASE_SCRIPTS = `
       }
     }
   })();
+
+  // Keep sessionStorage/localStorage bw_cid and HttpOnly bw_cid cookie aligned with the active company.
+  window._bwEnsureSessionCompanyId = function(companyId) {
+    var cid = String(companyId || '').trim();
+    if (!cid || !/^\\d+$/.test(cid)) {
+      console.warn('[bw_cid] _bwEnsureSessionCompanyId skipped — invalid companyId:', companyId);
+      return Promise.resolve(false);
+    }
+    window._bwStoreCompanyId(cid);
+    console.log('[bw_cid] storage bw_cid set to', cid);
+    var tokP = (fbAuth && fbAuth.currentUser)
+      ? fbAuth.currentUser.getIdToken().catch(function() { return null; })
+      : Promise.resolve(null);
+    return tokP.then(function(tok) {
+      return fetch('/api/sync-session-company', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: cid, token: tok || undefined })
+      });
+    }).then(function(r) { return r.json(); }).then(function(res) {
+      if (res && res.ok) {
+        console.log('[bw_cid] bw_cid cookie synced to', cid);
+        return true;
+      }
+      console.warn('[bw_cid] cookie sync failed:', (res && res.error) || 'unknown');
+      return false;
+    }).catch(function(e) {
+      console.warn('[bw_cid] cookie sync request failed:', e && e.message);
+      return false;
+    });
+  };
   firebase.initializeApp(FIREBASE_CONFIG);
   var fbAuth    = firebase.auth();
   var fbDB      = firebase.database();
@@ -204,7 +246,7 @@ const FIREBASE_SCRIPTS = `
       // If COMPANY_ID is empty (sessionStorage cleared or missing), re-verify from server
       // so every page has the correct company context even without a fresh login.
       var cidNow = '';
-      try { cidNow = sessionStorage.getItem('bw_cid') || ''; } catch(e) {}
+      try { cidNow = sessionStorage.getItem('bw_cid') || localStorage.getItem('bw_cid') || ''; } catch(e) {}
       if (!cidNow) {
         user.getIdToken().then(function(tok) {
           return fetch('/api/verify-admin', {
@@ -214,7 +256,15 @@ const FIREBASE_SCRIPTS = `
           }).then(function(r) { return r.json(); });
         }).then(function(res) {
           if (res.ok && res.companyId) {
-            try { sessionStorage.setItem('bw_cid', String(res.companyId)); } catch(e) {}
+            if (window._bwStoreCompanyId) window._bwStoreCompanyId(String(res.companyId));
+            else try { sessionStorage.setItem('bw_cid', String(res.companyId)); localStorage.setItem('bw_cid', String(res.companyId)); } catch(e) {}
+            return user.getIdToken().then(function(tok) {
+              return fetch('/api/sync-session-company', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ companyId: String(res.companyId), token: tok })
+              }).catch(function() {});
+            });
           }
         }).catch(function(){}).finally(function() {
           discoverDbNodes(user).then(function() {
@@ -695,14 +745,15 @@ window._bwEnsureSecondaryFbApp = function() {
 };
 
 // Find a driver profile linked to this email or Firebase Auth UID.
-window._bwFindDriverByEmailOrUid = function(email, uid) {
+window._bwFindDriverByEmailOrUid = function(email, uid, companyId) {
   var emailLow = String(email || '').trim().toLowerCase();
+  var cid = String(companyId || window.COMPANY_ID || '').trim();
   var found = null;
   Object.keys(window.allDrivers || {}).forEach(function(k) {
     if (found) return;
     var d = window.allDrivers[k];
     if (!d || typeof d !== 'object') return;
-    if (d.companyId && d.companyId !== window.COMPANY_ID) return;
+    if (cid && d.companyId && String(d.companyId) !== cid) return;
     if (uid && d.uid && String(d.uid) === String(uid)) { found = { key: k, driver: d }; return; }
     if (emailLow && d.email && String(d.email).trim().toLowerCase() === emailLow) found = { key: k, driver: d };
   });
@@ -882,7 +933,7 @@ window._bwResolveCanonicalDriverKey = function(opts) {
   var companyId = opts.companyId || window.COMPANY_ID;
   var dispId = String(opts.dispId || '').trim().toLowerCase();
   if (editId) return editId;
-  var linked = window._bwFindDriverByEmailOrUid(email, uid);
+  var linked = window._bwFindDriverByEmailOrUid(email, uid, companyId);
   if (linked && linked.key) return linked.key;
   var emailDups = window._bwFindEmailDuplicateKeys(email, companyId, '');
   if (emailDups.length) return emailDups[0];
@@ -924,9 +975,15 @@ window._bwSyncVehicleCompanyRegistry = function(vehKey, vehicle) {
 
 // Write drivers/{companyId}/{uid} + drivers/{uid} for Driver App discovery and login.
 window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
+  console.log('[bwSyncDriverCompanyAlloc] start — driverKey:', driverKey,
+    '| profile.companyId:', profile && profile.companyId,
+    '| window.COMPANY_ID:', window.COMPANY_ID,
+    '| email:', profile && profile.email);
   return window._bwResolveDriverUid(profile, driverKey).then(function(uid) {
-    var cId = profile.companyId || window.COMPANY_ID;
+    var cId = String((profile && profile.companyId) || window.COMPANY_ID || '').trim();
+    console.log('[bwSyncDriverCompanyAlloc] uid resolved:', uid || '(none)', '| companyId used:', cId || '(none)');
     if (!uid || !cId) {
+      console.warn('[bwSyncDriverCompanyAlloc] aborted — missing uid or companyId (uid:', uid, 'cId:', cId, ')');
       return null;
     }
     profile.uid = uid;
@@ -964,18 +1021,46 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
       allowedServices:   allowedServicesMap,
       updatedAt:         Date.now()
     };
+    function _logWrite(path, method, ok, err) {
+      if (ok) console.log('[bwSyncDriverCompanyAlloc] Firebase write OK —', method, path);
+      else console.error('[bwSyncDriverCompanyAlloc] Firebase write FAILED —', method, path, '|', err && err.message ? err.message : err);
+    }
+    var pathCompany = 'drivers/' + cId + '/' + uid;
+    var pathUid     = 'drivers/' + uid;
+    var pathKey     = driverKey ? ('drivers/' + driverKey) : null;
+    console.log('[bwSyncDriverCompanyAlloc] writing paths:', [pathCompany, pathUid].concat(pathKey ? [pathKey] : []).join(', '));
     var tasks = [
-      window.adminWrite('drivers/' + cId + '/' + uid, 'PATCH', companyPatch),
-      window.adminWrite('drivers/' + uid, 'PATCH', {
+      window.adminWrite(pathCompany, 'PATCH', companyPatch).then(function(res) {
+        _logWrite(pathCompany, 'PATCH', true);
+        return res;
+      }).catch(function(e) {
+        _logWrite(pathCompany, 'PATCH', false, e);
+        throw e;
+      }),
+      window.adminWrite(pathUid, 'PATCH', {
         companyId: cId,
         uid:       uid,
         email:     profile.email || ''
+      }).then(function(res) {
+        _logWrite(pathUid, 'PATCH', true);
+        return res;
+      }).catch(function(e) {
+        _logWrite(pathUid, 'PATCH', false, e);
+        throw e;
       })
     ];
-    if (driverKey) {
-      tasks.push(window.adminWrite('drivers/' + driverKey, 'PATCH', { uid: uid, updatedAt: Date.now() }).catch(function(){}));
+    if (pathKey) {
+      tasks.push(window.adminWrite(pathKey, 'PATCH', { uid: uid, updatedAt: Date.now() }).then(function(res) {
+        _logWrite(pathKey, 'PATCH', true);
+        return res;
+      }).catch(function(e) {
+        _logWrite(pathKey, 'PATCH', false, e);
+      }));
     }
-    return Promise.all(tasks).then(function() { return uid; });
+    return Promise.all(tasks).then(function() {
+      console.log('[bwSyncDriverCompanyAlloc] complete — uid:', uid, 'companyId:', cId);
+      return uid;
+    });
   });
 };
 
@@ -1148,7 +1233,7 @@ window._bwAddVehicleToDriverFromVehicleTab = function(driverKey, taxiNumber, com
       return '<div class="'+cls+'">'+_icon(n.type)+'<div class="ni-body"><div class="ni-title">'+n.title+'</div><div class="ni-msg">'+n.message+'</div><div class="ni-ago">'+_ago(n.ts)+'</div></div>'+ck+'</div>';
     }).join('');
   }
-  function _cid(){ try{return window.COMPANY_ID||sessionStorage.getItem('bw_cid')||'';}catch(e){return window.COMPANY_ID||'';} }
+  function _cid(){ try{return window.COMPANY_ID||sessionStorage.getItem('bw_cid')||localStorage.getItem('bw_cid')||'';}catch(e){return window.COMPANY_ID||'';} }
   function _markRead(key){
     if(_nd[key]){
       _nd[key].read=true;
@@ -1222,7 +1307,7 @@ window._bwAddVehicleToDriverFromVehicleTab = function(driverKey, taxiNumber, com
 </script>
 <script>
 function Logout() {
-  try { sessionStorage.removeItem('bw_cid'); } catch(e) {}
+  try { sessionStorage.removeItem('bw_cid'); localStorage.removeItem('bw_cid'); } catch(e) {}
   fetch('/api/logout', { method: 'POST' }).catch(function(){}).finally(function() {
     if(typeof firebase !== 'undefined') {
       firebase.auth().signOut().then(function() {
@@ -1237,7 +1322,7 @@ function Logout() {
 (function(){
   function _setHeaderCid(){
     var cid = window.COMPANY_ID;
-    if(!cid){ try { cid = sessionStorage.getItem('bw_cid'); } catch(e){} }
+    if(!cid){ try { cid = sessionStorage.getItem('bw_cid') || localStorage.getItem('bw_cid'); } catch(e){} }
     if(!cid) return;
     var badge = document.getElementById('hdr-cid-badge');
     if(badge){ badge.textContent = 'Co. ' + cid; badge.style.display = 'inline-block'; }
@@ -1662,8 +1747,22 @@ auth.onAuthStateChanged(function(user) {
     }).then(function(r) { return r.json(); });
   }).then(function(res) {
     if (res.ok) {
-      try { if (res.companyId) sessionStorage.setItem('bw_cid', String(res.companyId)); } catch(e) {}
-      window.location.href = 'Default.aspx';
+      try {
+        if (res.companyId) {
+          sessionStorage.setItem('bw_cid', String(res.companyId));
+          localStorage.setItem('bw_cid', String(res.companyId));
+        }
+      } catch(e) {}
+      return user.getIdToken().then(function(tok) {
+        if (!res.companyId) return;
+        return fetch('/api/sync-session-company', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyId: String(res.companyId), token: tok })
+        }).catch(function() {});
+      }).then(function() {
+        window.location.href = 'Default.aspx';
+      });
     } else {
       auth.signOut().then(function() {
         var err = document.getElementById('errBox');
@@ -1697,8 +1796,22 @@ function doLogin() {
     })
     .then(function(res) {
       if (res.ok) {
-        try { if (res.companyId) sessionStorage.setItem('bw_cid', String(res.companyId)); } catch(e) {}
-        window.location.href = 'Default.aspx';
+        try {
+          if (res.companyId) {
+            sessionStorage.setItem('bw_cid', String(res.companyId));
+            localStorage.setItem('bw_cid', String(res.companyId));
+          }
+        } catch(e) {}
+        return auth.currentUser.getIdToken().then(function(tok) {
+          if (!res.companyId) return;
+          return fetch('/api/sync-session-company', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ companyId: String(res.companyId), token: tok })
+          }).catch(function() {});
+        }).then(function() {
+          window.location.href = 'Default.aspx';
+        });
       } else {
         return auth.signOut().then(function() {
           throw { message: 'Access denied. This account does not have admin access for this company.' };
@@ -2938,7 +3051,7 @@ function switchToCompany(cid) {
   }).then(function(r) { return r.json(); })
     .then(function(res) {
       if (res.ok) {
-        try { sessionStorage.setItem('bw_cid', cid); } catch(e) {}
+        try { sessionStorage.setItem('bw_cid', cid); localStorage.setItem('bw_cid', cid); } catch(e) {}
         window.location.reload();
       } else {
         if (pill) pill.style.opacity = '';
@@ -7232,6 +7345,20 @@ function saveDriver() {
   }); // end _hashReady.then
 
   function _doSaveDriver() {
+
+  var companyId   = (document.getElementById('d-company-id') && document.getElementById('d-company-id').value.trim()) || COMPANY_ID;
+  if (!companyId) {
+    errEl.textContent = 'Company ID is missing — please reload the page and try again.';
+    errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Save Driver';
+    return;
+  }
+  window._bwEnsureSessionCompanyId(companyId).then(function() {
+  _doSaveDriverInner();
+  });
+  }
+
+  function _doSaveDriverInner() {
 
   var companyId   = (document.getElementById('d-company-id') && document.getElementById('d-company-id').value.trim()) || COMPANY_ID;
 
@@ -18681,6 +18808,120 @@ function getCookieSuperAdmin(req) {
   return match ? match.slice('bw_sa='.length).trim() === '1' : false;
 }
 
+// Railway sits behind a TLS-terminating proxy — detect HTTPS via x-forwarded-proto.
+function isRequestSecure(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (proto === 'https') return true;
+  if (proto === 'http') return false;
+  return !!(req.connection && req.connection.encrypted);
+}
+
+// Build session cookies that work on Railway (Secure + SameSite=None) and localhost (Lax, no Secure).
+function buildSessionCookie(name, value, req) {
+  const secure = isRequestSecure(req);
+  const sameSite = secure ? 'None' : 'Lax';
+  let cookie = name + '=' + encodeURIComponent(String(value)) + '; Path=/; HttpOnly; SameSite=' + sameSite + '; Max-Age=86400';
+  if (secure) cookie += '; Secure';
+  return cookie;
+}
+
+function clearSessionCookie(name, req) {
+  const secure = isRequestSecure(req);
+  const sameSite = secure ? 'None' : 'Lax';
+  let cookie = name + '=; Path=/; HttpOnly; SameSite=' + sameSite + '; Max-Age=0';
+  if (secure) cookie += '; Secure';
+  return cookie;
+}
+
+function envCompanyIdFallback() {
+  const envCid = String(process.env.COMPANY_ID || '').trim();
+  return /^\d+$/.test(envCid) ? envCid : null;
+}
+
+function extractBearerToken(req, body) {
+  const auth = String(req.headers.authorization || '');
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  if (body && body.token) return String(body.token).trim();
+  return null;
+}
+
+// Scan adminAccess/{companyId}/{uid} across all companies for this Firebase Auth UID.
+function findCompanyForUid(uid, callback) {
+  if (!uid) return callback(null, null);
+  proxyFirebaseRead('adminAccess', (err, allCompanies) => {
+    if (err || !allCompanies) return callback(err, null);
+    const matched = Object.keys(allCompanies).find(cid =>
+      allCompanies[cid] && allCompanies[cid][uid] === true
+    );
+    callback(null, matched || null);
+  });
+}
+
+function promiseFindCompanyForUid(uid) {
+  return new Promise(resolve => findCompanyForUid(uid, (err, cid) => resolve(cid || null)));
+}
+
+function userHasAdminAccess(uid, companyId, callback) {
+  if (!uid || !companyId) return callback(null, false);
+  proxyFirebaseRead('adminAccess/' + companyId + '/' + uid, (err, val) => {
+    callback(err, val === true);
+  });
+}
+
+function userCanAccessCompany(uid, targetCid, callback) {
+  userHasAdminAccess(uid, targetCid, (err, direct) => {
+    if (direct) return callback(null, true);
+    findCompanyForUid(uid, (err2, primaryCid) => {
+      if (!primaryCid) return callback(err2, false);
+      if (String(primaryCid) === String(targetCid)) return callback(null, true);
+      Promise.all([
+        new Promise(r => proxyFirebaseRead('superClients/' + primaryCid + '/ownerGroupId', (e, v) => r(v || null))),
+        new Promise(r => proxyFirebaseRead('superClients/' + targetCid + '/ownerGroupId', (e, v) => r(v || null)))
+      ]).then(([g1, g2]) => {
+        callback(null, !!(g1 && g2 && g1 === g2));
+      }).catch(e => callback(e, false));
+    });
+  });
+}
+
+// Resolve company ID: bw_cid cookie → Firebase token + adminAccess → env COMPANY_ID (optional).
+function resolveSessionCompanyId(req, opts, callback) {
+  opts = opts || {};
+  const cookieCid = getCookieCompanyId(req);
+  if (cookieCid) return callback(null, cookieCid);
+
+  const token = opts.token || extractBearerToken(req, opts.body);
+  if (token && firebaseAdmin) {
+    firebaseAdmin.auth().verifyIdToken(token).then(decoded => {
+      findCompanyForUid(decoded.uid, (err, cid) => {
+        if (cid) return callback(null, cid);
+        if (opts.allowEnvFallback) {
+          const envCid = envCompanyIdFallback();
+          if (envCid) return callback(null, envCid);
+        }
+        callback(err || new Error('No company access for this user'), null);
+      });
+    }).catch(e => {
+      if (opts.allowEnvFallback) {
+        const envCid = envCompanyIdFallback();
+        if (envCid) return callback(null, envCid);
+      }
+      callback(e, null);
+    });
+    return;
+  }
+
+  if (opts.allowEnvFallback) {
+    const envCid = envCompanyIdFallback();
+    if (envCid) return callback(null, envCid);
+  }
+  callback(new Error('Not authenticated'), null);
+}
+
+function getPageCompanyId(req) {
+  return getCookieCompanyId(req) || envCompanyIdFallback();
+}
+
 // Injects var IS_SUPER_ADMIN into the <head> of a rendered page.
 // Called after withCid (or on its own for pages that self-inject COMPANY_ID).
 function withSa(html, isSA) {
@@ -19409,22 +19650,22 @@ const server = http.createServer((req, res) => {
       res.writeHead(503, { 'Content-Type':'application/json' });
       res.end(JSON.stringify({ error:'FIREBASE_DB_SECRET not configured' })); return;
     }
-    const sessCid = getCookieCompanyId(req);
-    if (!sessCid) {
-      res.writeHead(401, { 'Content-Type':'application/json' });
-      res.end(JSON.stringify({ error:'Not authenticated' })); return;
-    }
     let raw = '';
     req.on('data', c => { raw += c; });
     req.on('end', () => {
       let body;
       try { body = JSON.parse(raw || '{}'); }
       catch(e){ res.writeHead(400,{ 'Content-Type':'application/json' }); res.end(JSON.stringify({ error:'Invalid JSON' })); return; }
-      if (body.cid && String(body.cid) !== sessCid) {
+      resolveSessionCompanyId(req, { body, allowEnvFallback: false }, (authErr, sessCid2) => {
+        if (!sessCid2) {
+          res.writeHead(401, { 'Content-Type':'application/json' });
+          res.end(JSON.stringify({ error:'Not authenticated' })); return;
+        }
+      if (body.cid && String(body.cid) !== sessCid2) {
         res.writeHead(403, { 'Content-Type':'application/json' });
         res.end(JSON.stringify({ error:'Can only command your own company' })); return;
       }
-      const cmd = Object.assign({}, body, { cid: sessCid, by: body.by || ('owner:' + sessCid) });
+      const cmd = Object.assign({}, body, { cid: sessCid2, by: body.by || ('owner:' + sessCid2) });
       executeJobCommand(cmd, (err, result) => {
         if (err) {
           const code = /Version conflict/.test(err) ? 409
@@ -19438,13 +19679,14 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
         res.end(JSON.stringify(Object.assign({ ok:true }, result)));
       });
+      });
     });
     return;
   }
 
   // ── API: GET /api/driver-state?driverId= — canonical driver view ──────────
   if (urlPath === '/api/driver-state') {
-    const sessCid = getCookieCompanyId(req);
+    resolveSessionCompanyId(req, { allowEnvFallback: false }, (authErr, sessCid) => {
     if (!sessCid) {
       res.writeHead(401, { 'Content-Type':'application/json' });
       res.end(JSON.stringify({ error:'Not authenticated' })); return;
@@ -19459,6 +19701,7 @@ const server = http.createServer((req, res) => {
       if (err) { res.writeHead(500,{ 'Content-Type':'application/json' }); res.end(JSON.stringify({ error: err })); return; }
       res.writeHead(200, { 'Content-Type':'application/json', 'Cache-Control':'no-cache', 'Access-Control-Allow-Origin':'*' });
       res.end(JSON.stringify(state));
+    });
     });
     return;
   }
@@ -19478,18 +19721,18 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ error: 'FIREBASE_DB_SECRET not configured' }));
       return;
     }
-    // Require an authenticated owner session (bw_cid cookie)
-    const sessCid = getCookieCompanyId(req);
-    if (!sessCid) {
-      res.writeHead(401, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Not authenticated' }));
-      return;
-    }
+    // Require an authenticated owner session (bw_cid cookie or Firebase token → adminAccess)
     let rawBody = '';
     req.on('data', chunk => { rawBody += chunk; });
     req.on('end', () => {
       let body = {};
       try { body = rawBody ? JSON.parse(rawBody) : {}; } catch(e) {}
+      resolveSessionCompanyId(req, { body, allowEnvFallback: false }, (authErr, sessCid) => {
+      if (!sessCid) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not authenticated' }));
+        return;
+      }
       const targetCid = String(body.companyId || sessCid);
       // Only allow pruning the session's own company (or owner-group sibling — strict for safety: own only)
       if (targetCid !== String(sessCid)) {
@@ -19557,6 +19800,7 @@ const server = http.createServer((req, res) => {
           });
         }
         next();
+      });
       });
     });
     return;
@@ -19650,7 +19894,10 @@ const server = http.createServer((req, res) => {
 
   // ── API: logout — clears the bw_cid session cookie ───────────────────────
   if (urlPath === '/api/logout') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'bw_cid=; Path=/; HttpOnly; Max-Age=0' });
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Set-Cookie': [clearSessionCookie('bw_cid', req), clearSessionCookie('bw_sa', req)]
+    });
     res.end(JSON.stringify({ ok: true }));
     return;
   }
@@ -19663,6 +19910,42 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/api/company-admin') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'This feature has been moved to the BookaWaka super-admin panel.' }));
+    return;
+  }
+
+  // POST /api/sync-session-company  body: { companyId, token }
+  // Sets the HttpOnly bw_cid cookie after verifying adminAccess for the user's UID.
+  if (urlPath === '/api/sync-session-company') {
+    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+    let rawBody = '';
+    req.on('data', chunk => { rawBody += chunk; });
+    req.on('end', async () => {
+      try {
+        const body = JSON.parse(rawBody || '{}');
+        const { companyId, token } = body;
+        const nc = String(companyId || '').trim();
+        if (!nc || !/^\d+$/.test(nc)) throw new Error('Invalid company ID');
+        if (!token) throw new Error('Firebase token required');
+        if (!firebaseAdmin) throw new Error('Admin SDK not initialised');
+        const decoded = await firebaseAdmin.auth().verifyIdToken(token);
+        userCanAccessCompany(decoded.uid, nc, (err, allowed) => {
+          if (!allowed) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'No admin access for company ' + nc }));
+            return;
+          }
+          console.log('[sync-session-company] bw_cid →', nc, '| uid:', decoded.uid, '| secure:', isRequestSecure(req));
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Set-Cookie': buildSessionCookie('bw_cid', nc, req)
+          });
+          res.end(JSON.stringify({ ok: true, companyId: nc }));
+        });
+      } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
     return;
   }
 
@@ -19699,8 +19982,10 @@ const server = http.createServer((req, res) => {
           throw new Error('Company not in the same owner group');
         }
         console.log('[switch-company] Switching bw_cid from', currentCid, 'to', nc, '(group:', currentGroup + ')');
-        const cookie = 'bw_cid=' + nc + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400';
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': cookie });
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Set-Cookie': buildSessionCookie('bw_cid', nc, req)
+        });
         res.end(JSON.stringify({ ok: true, companyId: nc }));
       } catch(e) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -19741,8 +20026,10 @@ const server = http.createServer((req, res) => {
             if (BOOTSTRAP_EMAIL && email === BOOTSTRAP_EMAIL) {
               proxyFirebaseWrite('PUT', 'adminAccess/' + BOOTSTRAP_COMPANY + '/' + uid, true, () => {});
               console.log('[verify-admin] Bootstrap: seeded first admin —', email, '→ company', BOOTSTRAP_COMPANY);
-              const bsCookie = 'bw_cid=' + BOOTSTRAP_COMPANY + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400';
-              res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': bsCookie });
+              res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Set-Cookie': buildSessionCookie('bw_cid', BOOTSTRAP_COMPANY, req)
+              });
               res.end(JSON.stringify({ ok: true, bootstrap: true, companyId: BOOTSTRAP_COMPANY }));
             } else {
               console.warn('[verify-admin] Denied (no admin list + email not bootstrap admin) —', email);
@@ -19761,10 +20048,14 @@ const server = http.createServer((req, res) => {
             // Check if this user is also listed as a super-admin
             proxyFirebaseRead('superAdmins/' + uid, (saErr, saVal) => {
               const isSuperAdmin = (saVal === true);
-              console.log('[verify-admin] Granted —', email, 'uid:', uid, 'company:', matchedCompany, isSuperAdmin ? '| SUPER-ADMIN' : '');
-              const cidCookie = 'bw_cid=' + matchedCompany + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400';
-              const saCookie  = 'bw_sa=' + (isSuperAdmin ? '1' : '0') + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400';
-              res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': [cidCookie, saCookie] });
+              console.log('[verify-admin] Granted —', email, 'uid:', uid, 'company:', matchedCompany, isSuperAdmin ? '| SUPER-ADMIN' : '', '| secure:', isRequestSecure(req));
+              res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Set-Cookie': [
+                  buildSessionCookie('bw_cid', matchedCompany, req),
+                  buildSessionCookie('bw_sa', isSuperAdmin ? '1' : '0', req)
+                ]
+              });
               res.end(JSON.stringify({ ok: true, companyId: matchedCompany, isSuperAdmin: isSuperAdmin }));
             });
           } else {
@@ -19804,10 +20095,12 @@ const server = http.createServer((req, res) => {
   }
 
   if (isOwnerPath && isAspx) {
-    // Extract the company ID and super-admin flag from session cookies.
-    const cid = getCookieCompanyId(req);
+    // Company ID: bw_cid cookie → env COMPANY_ID fallback (client re-syncs via verify-admin).
+    const cookieCid = getCookieCompanyId(req);
+    const cid = getPageCompanyId(req);
     const isSA = getCookieSuperAdmin(req);
-    if (!cid) console.warn('[page] ' + lname + ' — no bw_cid cookie, falling back to env COMPANY_ID');
+    if (!cookieCid && cid) console.log('[page]', lname, '— no bw_cid cookie; using company', cid);
+    else if (!cid) console.warn('[page]', lname, '— no bw_cid cookie and no COMPANY_ID env fallback');
 
     // Login page
     if (lname === 'ownerlogin.aspx') {
@@ -20027,7 +20320,7 @@ const server = http.createServer((req, res) => {
     // Dedicated rich pages
     if (lname === 'users-registration.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
-      res.end(withSa(driversPage(cid, isSA), isSA));
+      res.end(withSa(withCid(driversPage(cid, isSA), cid), isSA));
       return;
     }
     if (lname === 'vehicle-registration.aspx') {
