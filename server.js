@@ -843,6 +843,64 @@ window._bwDispatcherRoleLabel = function(dsp) {
   return 'DISPATCHER';
 };
 
+// True when this driver profile also has a dispatcher record (same company email or uid).
+window._bwDriverHasDispatcherTwin = function(d) {
+  if (!d || typeof d !== 'object') return false;
+  var cid = String(d.companyId || window.COMPANY_ID || '');
+  var emailLow = String(d.email || '').trim().toLowerCase();
+  var uid = String(d.uid || '').trim();
+  var driverKey = null;
+  Object.keys(window.allDrivers || {}).forEach(function(k) {
+    if (window.allDrivers[k] === d) driverKey = k;
+  });
+  var matched = false;
+  Object.keys(window.allDispatchers || {}).forEach(function(k) {
+    if (matched) return;
+    var dsp = window.allDispatchers[k];
+    if (!dsp || typeof dsp !== 'object') return;
+    if (dsp.companyId && cid && String(dsp.companyId) !== cid) return;
+    if (driverKey && dsp.fromDriverId === driverKey) { matched = true; return; }
+    if (uid && dsp.uid && String(dsp.uid) === uid) { matched = true; return; }
+    if (emailLow && dsp.email && String(dsp.email).trim().toLowerCase() === emailLow) matched = true;
+  });
+  return matched;
+};
+
+window._bwDriverRoleLabel = function(d) {
+  if (!d || typeof d !== 'object' || !d.isDispatcher) return '';
+  var hasDriverId = !!(String(d.dispatcherId || d.driverId || d.id || '').trim());
+  if (hasDriverId && window._bwDriverHasDispatcherTwin(d)) return 'DRIVER & DISPATCHER';
+  return 'DISPATCHER';
+};
+
+// Resolve existing drivers/{key} for save — never create a second profile for same person.
+window._bwResolveCanonicalDriverKey = function(opts) {
+  opts = opts || {};
+  var editId = opts.editId || '';
+  var email = opts.email || '';
+  var uid = opts.uid || '';
+  var companyId = opts.companyId || window.COMPANY_ID;
+  var dispId = String(opts.dispId || '').trim().toLowerCase();
+  if (editId) return editId;
+  var linked = window._bwFindDriverByEmailOrUid(email, uid);
+  if (linked && linked.key) return linked.key;
+  var emailDups = window._bwFindEmailDuplicateKeys(email, companyId, '');
+  if (emailDups.length) return emailDups[0];
+  if (dispId) {
+    var byDisp = null;
+    Object.keys(window.allDrivers || {}).forEach(function(k) {
+      if (byDisp) return;
+      var dr = window.allDrivers[k];
+      if (!dr || typeof dr !== 'object') return;
+      if (String(dr.companyId || companyId) !== String(companyId)) return;
+      var did = String(dr.dispatcherId || dr.driverId || dr.id || '').trim().toLowerCase();
+      if (did && did === dispId) byDisp = k;
+    });
+    if (byDisp) return byDisp;
+  }
+  return null;
+};
+
 // Write vehicles/{companyId}/{vehicleNo} — structured registry the Driver App reads.
 window._bwSyncVehicleCompanyRegistry = function(vehKey, vehicle) {
   var cId = String(vehicle.companyId || window.COMPANY_ID || '').trim();
@@ -6761,9 +6819,7 @@ function renderDriversTable() {
     var statusCls = d.status === 'active' ? 'active' : (d.status === 'suspended' ? 'suspended' : 'inactive');
     var dspBadge = '';
     if (d.isDispatcher) {
-      var roleLabel = (d.dispatcherId && /^[Dd]\d+$/.test(String(d.dispatcherId)))
-        ? 'DRIVER &amp; DISPATCHER'
-        : 'DISPATCHER';
+      var roleLabel = window._bwDriverRoleLabel(d) || 'DISPATCHER';
       dspBadge = ' <span title="' + roleLabel + '" style="display:inline-block;background:#E8EAF6;color:#3949AB;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle">' + roleLabel + '</span>';
     }
     var tr = document.createElement('tr');
@@ -7125,6 +7181,7 @@ function saveDriver() {
   if (taxiLic) _dupParams.set('taxiLic', taxiLic);
   if (dispId)  _dupParams.set('dispId',  dispId);
   if (editId)  _dupParams.set('skipKey', editId);
+  _dupParams.set('companyId', (document.getElementById('d-company-id') && document.getElementById('d-company-id').value.trim()) || COMPANY_ID);
   fetch('/api/check-driver-duplicate?' + _dupParams.toString())
     .then(function(r){ return r.json(); })
     .catch(function(){ return { duplicates: [] }; }) // fail open
@@ -7135,7 +7192,7 @@ function saveDriver() {
         if (email) {
           var emailDupKeys = [];
           for (var di = 0; di < dups.length; di++) {
-            if (dups[di].field === 'email' && String(dups[di].companyId) === String(COMPANY_ID)) {
+            if (dups[di].field === 'email' && (dups[di].sameCompany || String(dups[di].companyId) === String(COMPANY_ID))) {
               emailDupKeys.push(dups[di].key);
             }
           }
@@ -7397,6 +7454,24 @@ function saveDriver() {
     });
   }
 
+  function _keyForSaveDriver() {
+    var resolved = window._bwResolveCanonicalDriverKey({
+      editId: editId,
+      email: email,
+      uid: profile.uid,
+      companyId: companyId,
+      dispId: dispId
+    });
+    if (resolved) {
+      if (!editId) {
+        editId = resolved;
+        document.getElementById('edit-driver-id').value = resolved;
+      }
+      return resolved;
+    }
+    return fbDB.ref('drivers').push().key;
+  }
+
   if (editId) {
     // Edit existing — update real email if changed, systemEmail stays fixed
     if (!profile.systemEmail && allDrivers[editId] && allDrivers[editId].systemEmail) {
@@ -7419,8 +7494,7 @@ function saveDriver() {
         console.log('[saveDriver] Reusing existing Firebase Auth account:', existing.email, existing.uid);
         profile.uid = existing.uid;
         return window._bwSyncAuthPassword(existing.uid, password).then(function() {
-          var key = fbDB.ref('drivers').push().key;
-          finish(key, true);
+          finish(_keyForSaveDriver(), true);
         });
       }
       try {
@@ -7431,15 +7505,14 @@ function saveDriver() {
             return secondaryFbApp.auth().signOut();
           });
         }).then(function() {
-          var key = fbDB.ref('drivers').push().key;
-          finish(key, true);
+          finish(_keyForSaveDriver(), true);
         }).catch(function(err) {
           if (err && err.code === 'auth/email-already-in-use') {
             return window._bwLookupAuthUidByEmails(emailsToCheck).then(function(retry) {
               if (retry && retry.uid) {
                 profile.uid = retry.uid;
                 return window._bwSyncAuthPassword(retry.uid, password).then(function() {
-                  finish(fbDB.ref('drivers').push().key, true);
+                  finish(_keyForSaveDriver(), true);
                 });
               }
               throw err;
@@ -7448,13 +7521,11 @@ function saveDriver() {
           throw err;
         });
       } catch(e) {
-        var key = fbDB.ref('drivers').push().key;
-        finish(key, false);
+        finish(_keyForSaveDriver(), false);
       }
     }).catch(function(err) {
       console.warn('[Drivers] Auth lookup/create failed:', err && err.message);
-      var key = fbDB.ref('drivers').push().key;
-      finish(key, false);
+      finish(_keyForSaveDriver(), false);
     });
   }
   } // end _doSaveDriver
@@ -20147,6 +20218,7 @@ const server = http.createServer((req, res) => {
     const chkTaxiLic = (qs2.get('taxiLic') || '').toLowerCase().trim();
     const chkDispId  = (qs2.get('dispId')  || '').toLowerCase().trim();
     const skipKey    = qs2.get('skipKey')  || '';
+    const reqCid     = qs2.get('companyId') || '';
     if (!chkEmail && !chkPhone && !chkLic && !chkTaxiLic && !chkDispId) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'At least one field required' })); return;
@@ -20169,7 +20241,13 @@ const server = http.createServer((req, res) => {
         if (chkLic     && d.licenseNumber   && d.licenseNumber.toLowerCase()   === chkLic)     field = field || 'licence';
         if (chkTaxiLic && d.taxiLicenseNumber && d.taxiLicenseNumber.toLowerCase() === chkTaxiLic) field = field || 'taxi licence';
         if (chkDispId  && d.dispatcherId    && d.dispatcherId.toLowerCase()    === chkDispId)  field = field || 'dispatcherId';
-        if (field) duplicates.push({ key, field, name: d.name || '?', companyId: d.companyId || '?' });
+        if (field) duplicates.push({
+          key,
+          field,
+          name: d.name || '?',
+          companyId: d.companyId || '?',
+          sameCompany: !!(reqCid && String(d.companyId || '') === String(reqCid))
+        });
       });
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
       res.end(JSON.stringify({ duplicates }));
