@@ -974,10 +974,11 @@ window._bwDriverHasDispatcherTwin = function(d) {
 };
 
 window._bwDriverRoleLabel = function(d) {
-  if (!d || typeof d !== 'object' || !d.isDispatcher) return '';
+  if (!d || typeof d !== 'object') return '';
   var hasDriverId = !!(String(d.dispatcherId || d.driverId || d.id || '').trim());
-  if (hasDriverId && window._bwDriverHasDispatcherTwin(d)) return 'DRIVER & DISPATCHER';
-  return 'DISPATCHER';
+  if (!hasDriverId) return '';
+  if (window._bwDriverHasDispatcherTwin(d)) return 'DRIVER & DISPATCHER';
+  return 'DRIVER';
 };
 
 // Resolve existing drivers/{key} for save — never create a second profile for same person.
@@ -7060,10 +7061,11 @@ function renderDriversTable() {
       ? '<span style="color:#D32F2F;font-weight:600">' + expiry + ' &#x26A0;</span>'
       : expiry;
     var statusCls = d.status === 'active' ? 'active' : (d.status === 'suspended' ? 'suspended' : 'inactive');
+    var roleLabel = window._bwDriverRoleLabel(d);
     var dspBadge = '';
-    if (d.isDispatcher) {
-      var roleLabel = window._bwDriverRoleLabel(d) || 'DISPATCHER';
-      dspBadge = ' <span title="' + roleLabel + '" style="display:inline-block;background:#E8EAF6;color:#3949AB;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle">' + roleLabel + '</span>';
+    if (roleLabel) {
+      var isDual = roleLabel.indexOf('DISPATCHER') !== -1;
+      dspBadge = ' <span title="' + roleLabel + '" style="display:inline-block;background:' + (isDual ? '#E8EAF6;color:#3949AB' : '#E8F5E9;color:#2E7D32') + ';border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle">' + roleLabel + '</span>';
     }
     var tr = document.createElement('tr');
     tr.innerHTML =
