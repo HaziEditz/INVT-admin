@@ -1181,7 +1181,51 @@ window._bwRebuildVehicleAllocatedDrivers = function(vehKey, taxiNumber, companyI
     if (window.allVehicles && window.allVehicles[vehKey]) {
       window.allVehicles[vehKey] = Object.assign(window.allVehicles[vehKey], patch);
     }
+  }).then(function() {
+    if (!companyId || !taxiUp) return;
+    var registryPatch = { allocatedDrivers: allocatedDrivers, updatedAt: Date.now() };
+    if (opts.setCurrentShiftDriverKey !== undefined) {
+      if (opts.setCurrentShiftDriverKey) {
+        var sd2 = (window.allDrivers && window.allDrivers[opts.setCurrentShiftDriverKey]) || {};
+        registryPatch.assignedDriverKey = opts.setCurrentShiftDriverKey;
+        registryPatch.assignedDriver = sd2.name || '';
+      } else {
+        registryPatch.assignedDriverKey = '';
+        registryPatch.assignedDriver = '';
+      }
+    }
+    return window.adminWrite('vehicles/' + companyId + '/' + taxiUp, 'PATCH', registryPatch).catch(function(e) {
+      console.warn('[alloc] company registry allocatedDrivers write failed vehicles/' + companyId + '/' + taxiUp + ':', e && e.message);
+    });
   }).catch(function(e) { console.warn('[alloc] vehicle rebuild failed:', e && e.message); });
+};
+
+window._bwSyncVehicleAllocatedDriversRegistry = function(driverKey, profile, companyId) {
+  var cId = String(companyId || window.COMPANY_ID || '').trim();
+  if (!cId || !driverKey || !profile) return Promise.resolve();
+  var alloc = window._bwDriverAllocMap(profile);
+  var tasks = [];
+  Object.keys(alloc).forEach(function(taxiUp) {
+    var allocatedDrivers = {};
+    Object.keys(window.allDrivers || {}).forEach(function(dk) {
+      var d = window.allDrivers[dk];
+      if (!d || typeof d !== 'object') return;
+      if (d.companyId && cId && String(d.companyId) !== cId) return;
+      if (window._bwDriverAllocMap(d)[taxiUp]) {
+        allocatedDrivers[dk] = { name: d.name || '', uid: d.uid || '' };
+      }
+    });
+    if (window._bwDriverAllocMap(profile)[taxiUp]) {
+      allocatedDrivers[driverKey] = { name: profile.name || '', uid: profile.uid || '' };
+    }
+    tasks.push(window.adminWrite('vehicles/' + cId + '/' + taxiUp, 'PATCH', {
+      allocatedDrivers: allocatedDrivers,
+      updatedAt: Date.now()
+    }).catch(function(e) {
+      console.warn('[alloc] vehicles/' + cId + '/' + taxiUp + '/allocatedDrivers failed:', e && e.message);
+    }));
+  });
+  return Promise.all(tasks);
 };
 
 window._bwSyncAllVehiclesForDriver = function(driverKey, profile, companyId) {
@@ -7078,6 +7122,28 @@ function _nextDispatcherId() {
   return 'D' + String(max + 1).padStart(3, '0');
 }
 
+function _fetchNextDriverId(callback) {
+  var cid = (document.getElementById('d-company-id') && document.getElementById('d-company-id').value.trim()) || COMPANY_ID;
+  fetch('/api/next-driver-id?companyId=' + encodeURIComponent(cid || ''))
+    .then(function(r) { return r.json(); })
+    .then(function(res) { callback((res && res.nextId) || _nextDispatcherId()); })
+    .catch(function() { callback(_nextDispatcherId()); });
+}
+
+function _applyAutoDriverId(autoId) {
+  var _dispEl = document.getElementById('d-dispatcher-id');
+  if (!_dispEl) return;
+  _dispEl.value = autoId;
+  _dispEl.readOnly = false;
+  _dispEl.style.background = '#F1F8E9';
+  _dispEl.style.color = '#1B5E20';
+  _dispEl.style.borderColor = '#A5D6A7';
+  _dispEl.style.cursor = '';
+  _dispEl.title = 'Auto-generated — you can change this before saving';
+  var autoHint = document.getElementById('dispatcher-id-hint');
+  if (autoHint) autoHint.innerHTML = '<span style="color:#7CB342">Auto-generated (' + autoId + ') — edit if needed</span>';
+}
+
 /* ── New-driver credentials card ── */
 function _closeDriverCredsCard() {
   document.getElementById("driver-creds-card").style.display = "none";
@@ -7282,18 +7348,7 @@ function openDriverModal(id) {
     // Reset company sharing for new driver
     _drvSharedWith = [];
     _renderSharedChips();
-    // Auto-generate ID from highest existing — pre-fill, editable override allowed
-    var autoId = _nextDispatcherId();
-    var _dispEl = document.getElementById('d-dispatcher-id');
-    _dispEl.value = autoId;
-    _dispEl.readOnly = false;
-    _dispEl.style.background = '#F1F8E9';
-    _dispEl.style.color = '#1B5E20';
-    _dispEl.style.borderColor = '#A5D6A7';
-    _dispEl.style.cursor = '';
-    _dispEl.title = 'Auto-generated — you can change this before saving';
-    var autoHint = document.getElementById('dispatcher-id-hint');
-    if (autoHint) autoHint.innerHTML = '<span style="color:#7CB342">Auto-generated (' + autoId + ') — edit if needed</span>';
+    _fetchNextDriverId(_applyAutoDriverId);
   }
 }
 function closeDriverModal() { document.getElementById('driver-modal').style.display = 'none'; }
@@ -7614,6 +7669,8 @@ function saveDriver() {
       }).catch(function() {});
 
       window._bwSyncAllocatedVehiclesRegistry(profile, cId).catch(function() {});
+
+      window._bwSyncVehicleAllocatedDriversRegistry(key, Object.assign({}, profile, allDrivers[key] || {}), cId).catch(function() {});
 
       // Purge case-insensitive email duplicates in the same company
       if (window._pendingDupDeletes && window._pendingDupDeletes.length) {
@@ -8109,6 +8166,18 @@ function _nextDspId() {
   return 'DSP' + String(n).padStart(3, '0');
 }
 
+function _fetchNextDispatcherId(callback) {
+  fetch('/api/next-dispatcher-id?companyId=' + encodeURIComponent(COMPANY_ID || ''))
+    .then(function(r) { return r.json(); })
+    .then(function(res) { callback((res && res.nextId) || _nextDspId()); })
+    .catch(function() { callback(_nextDspId()); });
+}
+
+function _applyAutoDispatcherId(autoId) {
+  document.getElementById('dsp-code').value = autoId;
+  document.getElementById('dsp-id-hint').textContent = 'Auto-generated — edit if needed';
+}
+
 /* ── Dispatcher Modal Open/Close ── */
 function openDispatcherModal(id) {
   document.getElementById('dsp-modal-error').style.display = 'none';
@@ -8131,9 +8200,7 @@ function openDispatcherModal(id) {
     document.getElementById('dsp-pass-label').textContent = 'Password *';
     ['dsp-name','dsp-email','dsp-phone','dsp-password'].forEach(function(x){ document.getElementById(x).value=''; });
     document.getElementById('dsp-status').value = 'active';
-    var autoId = _nextDspId();
-    document.getElementById('dsp-code').value = autoId;
-    document.getElementById('dsp-id-hint').textContent = 'Auto-generated — edit if needed';
+    _fetchNextDispatcherId(_applyAutoDispatcherId);
   }
 }
 function closeDispatcherModal() { document.getElementById('dispatcher-modal').style.display = 'none'; }
@@ -19109,6 +19176,44 @@ function cleanupOrphanDriverProfiles() {
   });
 }
 
+function _scanDriverIdFromRecord(d, maxRef) {
+  if (!d || typeof d !== 'object') return;
+  const m = String(d.dispatcherId || d.driverId || d.id || '').match(/^[Dd](\d+)$/i);
+  if (m) maxRef.n = Math.max(maxRef.n, parseInt(m[1], 10));
+}
+
+function computeNextDriverId(allData, companyId) {
+  const maxRef = { n: 0 };
+  const cid = String(companyId || '').trim();
+  Object.keys(allData || {}).forEach(key => {
+    if (/^\d+$/.test(key)) return;
+    const d = allData[key];
+    if (!isDriverProfileRecord(d, key)) return;
+    if (cid && d.companyId && String(d.companyId) !== cid) return;
+    _scanDriverIdFromRecord(d, maxRef);
+  });
+  const cidNode = cid && allData && allData[cid];
+  if (cidNode && typeof cidNode === 'object') {
+    Object.values(cidNode).forEach(d => _scanDriverIdFromRecord(d, maxRef));
+  }
+  return 'D' + String(maxRef.n + 1).padStart(3, '0');
+}
+
+function computeNextDispatcherId(allData, companyId) {
+  const maxRef = { n: 0 };
+  const cid = String(companyId || '').trim();
+  Object.keys(allData || {}).forEach(key => {
+    const d = allData[key];
+    if (!d || typeof d !== 'object') return;
+    if (/^\d+$/.test(key)) return;
+    if (d.name === undefined && d.email === undefined && !d.dispatcherCode) return;
+    if (cid && d.companyId && String(d.companyId) !== cid) return;
+    const m = String(d.dispatcherCode || '').match(/^DSP(\d+)$/i);
+    if (m) maxRef.n = Math.max(maxRef.n, parseInt(m[1], 10));
+  });
+  return 'DSP' + String(maxRef.n + 1).padStart(3, '0');
+}
+
 // Injects var IS_SUPER_ADMIN into the <head> of a rendered page.
 // Called after withCid (or on its own for pages that self-inject COMPANY_ID).
 function withSa(html, isSA) {
@@ -20557,6 +20662,42 @@ const server = http.createServer((req, res) => {
   }
 
   // ── API: lookup Firebase Auth UID by email (for Driver App path sync) ─────
+  if (urlPath === '/api/next-driver-id') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (req.method !== 'GET') { res.writeHead(405, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'GET only' })); return; }
+    const qsDrv = new URLSearchParams(req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '');
+    const drvCid = qsDrv.get('companyId') || getPageCompanyId(req) || envCompanyIdFallback() || '';
+    if (!drvCid) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'companyId required' })); return;
+    }
+    proxyFirebaseRead('drivers', (err, allData) => {
+      const nextId = computeNextDriverId(allData || {}, drvCid);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+      res.end(JSON.stringify({ ok: true, nextId: nextId, companyId: drvCid }));
+    });
+    return;
+  }
+
+  if (urlPath === '/api/next-dispatcher-id') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (req.method !== 'GET') { res.writeHead(405, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'GET only' })); return; }
+    const qsDsp = new URLSearchParams(req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '');
+    const dspCid = qsDsp.get('companyId') || getPageCompanyId(req) || envCompanyIdFallback() || '';
+    if (!dspCid) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'companyId required' })); return;
+    }
+    proxyFirebaseRead('dispatchers', (err, allData) => {
+      const nextId = computeNextDispatcherId(allData || {}, dspCid);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+      res.end(JSON.stringify({ ok: true, nextId: nextId, companyId: dspCid }));
+    });
+    return;
+  }
+
   if (urlPath === '/api/lookup-auth-uid') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
