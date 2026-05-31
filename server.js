@@ -692,21 +692,75 @@ window._bwBuildAllocObject = function(allocatedVehicles) {
   return out;
 };
 
-// Resolve Firebase Auth UID from profile or by email (system + personal) via Admin SDK.
+// Resolve Firebase Auth UID — always prefer Admin SDK getUserByEmail over cached profile uid.
 window._bwResolveDriverUid = function(profile, driverKey) {
-  var uid = profile.uid || (driverKey && window.allDrivers && window.allDrivers[driverKey] && window.allDrivers[driverKey].uid);
-  if (uid) return Promise.resolve(String(uid));
+  profile = profile || {};
+  var cachedUid = String(
+    profile.uid ||
+    (driverKey && window.allDrivers && window.allDrivers[driverKey] && window.allDrivers[driverKey].uid) ||
+    ''
+  ).trim();
+
   var emails = [];
-  if (profile.email && String(profile.email).indexOf('@') !== -1) emails.push(String(profile.email).trim());
-  if (profile.systemEmail && String(profile.systemEmail).indexOf('@') !== -1) emails.push(String(profile.systemEmail).trim());
-  if (!emails.length) return Promise.resolve(null);
+  var seen = {};
+  function _addEmail(e) {
+    e = String(e || '').trim();
+    if (!e || e.indexOf('@') === -1) return;
+    var low = e.toLowerCase();
+    if (seen[low]) return;
+    seen[low] = true;
+    emails.push(e);
+  }
+  _addEmail(profile.email);
+  if (driverKey && window.allDrivers && window.allDrivers[driverKey]) {
+    _addEmail(window.allDrivers[driverKey].email);
+    _addEmail(window.allDrivers[driverKey].systemEmail);
+  }
+  _addEmail(profile.systemEmail);
+
+  function _persistAuthUid(authUid) {
+    authUid = String(authUid || '').trim();
+    if (!authUid) return null;
+    if (cachedUid && cachedUid !== authUid) {
+      console.warn('[bwResolveDriverUid] Replacing stale cached UID', cachedUid, '→', authUid,
+        '| email:', profile.email || emails[0] || '(none)');
+    }
+    profile.uid = authUid;
+    if (driverKey) {
+      if (window.allDrivers && window.allDrivers[driverKey]) window.allDrivers[driverKey].uid = authUid;
+      window.adminWrite('drivers/' + driverKey, 'PATCH', { uid: authUid, updatedAt: Date.now() }).catch(function(e) {
+        console.warn('[bwResolveDriverUid] profile uid PATCH failed for drivers/' + driverKey + ':', e && e.message);
+      });
+    }
+    return authUid;
+  }
+
+  if (!emails.length) {
+    return Promise.resolve(cachedUid || null);
+  }
+
   return fetch('/api/lookup-auth-uid', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ emails: emails })
   }).then(function(r) { return r.json(); }).then(function(j) {
-    return (j && j.uid) ? String(j.uid) : null;
-  }).catch(function() {
+    if (j && j.uid) {
+      var authUid = String(j.uid);
+      console.log('[bwResolveDriverUid] Auth UID for', j.email || emails[0], '→', authUid);
+      return _persistAuthUid(authUid);
+    }
+    if (cachedUid) {
+      console.warn('[bwResolveDriverUid] Auth lookup found no user for', emails.join(', '), '— using cached uid:', cachedUid);
+      profile.uid = cachedUid;
+      return cachedUid;
+    }
+    return null;
+  }).catch(function(err) {
+    console.warn('[bwResolveDriverUid] lookup request failed:', err && err.message);
+    if (cachedUid) {
+      profile.uid = cachedUid;
+      return cachedUid;
+    }
     return null;
   });
 };
