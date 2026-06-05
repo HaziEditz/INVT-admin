@@ -8965,6 +8965,7 @@ function zonesPage() {
   const js = `
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 <script>
 var znMap=null,znLayers={},znZones=[],znEditKey=null,znEditLayer=null,znDrawGroup=null;
 var ZN_COLORS=['#0d9488','#2563eb','#7c3aed','#dc2626','#d97706','#0891b2','#16a34a','#9333ea'];
@@ -8989,6 +8990,51 @@ function znInitMap(){
   window.addEventListener('resize',function(){
     if(znMap) znMap.invalidateSize();
   });
+}
+
+function znCenterFromBoundary(boundary){
+  if(!boundary||!boundary.length) return null;
+  var lats=boundary.map(function(p){return p[0];});
+  var lngs=boundary.map(function(p){return p[1];});
+  return {lat:(Math.min.apply(null,lats)+Math.max.apply(null,lats))/2,lng:(Math.min.apply(null,lngs)+Math.max.apply(null,lngs))/2};
+}
+
+function znRingFromGeoJsonPolygon(coords){
+  if(!coords||!coords[0]) return [];
+  return coords[0].map(function(c){return [c[1],c[0]];});
+}
+
+function znParseClipBbox(raw){
+  if(!raw||raw.length<4) return [-46.63,-46.19,167.99,168.55];
+  return [parseFloat(raw[0]),parseFloat(raw[1]),parseFloat(raw[2]),parseFloat(raw[3])];
+}
+
+function znApplyVoronoiBoundaries(suburbs,clipBbox){
+  if(typeof turf==='undefined'){
+    console.warn('[zones] Turf.js not loaded — keeping rectangle boundaries');
+    return suburbs;
+  }
+  if(!suburbs||suburbs.length<2) return suburbs;
+  var bb=znParseClipBbox(clipBbox);
+  var south=bb[0],north=bb[1],west=bb[2],east=bb[3];
+  var turfBbox=[west,south,east,north];
+  var points=[];
+  suburbs.forEach(function(s,i){
+    var c=s.center||znCenterFromBoundary(s.boundary);
+    if(!c||!Number.isFinite(c.lat)||!Number.isFinite(c.lng)) return;
+    points.push(turf.point([c.lng,c.lat],{idx:i,name:s.name}));
+  });
+  if(points.length<2) return suburbs;
+  var voronoi=turf.voronoi(turf.featureCollection(points),{bbox:turfBbox});
+  var out=suburbs.map(function(s){return Object.assign({},s);});
+  (voronoi.features||[]).forEach(function(f){
+    var idx=f.properties&&f.properties.idx;
+    if(idx==null||!out[idx]||!f.geometry||!f.geometry.coordinates) return;
+    var ring=znRingFromGeoJsonPolygon(f.geometry.coordinates);
+    if(ring.length>=4) out[idx].boundary=ring;
+  });
+  console.log('[zones] Applied Voronoi tessellation to '+out.length+' zones');
+  return out;
 }
 
 function znFetchSuburbsApi(city){
@@ -9076,12 +9122,15 @@ function znLoadSuburbs(){
   znFetchSuburbsApi(city).then(function(data){
     var suburbs=data.suburbs||[];
     if(!suburbs.length) throw new Error('No suburb boundaries found for '+city);
+    var clipBbox=data.clipBbox||data.place&&data.place.boundingbox;
+    suburbs=znApplyVoronoiBoundaries(suburbs,clipBbox);
     znZones=suburbs.map(function(s,i){
       return {
         key:'zone_'+(i+1),
-        zoneNumber:i+1,
+        zoneNumber:s.zoneNumber||(i+1),
         name:s.name,
         boundary:s.boundary,
+        center:s.center,
         active:true,
         osmId:s.osmId,
         companyId:window.COMPANY_ID||''
@@ -9089,8 +9138,8 @@ function znLoadSuburbs(){
     });
     znRenderList();
     znRedrawAll();
-    document.getElementById('zn-status').textContent=suburbs.length+' suburbs loaded for '+city;
-    znAlert('Loaded '+suburbs.length+' suburb zones. Toggle OFF any you do not need.','ok');
+    document.getElementById('zn-status').textContent=znZones.length+' Voronoi zones for '+city;
+    znAlert('Loaded '+znZones.length+' touching suburb zones (Voronoi). Toggle OFF any you do not need.','ok');
   }).catch(function(e){
     znAlert(e.message||'Failed to load suburbs','err');
     document.getElementById('zn-status').textContent='Load failed';
@@ -19215,6 +19264,9 @@ const INVERCARGILL_SUBURBS = [
   'Appleby', 'Rockdale', 'Rosedale', 'Clifton', 'Richmond', 'Kennington', 'Myross Bush',
 ];
 
+// Nominatim bbox order: [south, north, west, east]
+const INVERCARGILL_CLIP_BBOX = [-46.63, -46.19, 167.99, 168.55];
+
 function suburbsLogResponse(label, url, res, bodyText) {
   const headers = {};
   res.headers.forEach((v, k) => { headers[k] = v; });
@@ -19326,15 +19378,18 @@ async function fetchSuburbZone(suburbName, city) {
     return null;
   }
   const item = results[0];
-  const boundary = suburbsBoundaryFromNominatimResult(item);
-  if (boundary.length < 4) {
-    console.warn('[suburbs-proxy] No boundary for "' + suburbName + '"');
+  const lat = parseFloat(item.lat);
+  const lon = parseFloat(item.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    console.warn('[suburbs-proxy] No center point for "' + suburbName + '"');
     return null;
   }
+  const boundary = suburbsBoundaryFromNominatimResult(item);
   return {
     osmId: item.osm_id || item.place_id || null,
     name: suburbName,
-    boundary,
+    center: { lat, lon },
+    boundary: boundary.length >= 4 ? boundary : suburbsCircleAroundPoint(lat, lon),
   };
 }
 
@@ -19403,14 +19458,17 @@ async function loadSuburbsForCity(city) {
     ? [Math.min(...allLats), Math.max(...allLats), Math.min(...allLngs), Math.max(...allLngs)]
     : null;
 
+  const clipBbox = placeBbox || INVERCARGILL_CLIP_BBOX;
+
   return {
     city: trimmed,
     place: {
       name: nominatimCity,
       lat: placeLat,
       lon: placeLon,
-      boundingbox: placeBbox,
+      boundingbox: clipBbox,
     },
+    clipBbox,
     suburbs,
     geojson: suburbsToGeoJSON(suburbs),
     count: suburbs.length,
