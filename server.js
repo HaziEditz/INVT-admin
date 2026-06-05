@@ -19346,8 +19346,9 @@ function buildOverpassAreaQuery(areaName) {
     '[out:json][timeout:90];\n' +
     'area["name"="' + safeName + '"]["boundary"="administrative"]->.searchArea;\n' +
     '(\n' +
-    '  relation["boundary"="administrative"]["admin_level"~"9|10"](area.searchArea);\n' +
-    '  way["boundary"="administrative"]["admin_level"~"9|10"](area.searchArea);\n' +
+    '  relation["boundary"="administrative"]["admin_level"="6"](area.searchArea);\n' +
+    '  way["place"~"suburb|locality|neighbourhood"](area.searchArea);\n' +
+    '  node["place"~"suburb|locality|neighbourhood"](area.searchArea);\n' +
     ');\n' +
     'out geom;'
   );
@@ -19381,18 +19382,75 @@ async function fetchOverpassSuburbs(city, place) {
     }
   }
 
-  throw lastErr || new Error('No suburb boundaries found in Overpass for ' + city);
+  if (lastErr) {
+    console.warn('[suburbs-proxy] Overpass exhausted all area names, last error: ' + (lastErr.message || lastErr));
+  }
+  return [];
+}
+
+function suburbsRingFromGeoJSON(geojson) {
+  if (!geojson) return [];
+  if (geojson.type === 'Polygon' && geojson.coordinates && geojson.coordinates[0]) {
+    const ring = geojson.coordinates[0].map(([lng, lat]) => [lat, lng]);
+    return ring.length >= 4 ? ring : [];
+  }
+  if (geojson.type === 'MultiPolygon' && geojson.coordinates) {
+    let best = [];
+    geojson.coordinates.forEach((poly) => {
+      if (!poly || !poly[0]) return;
+      const ring = poly[0].map(([lng, lat]) => [lat, lng]);
+      if (ring.length > best.length) best = ring;
+    });
+    return best.length >= 4 ? best : [];
+  }
+  return [];
+}
+
+async function fetchNominatimSuburbs(city) {
+  const url =
+    'https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=50&countrycodes=nz&q=' +
+    encodeURIComponent('suburb ' + city + ' New Zealand');
+  console.log('[suburbs-proxy] Nominatim suburb fallback — city="' + city + '"');
+  const results = await suburbsFetchJson('nominatim-suburbs', url);
+  if (!results || !results.length) return [];
+
+  const seen = {};
+  const out = [];
+  results.forEach((item) => {
+    const name = (item.name || String(item.display_name || '').split(',')[0] || '').trim();
+    const ring = suburbsRingFromGeoJSON(item.geojson);
+    if (ring.length < 4 || !name) return;
+    const key = String(item.osm_id || item.place_id || name);
+    if (seen[key]) return;
+    seen[key] = 1;
+    out.push({ osmId: item.osm_id || item.place_id, name, boundary: ring });
+  });
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  console.log('[suburbs-proxy] Nominatim suburb fallback found: ' + out.length);
+  return out;
 }
 
 async function loadSuburbsForCity(city) {
   console.log('[suburbs-proxy] loadSuburbsForCity — city="' + city + '"');
   const place = await fetchNominatimCity(city);
   console.log('[suburbs-proxy] Nominatim place found: ' + (place.display_name || place.name || city));
-  const elements = await fetchOverpassSuburbs(city, place);
-  console.log('[suburbs-proxy] Overpass elements: ' + elements.length);
-  const suburbs = suburbsDedupe(elements);
+
+  let suburbs = [];
+  try {
+    const elements = await fetchOverpassSuburbs(city, place);
+    console.log('[suburbs-proxy] Overpass elements: ' + elements.length);
+    suburbs = suburbsDedupe(elements);
+    console.log('[suburbs-proxy] Overpass deduped suburbs: ' + suburbs.length);
+  } catch (overpassErr) {
+    console.warn('[suburbs-proxy] Overpass failed, will try Nominatim suburb search: ' + overpassErr.message);
+  }
+
+  if (!suburbs.length) {
+    suburbs = await fetchNominatimSuburbs(city);
+  }
+
   if (!suburbs.length) throw new Error('No suburb boundaries found for ' + city);
-  console.log('[suburbs-proxy] Deduped suburbs: ' + suburbs.length);
+  console.log('[suburbs-proxy] Final suburb count: ' + suburbs.length);
   return {
     city: city.trim(),
     place: {
