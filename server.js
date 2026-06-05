@@ -2102,6 +2102,30 @@ function dashboardPage(companyId) {
   </div>
 </div>
 
+<!-- ── UPCOMING BOOKINGS (today's scheduled rides) ── -->
+<div class="uk-grid uk-margin-top" data-uk-grid-margin="" id="dash-upcoming-wrap" style="display:none">
+  <div class="uk-width-1-1">
+    <div class="md-card" style="border-left:4px solid #6D28D9">
+      <div class="md-card-toolbar">
+        <h3 class="md-card-toolbar-heading-text">
+          <i class="material-icons" style="vertical-align:middle;font-size:18px;margin-right:6px;color:#6D28D9">&#xE878;</i>
+          Upcoming Bookings Today
+          <small id="dash-upcoming-count" style="font-size:12px;color:#9e9e9e;font-weight:normal;margin-left:8px"></small>
+        </h3>
+        <div class="md-card-toolbar-actions">
+          <a href="Scheduled Rides.aspx" class="md-btn md-btn-small">View All</a>
+        </div>
+      </div>
+      <div class="md-card-content" style="padding:0;overflow-x:auto">
+        <table class="uk-table uk-table-striped" style="margin:0;font-size:13px">
+          <thead><tr><th>Time</th><th>Booking #</th><th>Pickup</th><th>Passenger</th><th>Payment</th></tr></thead>
+          <tbody id="dash-upcoming-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── STUCK JOBS ALERT PANEL (hidden when empty) ── -->
 <div id="stuck-jobs-panel" style="display:none;margin-bottom:18px">
   <div class="md-card" style="border-left:5px solid #D32F2F">
@@ -2825,6 +2849,67 @@ function startListeners() {
   _loadTodayStats();
   setInterval(_loadTodayStats, 60000); // refresh every minute
 
+  // ── Upcoming bookings widget (today's scheduled rides) ───────────────────
+  function _dashSrScheduledAt(job) {
+    return job.scheduledAt || job.ScheduledAt || job.scheduledFor || job.ScheduledFor
+      || job.scheduledTime || job.pickUpTime || job.bookingTime || null;
+  }
+  function _dashSrIsScheduled(job) {
+    var st = String(job.status || job.Status || job.BookingStatus || '').toLowerCase();
+    return st === 'scheduled' || st === 'prebook' || st === 'pre-book' || st.indexOf('schedul') !== -1;
+  }
+  function _loadUpcomingBookings() {
+    var cid = COMPANY_ID;
+    if (!cid) return;
+    window.adminRead('allbookings/' + cid).then(function(data) {
+      data = data || {};
+      var todayStr;
+      try {
+        todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: NZ_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+      } catch(e) { todayStr = new Date().toISOString().slice(0,10); }
+      var rows = [];
+      Object.keys(data).forEach(function(key) {
+        var job = data[key];
+        if (!job || typeof job !== 'object' || !_dashSrIsScheduled(job)) return;
+        var sched = _dashSrScheduledAt(job);
+        if (!sched) return;
+        var ms = typeof sched === 'number' ? (sched < 1e12 ? sched * 1000 : sched) : Date.parse(sched);
+        if (!ms || isNaN(ms)) return;
+        var dayKey;
+        try {
+          dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: NZ_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(ms));
+        } catch(e) { dayKey = new Date(ms).toISOString().slice(0,10); }
+        if (dayKey !== todayStr) return;
+        rows.push({
+          ms: ms,
+          bid: job.bookingId || job.BookingId || job.jobId || key,
+          pickup: job.pickup || job.pickupAddress || job.PickupAddress || '—',
+          pax: job.passengerName || job.PassengerName || job.phone || job.PhoneNo || '—',
+          pay: job.paymentMethod || job.PaymentMethod || job.paymentType || '—'
+        });
+      });
+      rows.sort(function(a,b){ return a.ms - b.ms; });
+      var wrap = document.getElementById('dash-upcoming-wrap');
+      var tbody = document.getElementById('dash-upcoming-tbody');
+      var cnt = document.getElementById('dash-upcoming-count');
+      if (!wrap || !tbody) return;
+      if (!rows.length) { wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      if (cnt) cnt.textContent = '(' + rows.length + ')';
+      tbody.innerHTML = rows.map(function(r) {
+        var timeStr;
+        try {
+          timeStr = new Intl.DateTimeFormat('en-NZ', { timeZone: NZ_TZ, hour:'2-digit', minute:'2-digit' }).format(new Date(r.ms));
+        } catch(e) { timeStr = '—'; }
+        return '<tr><td style="font-weight:600">' + timeStr + '</td><td style="font-family:monospace;color:#6D28D9">' + r.bid + '</td>'
+          + '<td style="max-width:280px;white-space:normal;font-size:12px">' + r.pickup + '</td>'
+          + '<td>' + r.pax + '</td><td style="font-size:12px">' + r.pay + '</td></tr>';
+      }).join('');
+    }).catch(function(){});
+  }
+  _loadUpcomingBookings();
+  setInterval(_loadUpcomingBookings, 120000);
+
   // ── All-Time Totals tile wall ───────────────────────────────────────────────
   // Each tile shows a single big number — no breakdown. Click → opens its report page.
   function _renderTile(id, num, label, href, sub) {
@@ -2921,9 +3006,9 @@ function startListeners() {
           totals.completed++;
           var bt = String(j.bookingType || j.jobType || j.JobType || 'taxi').toLowerCase();
           if (bt.indexOf('tm') !== -1 || bt.indexOf('mobility') !== -1) totals.tm++;
-          var src = String(j.source || j.bookingSource || j.via || '').toLowerCase();
+          var src = String(j.source || j.bookingSource || j.BookingSource || j.via || j.Via || '').toLowerCase();
           if (src.indexOf('passenger') !== -1 || src.indexOf('app') !== -1) totals.pasapp++;
-          if (src.indexOf('web') !== -1) totals.website++;
+          if (src.indexOf('web') !== -1 || src === 'website' || src.indexOf('website') !== -1) totals.website++;
           var pm = String(j.paymentType || j.PaymentMethod || j.payment || '').toLowerCase();
           if (pm.indexOf('card') !== -1 || pm.indexOf('stripe') !== -1) totals.cardpay++;
         });
@@ -3949,7 +4034,7 @@ function vehicleTypesPage() {
   <div class="uk-width-medium-2-3">
     <div class="md-card">
       <div class="md-card-toolbar">
-        <h3 class="md-card-toolbar-heading-text"><i class="material-icons fa fa-car" style="vertical-align:middle;font-size:18px;margin-right:6px"></i>Vehicle Types <small style="font-size:12px;color:#9e9e9e;font-weight:normal">&nbsp;— Firebase node: <code>vehicleTypes</code></small></h3>
+        <h3 class="md-card-toolbar-heading-text"><i class="material-icons fa fa-car" style="vertical-align:middle;font-size:18px;margin-right:6px"></i>Vehicle Types <small style="font-size:12px;color:#9e9e9e;font-weight:normal">&nbsp;— Firebase: <code>vehicleTypes/{companyId}</code></small></h3>
         <div class="md-card-toolbar-actions" id="vt-status" style="font-size:12px;color:#9e9e9e"></div>
       </div>
       <div class="md-card-content" style="padding:0;max-height:420px;overflow-y:auto">
@@ -4009,8 +4094,14 @@ window._fbOnLogin = function(user) {
   loadVehicleTypes();
 };
 
+function vtPath() {
+  var cid = window.COMPANY_ID || '';
+  return cid ? ('vehicleTypes/' + cid) : 'vehicleTypes';
+}
+
 function loadVehicleTypes() {
-  fbDB.ref('vehicleTypes').on('value', function(snap) {
+  if (!window.COMPANY_ID) { setTimeout(loadVehicleTypes, 300); return; }
+  fbDB.ref(vtPath()).on('value', function(snap) {
     vtData = snap.val() || {};
     renderVtTable();
   }, function(err) {
@@ -4057,9 +4148,10 @@ function saveVehicleType() {
     description: document.getElementById('vt-desc').value.trim(),
     capacity:    parseInt(document.getElementById('vt-capacity').value, 10) || 4,
     active:      document.getElementById('vt-active').checked,
+    companyId:   window.COMPANY_ID || '',
     updatedAt:   Date.now()
   };
-  window.adminWrite('vehicleTypes/' + key, 'PUT', data).then(function() {
+  window.adminWrite(vtPath() + '/' + key, 'PUT', data).then(function() {
     showVtAlert((editKey ? 'Updated' : 'Added') + ': ' + name, 'ok');
     resetVtForm();
   }).catch(function(e) {
@@ -4084,7 +4176,7 @@ function editVt(key) {
 
 function deleteVt(key, name) {
   if (!confirm('Delete vehicle type "' + name + '"? This cannot be undone.')) return;
-  window.adminWrite('vehicleTypes/' + key, 'DELETE', null).then(function() {
+  window.adminWrite(vtPath() + '/' + key, 'DELETE', null).then(function() {
     showVtAlert('Deleted: ' + name, 'ok');
   }).catch(function(e) { showVtAlert('Delete failed: ' + e.message, 'err'); });
 }
@@ -4868,22 +4960,28 @@ window._fbOnLogin = function(user) {
 };
 
 function loadCompanyAccount() {
-  // Company profile — reads from companyProfiles/{cid} (where registration data actually lives)
-  fbDB.ref('companyProfiles/' + COMPANY_ID).once('value').then(function(snap) {
-    var d = snap.val() || {};
+  // Company profile — primary: companySettings/{cid}; fallback: legacy companyProfiles/{cid}
+  Promise.all([
+    fbDB.ref('companySettings/' + COMPANY_ID).once('value'),
+    fbDB.ref('companyProfiles/' + COMPANY_ID).once('value')
+  ]).then(function(res) {
+    var d = Object.assign({}, res[1].val() || {}, res[0].val() || {});
     var set = function(id,v){ var el=document.getElementById(id); if(el && v) el.value=v; };
     set('cp-name',    d.name    || d.companyName);
     set('cp-trading', d.trading || d.tradingName);
-    set('cp-phone',   d.phone   || d.companyPhone);
-    set('cp-email',   d.email   || d.companyEmail);
+    set('cp-phone',   d.phone   || d.companyPhone || d.supportPhone);
+    set('cp-email',   d.email   || d.companyEmail || d.supportEmail);
     set('cp-address', d.address || d.city);
     set('cp-gst',     d.gst);
     set('cp-website', d.website);
   });
 
-  // Services — also from companyProfiles/{cid} (same node, loaded above via snap)
-  fbDB.ref('companyProfiles/' + COMPANY_ID + '/services').once('value').then(function(snap) {
-    var active = snap.val();
+  // Services — companySettings first, then legacy companyProfiles
+  Promise.all([
+    fbDB.ref('companySettings/' + COMPANY_ID + '/services').once('value'),
+    fbDB.ref('companyProfiles/' + COMPANY_ID + '/services').once('value')
+  ]).then(function(res) {
+    var active = res[0].val() != null ? res[0].val() : res[1].val();
     if (!Array.isArray(active)) active = [];
     _SVC_KEYS.forEach(function(k) {
       var el = document.getElementById('svc-' + k);
@@ -4924,9 +5022,11 @@ function saveCompanyProfile() {
     id:      COMPANY_ID,
     updatedAt: Date.now()
   };
-  // Save to companyProfiles/{cid} — where registration data lives and apps read from
-  window.adminWrite('companyProfiles/' + COMPANY_ID, 'PATCH', data).then(function() {
-    showCAlert('cp-alert', 'Company profile saved.', 'ok');
+  // Primary: companySettings/{cid} — read by Passenger App & Dispatch Console
+  window.adminWrite('companySettings/' + COMPANY_ID, 'PATCH', data).then(function() {
+    return window.adminWrite('companyProfiles/' + COMPANY_ID, 'PATCH', data).catch(function(){});
+  }).then(function() {
+    showCAlert('cp-alert', 'Company profile saved to companySettings.', 'ok');
   }).catch(function(e) {
     showCAlert('cp-alert', 'Save failed: ' + e.message, 'err');
   }).finally(function() {
@@ -4939,8 +5039,10 @@ function saveServices() {
   var btn = document.getElementById('svc-save-btn');
   btn.disabled = true; btn.textContent = 'Saving\u2026';
   var active = _SVC_KEYS.filter(function(k){ var el=document.getElementById('svc-'+k); return el&&el.checked; });
-  // Write to companyProfiles/{cid}/services (array)
-  window.adminWrite('companyProfiles/' + COMPANY_ID + '/services', 'PUT', active).then(function() {
+  Promise.all([
+    window.adminWrite('companySettings/' + COMPANY_ID + '/services', 'PUT', active),
+    window.adminWrite('companyProfiles/' + COMPANY_ID + '/services', 'PUT', active).catch(function(){})
+  ]).then(function() {
     showCAlert('svc-alert', 'Services saved: ' + (active.length ? active.join(', ') : 'none selected'), 'ok');
   }).catch(function(e) {
     showCAlert('svc-alert', 'Save failed: ' + e.message, 'err');
@@ -10123,6 +10225,53 @@ function tariffsPage() {
         </div>
       </div>
 
+      <!-- Time-Based Rates -->
+      <div class="sched-section">
+        <div style="font-size:11px;font-weight:700;color:#00897B;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">
+          <i class="material-icons" style="vertical-align:middle;font-size:14px;margin-right:3px">&#xE192;</i>
+          Time-Based Rates
+        </div>
+        <div class="field-group" style="margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:normal;text-transform:none;letter-spacing:0">
+            <input type="checkbox" id="t-night-en" onchange="tToggleTimeRates()"/> Night rate (default 22:00 – 06:00)
+          </label>
+        </div>
+        <div id="t-night-fields" style="display:none">
+          <div class="rate-grid">
+            <div class="field-group"><label>Night base ($)</label><input id="t-night-base" type="number" min="0" step="0.01"/></div>
+            <div class="field-group"><label>Night / km ($)</label><input id="t-night-perkm" type="number" min="0" step="0.01"/></div>
+            <div class="field-group"><label>Night waiting ($/min)</label><input id="t-night-waiting" type="number" min="0" step="0.01"/></div>
+            <div class="field-group"><label>Night min fare ($)</label><input id="t-night-minfare" type="number" min="0" step="0.01"/></div>
+            <div class="field-group"><label>Night starts</label><input id="t-night-start" type="time" value="22:00"/></div>
+            <div class="field-group"><label>Night ends</label><input id="t-night-end" type="time" value="06:00"/></div>
+          </div>
+        </div>
+        <div class="field-group" style="margin:10px 0 8px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:normal;text-transform:none;letter-spacing:0">
+            <input type="checkbox" id="t-weekend-en" onchange="tToggleTimeRates()"/> Weekend surcharge
+          </label>
+        </div>
+        <div id="t-weekend-fields" style="display:none;margin-bottom:8px">
+          <div class="field-group"><label>Weekend multiplier (e.g. 1.2 = +20%)</label><input id="t-weekend-mult" type="number" min="1" step="0.05" value="1.2"/></div>
+        </div>
+        <div class="field-group" style="margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:normal;text-transform:none;letter-spacing:0">
+            <input type="checkbox" id="t-holiday-en" onchange="tToggleTimeRates()"/> NZ public holiday rate
+          </label>
+        </div>
+        <div id="t-holiday-fields" style="display:none;margin-bottom:8px">
+          <div class="field-group"><label>Holiday multiplier</label><input id="t-holiday-mult" type="number" min="1" step="0.05" value="1.5"/></div>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:normal;text-transform:none;letter-spacing:0;margin-top:6px">
+            <input type="checkbox" id="t-nz-holidays" checked/> Use built-in NZ public holiday calendar
+          </label>
+        </div>
+        <div class="field-group">
+          <label>Special rate dates (YYYY-MM-DD, one per line)</label>
+          <textarea id="t-special-dates" rows="3" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box" placeholder="2026-12-31&#10;2026-01-01"></textarea>
+          <small style="color:#9e9e9e;font-size:11px">These dates use the holiday multiplier above</small>
+        </div>
+      </div>
+
       <div id="tmodal-err" style="display:none;background:#FFEBEE;color:#C62828;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:8px"></div>
     </div>
     <div class="tmodal-foot">
@@ -10134,6 +10283,10 @@ function tariffsPage() {
 
   const js = `<script>
 var allTariffs = {};
+var NZ_PUBLIC_HOLIDAYS = [
+  '2025-01-01','2025-01-02','2025-02-06','2025-04-18','2025-04-21','2025-04-25','2025-06-02','2025-10-27','2025-12-25','2025-12-26',
+  '2026-01-01','2026-01-02','2026-02-06','2026-04-03','2026-04-06','2026-04-25','2026-06-01','2026-10-26','2026-12-25','2026-12-28'
+];
 
 window._fbOnLogin = function(user) {
   document.getElementById('lblName').textContent = user.email || user.displayName || '';
@@ -10223,6 +10376,46 @@ function tToggleTime() {
   var allDay = document.getElementById('t-allday');
   document.getElementById('t-time-fields').style.display = (allDay && allDay.checked) ? 'none' : 'block';
 }
+function tToggleTimeRates() {
+  document.getElementById('t-night-fields').style.display = document.getElementById('t-night-en').checked ? 'block' : 'none';
+  document.getElementById('t-weekend-fields').style.display = document.getElementById('t-weekend-en').checked ? 'block' : 'none';
+  document.getElementById('t-holiday-fields').style.display = document.getElementById('t-holiday-en').checked ? 'block' : 'none';
+}
+function tLoadTimeRates(t) {
+  document.getElementById('t-night-en').checked = !!t.nightEnabled;
+  document.getElementById('t-night-base').value = t.nightBaseFare || '';
+  document.getElementById('t-night-perkm').value = t.nightPricePerKm || '';
+  document.getElementById('t-night-waiting').value = t.nightWaitingRate || '';
+  document.getElementById('t-night-minfare').value = t.nightMinimumFare || '';
+  document.getElementById('t-night-start').value = t.nightStart || '22:00';
+  document.getElementById('t-night-end').value = t.nightEnd || '06:00';
+  document.getElementById('t-weekend-en').checked = !!t.weekendEnabled;
+  document.getElementById('t-weekend-mult').value = t.weekendMultiplier || 1.2;
+  document.getElementById('t-holiday-en').checked = !!t.holidayEnabled;
+  document.getElementById('t-holiday-mult').value = t.holidayMultiplier || 1.5;
+  document.getElementById('t-nz-holidays').checked = t.useNzHolidays !== false;
+  document.getElementById('t-special-dates').value = (t.specialRateDates || []).join('\\n');
+  tToggleTimeRates();
+}
+function tReadTimeRates() {
+  var special = (document.getElementById('t-special-dates').value || '').split(/[\\n,]+/).map(function(s){return s.trim();}).filter(Boolean);
+  return {
+    nightEnabled: document.getElementById('t-night-en').checked,
+    nightBaseFare: parseFloat(document.getElementById('t-night-base').value) || 0,
+    nightPricePerKm: parseFloat(document.getElementById('t-night-perkm').value) || 0,
+    nightWaitingRate: parseFloat(document.getElementById('t-night-waiting').value) || 0,
+    nightMinimumFare: parseFloat(document.getElementById('t-night-minfare').value) || 0,
+    nightStart: document.getElementById('t-night-start').value || '22:00',
+    nightEnd: document.getElementById('t-night-end').value || '06:00',
+    weekendEnabled: document.getElementById('t-weekend-en').checked,
+    weekendMultiplier: parseFloat(document.getElementById('t-weekend-mult').value) || 1.2,
+    holidayEnabled: document.getElementById('t-holiday-en').checked,
+    holidayMultiplier: parseFloat(document.getElementById('t-holiday-mult').value) || 1.5,
+    useNzHolidays: document.getElementById('t-nz-holidays').checked,
+    nzPublicHolidays: document.getElementById('t-nz-holidays').checked ? NZ_PUBLIC_HOLIDAYS : [],
+    specialRateDates: special
+  };
+}
 
 function fmt(v) { return v !== undefined && v !== '' ? '$' + parseFloat(v).toFixed(2) : '—'; }
 
@@ -10247,7 +10440,7 @@ function renderTariffs() {
         '<br><span style="color:#9e9e9e;font-size:10px">→ waiting rate</span>' +
       '</td>' +
       '<td>' + fmt(t.minimumFare) + '</td>' +
-      '<td>' + schedSummary(t) + '</td>' +
+      '<td>' + schedSummary(t) + (t.nightEnabled||t.weekendEnabled||t.holidayEnabled ? '<br><span class="badge-sched" style="margin-top:3px">Time rates</span>' : '') + '</td>' +
       '<td>' + (active ? '<span class="badge-active">ACTIVE</span>' : '<span class="badge-inactive">INACTIVE</span>') + '</td>' +
       '<td>' +
         '<button class="md-btn md-btn-small" data-key="' + id + '" onclick="openTariffModal(this.dataset.key)" style="margin-right:4px;padding:4px 8px;font-size:11px"><i class="material-icons" style="font-size:13px;vertical-align:middle">&#xE3C9;</i></button>' +
@@ -10300,11 +10493,17 @@ function openTariffModal(id) {
         if (cb) cb.checked = savedDays.indexOf(d) !== -1;
       });
     }
+    tLoadTimeRates(t);
   } else {
     document.getElementById('tmodal-title').textContent = 'Add Tariff Zone';
     ['t-name','t-base','t-perkm','t-waiting','t-minfare','t-notes'].forEach(function(x){ document.getElementById(x).value=''; });
     document.getElementById('t-speedthreshold').value = 1;
     document.getElementById('t-waitinterval').value = 60;
+    document.getElementById('t-night-en').checked = false;
+    document.getElementById('t-weekend-en').checked = false;
+    document.getElementById('t-holiday-en').checked = false;
+    document.getElementById('t-special-dates').value = '';
+    tToggleTimeRates();
   }
   updateMeterSummary();
   document.getElementById('tariff-modal').classList.add('open');
@@ -10401,6 +10600,7 @@ function saveTariff() {
     days:      days,
     updatedAt: Date.now()
   };
+  Object.assign(tariff, tReadTimeRates());
 
   var key = editId || ('tariff_' + Date.now());
   // Add driver-app-friendly field alias
@@ -10555,7 +10755,7 @@ function vendorsPage() {
 
   const js = `
 <script>
-var vndData = {};
+var vndData = {}, _vndListenRef = null;
 
 window._fbOnLogin = function(user) {
   document.getElementById('lblName').textContent = user.email || user.displayName || '';
@@ -10564,7 +10764,8 @@ window._fbOnLogin = function(user) {
 };
 
 function loadVendors() {
-  adminListen('vendors', function(data) {
+  if (_vndListenRef) return;
+  _vndListenRef = adminListen('vendors', function(data) {
     vndData = data || {};
     renderVendorTable();
   });
@@ -11051,7 +11252,7 @@ function promosPage() {
         <h3 class="md-card-toolbar-heading-text">
           <i class="material-icons fa fa-gift" style="vertical-align:middle;font-size:18px;margin-right:6px"></i>
           Promo Codes
-          <small style="font-size:12px;color:#9e9e9e;font-weight:normal">&nbsp;— Firebase node: <code>promos</code></small>
+          <small style="font-size:12px;color:#9e9e9e;font-weight:normal">&nbsp;— Firebase: <code>promoCodes/{code}</code></small>
         </h3>
         <div class="md-card-toolbar-actions" style="display:flex;align-items:center;gap:10px">
           <span id="promo-count" style="font-size:12px;color:#9e9e9e">Loading…</span>
@@ -11172,7 +11373,7 @@ function promosPage() {
 
   const js = `
 <script>
-var promoData = {};
+var promoData = {}, _promoListenRef = null;
 
 window._fbOnLogin = function(user) {
   document.getElementById('lblName').textContent = user.email || user.displayName || '';
@@ -11190,7 +11391,8 @@ function setupDiscountTypeToggle() {
 }
 
 function loadPromos() {
-  adminListen('promos', function(data) {
+  if (_promoListenRef) return;
+  _promoListenRef = adminListen('promoCodes', function(data) {
     promoData = data || {};
     renderPromoTable();
   });
@@ -11199,7 +11401,7 @@ function loadPromos() {
 function refreshPromos() {
   document.getElementById('promo-tbody').innerHTML =
     '<tr><td colspan="7" style="text-align:center;padding:30px;color:#9e9e9e">Refreshing…</td></tr>';
-  adminRead('promos').then(function(data) {
+  adminRead('promoCodes').then(function(data) {
     promoData = data || {};
     renderPromoTable();
   }).catch(function(e) {
@@ -11282,9 +11484,16 @@ function savePromo() {
     expiryDate:    document.getElementById('promo-expiry').value || '',
     active:        document.getElementById('promo-active').checked,
     usedCount:     existing.usedCount || 0,
+    companyId:     window.COMPANY_ID || '',
     updatedAt:     Date.now()
   };
-  window.adminWrite('promos/' + key, 'PUT', data).then(function() {
+  if (type === 'percentage') {
+    data.discountPercent = val;
+    data.discount = val / 100;
+  } else {
+    data.discountAmount = val;
+  }
+  window.adminWrite('promoCodes/' + key, 'PUT', data).then(function() {
     showPromoAlert('promo-alert', (editKey ? 'Updated: ' : 'Created: ') + rawCode, 'ok');
     var discLabel = data.discountType === 'percentage' ? data.discountValue + '% off' : '$' + data.discountValue + ' off';
     var statusLabel = data.active ? 'ACTIVE' : 'INACTIVE';
@@ -11325,7 +11534,7 @@ function deletePromo(key) {
   var p = promoData[key] || {};
   var code = p.code || key;
   if (!confirm('Delete promo code "' + code + '"? Passengers will no longer be able to use it.')) return;
-  window.adminWrite('promos/' + key, 'DELETE', null).then(function() {
+  window.adminWrite('promoCodes/' + key, 'DELETE', null).then(function() {
     showPromoAlert('promo-alert-list', 'Deleted: ' + code, 'ok');
     if (document.getElementById('promo-edit-key').value === key) resetPromoForm();
   }).catch(function(e) {
@@ -12232,9 +12441,11 @@ function flattenJoback(data){
                 ||j.DriverCost||j.driverCost||j.price||j.Price||null;
       var fareNum=parseFloat(fareRaw)||0;
       var payMethod=ss(j.paymentMethod||j.PaymentMethod||j.payment||j.Payment||j.payType,'—');
-      var distRaw=j.distance||j.Distance||j.km||j.kilometres||j.kilometers||j.distanceKm||null;
+      var distRaw=j.distanceKm||j.DistanceKm||j.distance||j.Distance||j.km||j.kilometres||j.kilometers||j.totalDistance||j.meterDistance||null;
       var distStr=distRaw?(parseFloat(distRaw).toFixed(1)+' km'):'—';
-      var durRaw=j.durationLabel||j.DurationLabel||j.duration||j.Duration||j.durationMin||j.minutes||null;
+      var durRaw=j.durationMin||j.DurationMin||j.durationLabel||j.DurationLabel||j.duration||j.Duration||j.minutes||null;
+      if(!durRaw&&j.totalRideMs) durRaw=Math.round(parseFloat(j.totalRideMs)/60000);
+      if(!durRaw&&j.movingMs!=null&&j.waitingMs!=null) durRaw=Math.round((parseFloat(j.movingMs)+parseFloat(j.waitingMs))/60000);
       var durStr=durRaw?(parseFloat(durRaw).toFixed(0)+' min'):'—';
       var innerBid=j.bookingid||j.bookingId||j.BookingId||'';
       var displayBid=(innerBid&&innerBid!=='0'&&innerBid!=='')?innerBid:bookingId;
@@ -12840,6 +13051,7 @@ function loadReport(){
       return Promise.all([
         window.adminRead('joback',{limitToLast:500}).catch(function(){return null;}),
         window.adminRead('completedJobs/'+(window.COMPANY_ID||'')).catch(function(){return null;}),
+        window.adminRead('closedJobs/'+(window.COMPANY_ID||'')).catch(function(){return null;}),
         window.adminRead('allbookings/'+(window.COMPANY_ID||'')).catch(function(){return null;}),
         window.adminRead('pendingjobs/'+(window.COMPANY_ID||'')).catch(function(){return null;}),
         (_isFoodPage||_isFreightPage)?window.adminRead('foodOrders/'+(window.COMPANY_ID||'')).catch(function(){return null;}):Promise.resolve(null),
@@ -12857,8 +13069,8 @@ function loadReport(){
             if(drivers&&typeof drivers==='object') Object.assign(merged[bid],drivers);
           });
         });
-        // Second pass: pendingjobs/1216 and completedJobs/1216 (keyed by bookingId directly)
-        [results[1],results[3]].forEach(function(data){
+        // Second pass: completedJobs, closedJobs, pendingjobs (keyed by bookingId / push key)
+        [results[1],results[2],results[4]].forEach(function(data){
           if(!data||typeof data!=='object') return;
           Object.keys(data).forEach(function(bid){
             // These are {bookingId: {fields}} — wrap in a driver-keyed structure so flattenJoback handles them
@@ -12872,9 +13084,9 @@ function loadReport(){
         });
         // Third pass: allbookings/{cid} (highest priority — richest data)
         // Handles both flat {bookingId:{fields}} and nested {bookingId:{driverId:{fields}}}
-        if(results[2]&&typeof results[2]==='object'){
-          Object.keys(results[2]).forEach(function(bid){
-            var job=results[2][bid];
+        if(results[3]&&typeof results[3]==='object'){
+          Object.keys(results[3]).forEach(function(bid){
+            var job=results[3][bid];
             if(!job||typeof job!=='object') return;
             if(!merged[bid]) merged[bid]={};
             var vals=Object.values(job);
@@ -12897,7 +13109,7 @@ function loadReport(){
         }
         // Fourth pass: foodOrders/{cid} and freightOrders/{cid} — dispatched food/freight orders
         // Keyed by {bookingId} directly (flat). Tagged with bookingType so the filter below matches.
-        [[results[4],'food'],[results[5],'freight']].forEach(function(pair){
+        [[results[5],'food'],[results[6],'freight']].forEach(function(pair){
           var data=pair[0], type=pair[1];
           if(!data||typeof data!=='object') return;
           Object.keys(data).forEach(function(bid){
@@ -12960,6 +13172,13 @@ function loadReport(){
           flat=flat.filter(function(r){
             var pm=(r.paymentMethod||r.payMethod||'').toLowerCase().replace(/[_\\s-]/g,'');
             return pm==='account'||pm.indexOf('account')!==-1;
+          });
+        } else if(RTYPE==='totalmobility'){
+          flat=flat.filter(function(r){
+            var pm=(r.paymentMethod||r.payMethod||r.paymentType||'').toLowerCase().replace(/[_\\s-]/g,'');
+            var bt=(r.bookingType||r.serviceType||r.jobType||'').toLowerCase();
+            return pm==='totalmobility'||pm==='tm'||pm==='total_mobility'
+              ||bt.indexOf('tm')!==-1||bt.indexOf('mobility')!==-1;
           });
         }
         if(RTYPE==='carreports'){
@@ -13201,6 +13420,9 @@ function driverCompliancePage() {
     </div>
     <div class="rpt-toolbar-actions">
       <span id="comp-updated" class="rpt-toolbar-meta"></span>
+      <button class="rpt-btn rpt-btn-white" onclick="closeAllGhostShifts()" id="comp-close-ghosts" style="margin-right:8px">
+        <i class="material-icons">&#xE872;</i> Close All Ghost Shifts
+      </button>
       <button class="rpt-btn rpt-btn-white" onclick="loadCompliance()"><i class="material-icons">&#xE5D5;</i> Refresh</button>
     </div>
   </div>
@@ -13616,6 +13838,43 @@ function clearCompFilter(){
   document.getElementById('comp-to').value='';
   document.getElementById('comp-driver-sel').value='';
   applyCompFilter();
+}
+
+function closeAllGhostShifts(){
+  var cid=window.COMPANY_ID||'';
+  if(!cid){alert('Company ID not set.');return;}
+  if(!confirm('Close all unclosed shifts older than 18 hours? Drivers will need to start a fresh shift in the app.'))return;
+  var btn=document.getElementById('comp-close-ghosts');
+  if(btn){btn.disabled=true;btn.textContent='Closing…';}
+  var now=Date.now(), closed=0, promises=[];
+  window.adminRead('shiftLogs/'+cid).then(function(shiftData){
+    if(!shiftData||typeof shiftData!=='object') return Promise.resolve(0);
+    Object.keys(shiftData).forEach(function(driverId){
+      var shifts=shiftData[driverId];
+      if(!shifts||typeof shifts!=='object') return;
+      Object.keys(shifts).forEach(function(shiftId){
+        var s=shifts[shiftId];
+        if(!s||typeof s!=='object') return;
+        var st=parseTs(s.startTime||s.loginTime||s.start||s.shiftStartAt);
+        var en=parseTs(s.endTime||s.logoutTime||s.end||s.finishTime||s.shiftEndAt);
+        var isActive=(s.status==='active')||(!en&&st>0);
+        if(!isActive||!st||now-st<=STALE_MS) return;
+        var capEnd=st+STALE_MS;
+        promises.push(window.adminWrite('shiftLogs/'+cid+'/'+driverId+'/'+shiftId,'PATCH',{
+          endTime:capEnd,logoutTime:capEnd,shiftEndAt:capEnd,status:'closed',
+          closedBy:'admin',closedReason:'ghost_shift_cleanup',updatedAt:now
+        }).then(function(){closed++;}));
+      });
+    });
+    return Promise.all(promises).then(function(){return closed;});
+  }).then(function(n){
+    alert(n?('Closed '+n+' ghost shift(s).'):'No ghost shifts found.');
+    loadCompliance();
+  }).catch(function(e){
+    alert('Ghost shift cleanup failed: '+(e&&e.message||e));
+  }).finally(function(){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="material-icons">&#xE872;</i> Close All Ghost Shifts';}
+  });
 }
 
 loadCompliance();
@@ -14923,6 +15182,26 @@ function scheduledRidesPage() {
 var _srData = [];
 var _srFilter = 'all';
 
+function srPickScheduledAt(job) {
+  if (!job || typeof job !== 'object') return null;
+  return job.scheduledAt || job.ScheduledAt || job.scheduledFor || job.ScheduledFor
+    || job.scheduledTime || job.ScheduledTime || job.pickUpTime || job.PickUpTime
+    || job.bookingTime || job.BookingTime || null;
+}
+
+function srIsScheduledStatus(job) {
+  var st = String(job.status || job.Status || job.BookingStatus || job.bookingStatus || '').toLowerCase();
+  return st === 'scheduled' || st === 'prebook' || st === 'pre-book' || st === 'prebooked'
+    || st === 'advance' || st.indexOf('schedul') !== -1;
+}
+
+function srFmtPay(raw) {
+  if (!raw) return '—';
+  var s = String(raw).trim();
+  if (!s) return '—';
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
 function setFilter(f, btn) {
   _srFilter = f;
   document.querySelectorAll('.sr-filter-btn').forEach(function(b){ b.classList.remove('active'); });
@@ -14999,7 +15278,7 @@ function renderSrTable() {
     var pickup  = r.pickupAddress  || r.PickupAddress  || '—';
     var dropoff = r.dropoffAddress || r.DropoffAddress || '—';
     var pax     = r.passengerName  || r.PassengerName  || r.phone || r.PhoneNo || '—';
-    var pay     = (r.paymentMethod || r.PaymentMethod  || '').replace(/\\b\\w/g, function(c){ return c.toUpperCase(); }) || '—';
+    var pay     = srFmtPay(r.paymentMethod || r.PaymentMethod || r.paymentType || r.PaymentType);
     var vtype   = r.vehicleType    || r.VehicleType    || '—';
     html += '<tr>' +
       '<td><span style="font-family:monospace;font-size:12px;color:#6D28D9;font-weight:600" title="' + jid + '">' + short + '</span></td>' +
@@ -15027,9 +15306,9 @@ function loadScheduledRides() {
       Object.keys(data).forEach(function(key) {
         var job = data[key];
         if (!job || typeof job !== 'object') return;
-        var st = String(job.status || job.Status || '').toLowerCase();
-        if (st !== 'scheduled') return;
-        _srData.push(Object.assign({ _key: key }, job));
+        if (!srIsScheduledStatus(job)) return;
+        var schedAt = srPickScheduledAt(job);
+        _srData.push(Object.assign({ _key: key, scheduledAt: schedAt }, job));
       });
     }
     var today    = _srData.filter(function(r){ return srIsToday(r.scheduledAt); }).length;
@@ -16056,7 +16335,18 @@ function deleteAsgn(btn){ var k=btn.getAttribute('data-k');
 function resetAsgnForm(){document.getElementById('asgn-edit-key').value='';document.getElementById('asgn-driver').selectedIndex=0;document.getElementById('asgn-shift').selectedIndex=0;document.getElementById('asgn-date').value='';document.getElementById('asgn-note').value='';document.getElementById('asgn-form-title').textContent='Assign Shift';document.getElementById('asgn-cancel').style.display='none';}
 window._fbOnLogin=function(){
   if(!_asgnRefs.drivers)_asgnRefs.drivers=window.adminListen('drivers',function(d){
-    asgnDrivers={};if(d&&typeof d==='object')Object.entries(d).forEach(function(e){var k=e[0],v=e[1];if(/^\d+$/.test(k)||k.indexOf('@')>=0||!v)return;if(v.companyId&&v.companyId!==COMPANY_ID)return;if(!v.companyId&&!IS_SUPER_ADMIN)return;var nm=([v.firstName||v.first_name||'',v.lastName||v.last_name||v.surname||''].join(' ').trim())||v.name||v.email||k;asgnDrivers[k]=nm+(v.dispatcherId||v.id?(' ('+ss(v.dispatcherId||v.id,k)+')'):'');});
+    asgnDrivers={};var seen={};
+    if(d&&typeof d==='object')Object.entries(d).forEach(function(e){
+      var k=e[0],v=e[1];
+      if(/^\d+$/.test(k)||k.indexOf('@')>=0||!v)return;
+      if(v.companyId&&v.companyId!==COMPANY_ID)return;
+      if(!v.companyId&&!IS_SUPER_ADMIN)return;
+      var canon=String(v.dispatcherId||v.id||v.driverId||k);
+      if(seen[canon])return;
+      seen[canon]=true;
+      var nm=([v.firstName||v.first_name||'',v.lastName||v.last_name||v.surname||''].join(' ').trim())||v.name||v.email||k;
+      asgnDrivers[canon]=nm+' ('+canon+')';
+    });
     refreshAsgnDriverDrop();renderAsgn();
   });
   if(!_asgnRefs.shifts)_asgnRefs.shifts=window.adminListen('workingShifts',function(d){
@@ -16204,7 +16494,18 @@ function renderSched(){
 }
 window._fbOnLogin=function(){
   if(!_schedRefs.drivers)_schedRefs.drivers=window.adminListen('drivers',function(d){
-    schedDrivers={};if(d&&typeof d==='object')Object.entries(d).forEach(function(e){var k=e[0],v=e[1];if(/^\d+$/.test(k)||k.indexOf('@')>=0||!v)return;if(v.companyId&&v.companyId!==COMPANY_ID)return;if(!v.companyId&&!IS_SUPER_ADMIN)return;var nm=([v.firstName||v.first_name||'',v.lastName||v.last_name||v.surname||''].join(' ').trim())||v.name||v.email||k;schedDrivers[k]=nm;});
+    schedDrivers={};var seen={};
+    if(d&&typeof d==='object')Object.entries(d).forEach(function(e){
+      var k=e[0],v=e[1];
+      if(/^\d+$/.test(k)||k.indexOf('@')>=0||!v)return;
+      if(v.companyId&&v.companyId!==COMPANY_ID)return;
+      if(!v.companyId&&!IS_SUPER_ADMIN)return;
+      var canon=String(v.dispatcherId||v.id||v.driverId||k);
+      if(seen[canon])return;
+      seen[canon]=true;
+      var nm=([v.firstName||v.first_name||'',v.lastName||v.last_name||v.surname||''].join(' ').trim())||v.name||v.email||k;
+      schedDrivers[canon]=nm;
+    });
     renderSched();
   });
   if(!_schedRefs.shifts)_schedRefs.shifts=window.adminListen('workingShifts',function(d){
@@ -16494,8 +16795,8 @@ function buildRow(bid,did,j){
     pickup:     ss(j.pickup||j.Pickup||j.pickupAddress||j.PickupAddress||j.from||j.From||j.jobpickup,'—'),
     destination:ss(j.destination||j.Destination||j.dropAddress||j.DropAddress||j.dropoff||j.Dropoff||j.to||j.To||j.jobdropoff,'—'),
     fare:       ss(j.fare||j.Fare||j.FinalFare||j.finalFare||j.meterFare||j.fareAmount||j.RideCost||j.rideCost||j.totalFare||j.Amount||j.DriverCost,'—'),
-    distance:   ss(j.distance||j.Distance||j.km||j.distanceKm,'—'),
-    duration:   ss(j.duration||j.Duration||j.durationMin,'—'),
+    distance:   ss(j.distanceKm||j.DistanceKm||j.distance||j.Distance||j.km,'—'),
+    duration:   ss(j.durationMin||j.DurationMin||j.duration||j.Duration||j.totalRideMs?(Math.round(parseFloat(j.totalRideMs)/60000)+' min'):'','—'),
     payMethod:  ss(j.paymentMethod||j.PaymentMethod||j.payment||j.payType,'—'),
     jobstatus:        normStatus(ss(j.jobstatus||j.jobStatus||j.status,'—')),
     notes:            ss(j.discription||j.description||j.Description||j.notes,'—'),
@@ -16728,6 +17029,10 @@ function printRec(i){
 
 window._fbOnLogin=function(){
   var cid=window.COMPANY_ID||'';
+  setTimeout(function(){
+    initMap();
+    if(_rMap) _rMap.invalidateSize({animate:false});
+  }, 400);
   window.adminRead('drivers').then(function(d){
     if(!d||typeof d!=='object')return;
     Object.entries(d).forEach(function(e){
@@ -16739,12 +17044,13 @@ window._fbOnLogin=function(){
   }).catch(function(){});
   var badge=document.getElementById('rat-badge');
   if(badge)badge.textContent='Loading…';
-  /* joback is not company-scoped — only completedJobs and allbookings are */
   Promise.all([
     window.adminRead('completedJobs/'+cid).catch(function(){return null;}),
+    window.adminRead('closedJobs/'+cid).catch(function(){return null;}),
     window.adminRead('allbookings/'+cid).catch(function(){return null;})
   ]).then(function(r){
-    processAllData(null,r[0],r[1]);
+    var mergedClosed=Object.assign({},r[0]||{},r[1]||{});
+    processAllData(null,mergedClosed,r[2]);
   }).catch(function(e){
     if(badge)badge.textContent='Load error';
     var list=document.getElementById('rat-list');
