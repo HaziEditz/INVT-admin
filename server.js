@@ -8992,10 +8992,18 @@ function znInitMap(){
 }
 
 function znFetchSuburbsApi(city){
-  return fetch('/api/suburbs?city='+encodeURIComponent(city),{
+  var apiUrl='/api/suburbs?city='+encodeURIComponent(city);
+  console.log('[zones] Fetching suburbs via server proxy (not Nominatim direct): '+apiUrl);
+  return fetch(apiUrl,{
     headers:{Accept:'application/json'}
   }).then(function(r){
-    return r.json().then(function(data){
+    return r.text().then(function(text){
+      console.log('[zones] /api/suburbs status='+r.status+' content-type='+(r.headers.get('content-type')||''));
+      console.log('[zones] /api/suburbs body preview: '+text.slice(0,200));
+      var data;
+      try{ data=JSON.parse(text); }catch(e){
+        throw new Error('Server returned non-JSON. Restart Owner Panel server. Preview: '+text.slice(0,120));
+      }
       if(!r.ok) throw new Error(data.error||'Failed to load suburbs');
       return data;
     });
@@ -19201,7 +19209,22 @@ function executeJobCommand(cmd, cb){
 // ── SUBURBS PROXY (Nominatim + Overpass server-side) ─────────────────────────
 const SUBURBS_UA = 'BookaWaka-OwnerPanel/1.0 (zones@bookawaka.nz)';
 
-async function suburbsFetchJson(url, options = {}) {
+function suburbsLogResponse(label, url, res, bodyText) {
+  const headers = {};
+  res.headers.forEach((v, k) => { headers[k] = v; });
+  const preview = String(bodyText || '').slice(0, 200);
+  console.log('[suburbs-proxy] ── ' + label + ' ──');
+  console.log('[suburbs-proxy] URL: ' + url);
+  console.log('[suburbs-proxy] HTTP status: ' + res.status);
+  console.log('[suburbs-proxy] Response headers: ' + JSON.stringify(headers));
+  console.log('[suburbs-proxy] Body preview (200 chars): ' + preview);
+}
+
+async function suburbsFetchJson(label, url, options = {}) {
+  console.log('[suburbs-proxy] ' + label + ' — request URL: ' + url);
+  if (options.method === 'POST' && options.body) {
+    console.log('[suburbs-proxy] ' + label + ' — POST body preview: ' + String(options.body).slice(0, 200));
+  }
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -19211,15 +19234,23 @@ async function suburbsFetchJson(url, options = {}) {
       ...(options.headers || {}),
     },
   });
+  const bodyText = await res.text();
+  suburbsLogResponse(label, url, res, bodyText);
   const ct = (res.headers.get('content-type') || '').toLowerCase();
-  if (!ct.includes('json')) {
-    const text = await res.text();
-    const hint = text && text.charAt(0) === '<' ? ' (XML/HTML — expected JSON)' : '';
-    throw new Error('API returned non-JSON' + hint);
+  const trimmed = bodyText.trim();
+  const looksJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+  if (!ct.includes('json') && !looksJson) {
+    const hint = trimmed.charAt(0) === '<' ? ' (XML/HTML — expected JSON)' : '';
+    throw new Error(label + ' returned non-JSON (' + (ct || 'unknown') + ')' + hint);
   }
-  const data = await res.json();
+  let data;
+  try {
+    data = JSON.parse(bodyText);
+  } catch (parseErr) {
+    throw new Error(label + ' JSON parse failed: ' + parseErr.message);
+  }
   if (!res.ok) {
-    throw new Error((data && data.error) || 'HTTP ' + res.status);
+    throw new Error((data && data.error) || label + ' HTTP ' + res.status);
   }
   return data;
 }
@@ -19283,7 +19314,7 @@ async function fetchNominatimCity(city) {
   const url =
     'https://nominatim.openstreetmap.org/search?format=json&countrycodes=nz&limit=1&q=' +
     encodeURIComponent(city + ', New Zealand');
-  const res = await suburbsFetchJson(url);
+  const res = await suburbsFetchJson('nominatim', url);
   if (!res || !res.length) throw new Error('City not found in New Zealand');
   return res[0];
 }
@@ -19300,7 +19331,8 @@ async function fetchOverpassSuburbs(bb) {
     'relation["place"="suburb"](' + w + ',' + s + ',' + e + ',' + n + ');' +
     'way["place"="suburb"](' + w + ',' + s + ',' + e + ',' + n + ');' +
     ');out geom;';
-  const data = await suburbsFetchJson('https://overpass-api.de/api/interpreter', {
+  const overpassUrl = 'https://overpass-api.de/api/interpreter';
+  const data = await suburbsFetchJson('overpass', overpassUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'data=' + encodeURIComponent(q),
@@ -19309,10 +19341,14 @@ async function fetchOverpassSuburbs(bb) {
 }
 
 async function loadSuburbsForCity(city) {
+  console.log('[suburbs-proxy] loadSuburbsForCity — city="' + city + '"');
   const place = await fetchNominatimCity(city);
+  console.log('[suburbs-proxy] Nominatim place found: ' + (place.display_name || place.name || city));
   const elements = await fetchOverpassSuburbs(place.boundingbox);
+  console.log('[suburbs-proxy] Overpass elements: ' + elements.length);
   const suburbs = suburbsDedupe(elements);
   if (!suburbs.length) throw new Error('No suburb boundaries found for ' + city);
+  console.log('[suburbs-proxy] Deduped suburbs: ' + suburbs.length);
   return {
     city: city.trim(),
     place: {
@@ -19335,6 +19371,7 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/api/suburbs') {
     const qs = new URLSearchParams(req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '');
     const city = (qs.get('city') || '').trim();
+    console.log('[suburbs-proxy] /api/suburbs browser request — city="' + city + '"');
     if (!city) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'city query param required' }));
@@ -19342,6 +19379,7 @@ const server = http.createServer((req, res) => {
     }
     loadSuburbsForCity(city)
       .then((payload) => {
+        console.log('[suburbs-proxy] /api/suburbs success — city="' + city + '" suburbs=' + payload.count);
         res.writeHead(200, {
           'Content-Type': 'application/json',
           'Cache-Control': 'private, max-age=3600',
@@ -19349,6 +19387,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify(payload));
       })
       .catch((err) => {
+        console.error('[suburbs-proxy] /api/suburbs failed — city="' + city + '": ' + (err.message || err));
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message || 'Failed to load suburbs' }));
       });
