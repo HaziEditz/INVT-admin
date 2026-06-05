@@ -19255,8 +19255,35 @@ async function suburbsFetchJson(label, url, options = {}) {
   return data;
 }
 
+function suburbsCityBaseName(city) {
+  return String(city || '').trim().toLowerCase().replace(/\s+city$/i, '').trim();
+}
+
+function suburbsIsWholeCityName(name, city) {
+  const n = String(name || '').trim().toLowerCase();
+  const base = suburbsCityBaseName(city);
+  if (!n || !base) return false;
+  return n === base || n === base + ' city' || n === base + ' district';
+}
+
+function suburbsRingAroundPoint(lat, lon, delta = 0.007) {
+  return [
+    [lat - delta, lon - delta],
+    [lat - delta, lon + delta],
+    [lat + delta, lon + delta],
+    [lat + delta, lon - delta],
+    [lat - delta, lon - delta],
+  ];
+}
+
 function suburbsRingFromEl(el) {
   const ring = [];
+  if (el.type === 'node') {
+    const lat = el.lat != null ? el.lat : (el.geometry && el.geometry[0] && el.geometry[0].lat);
+    const lon = el.lon != null ? el.lon : (el.geometry && el.geometry[0] && el.geometry[0].lon);
+    if (lat != null && lon != null) return suburbsRingAroundPoint(lat, lon);
+    return [];
+  }
   if (el.type === 'way' && el.geometry) {
     el.geometry.forEach((g) => ring.push([g.lat, g.lon]));
   } else if (el.type === 'relation' && el.members) {
@@ -19274,14 +19301,15 @@ function suburbsRingFromEl(el) {
   return ring.length >= 4 ? ring : [];
 }
 
-function suburbsDedupe(elements) {
+function suburbsDedupe(elements, city) {
   const seen = {};
   const out = [];
   elements.forEach((el) => {
+    const name = (el.tags && (el.tags.name || el.tags['name:en'])) || '';
+    if (!name || suburbsIsWholeCityName(name, city)) return;
+    if (el.type === 'relation' && el.tags && el.tags.admin_level && Number(el.tags.admin_level) <= 8) return;
     const ring = suburbsRingFromEl(el);
     if (ring.length < 4) return;
-    const name = (el.tags && (el.tags.name || el.tags['name:en'])) || '';
-    if (!name) return;
     const key = String(el.id || name);
     if (seen[key]) return;
     seen[key] = 1;
@@ -19289,6 +19317,17 @@ function suburbsDedupe(elements) {
   });
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
+}
+
+function suburbsBboxFromPlace(place) {
+  const bb = place && place.boundingbox;
+  if (!bb || bb.length < 4) return null;
+  return {
+    south: parseFloat(bb[0]),
+    north: parseFloat(bb[1]),
+    west: parseFloat(bb[2]),
+    east: parseFloat(bb[3]),
+  };
 }
 
 function suburbsToGeoJSON(suburbs) {
@@ -19319,73 +19358,37 @@ async function fetchNominatimCity(city) {
   return res[0];
 }
 
-function suburbsEscapeOverpassValue(value) {
-  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-}
-
-function suburbsAreaNameCandidates(city, place) {
-  const names = [];
-  const add = (n) => {
-    const t = String(n || '').trim();
-    if (t && !names.includes(t)) names.push(t);
-  };
-  const raw = String(city || '').trim();
-  if (place) {
-    add(place.name);
-    if (place.display_name) add(place.display_name.split(',')[0].trim());
-  }
-  add(raw);
-  if (raw && !/\bcity\b/i.test(raw)) add(raw + ' City');
-  if (raw && !/\bdistrict\b/i.test(raw)) add(raw + ' District');
-  return names;
-}
-
-function buildOverpassAreaQuery(areaName) {
-  const safeName = suburbsEscapeOverpassValue(areaName);
+function buildOverpassBboxNodeQuery(bbox) {
+  const { south, west, north, east } = bbox;
   return (
     '[out:json][timeout:90];\n' +
-    'area["name"="' + safeName + '"]["boundary"="administrative"]->.searchArea;\n' +
-    '(\n' +
-    '  relation["boundary"="administrative"]["admin_level"="6"](area.searchArea);\n' +
-    '  way["place"~"suburb|locality|neighbourhood"](area.searchArea);\n' +
-    '  node["place"~"suburb|locality|neighbourhood"](area.searchArea);\n' +
-    ');\n' +
+    'node["place"~"suburb|locality|neighbourhood"](' + south + ',' + west + ',' + north + ',' + east + ');\n' +
     'out geom;'
   );
 }
 
-async function fetchOverpassSuburbs(city, place) {
-  const areaNames = suburbsAreaNameCandidates(city, place);
+async function overpassPostQuery(q) {
   const overpassUrl = 'https://overpass-api.de/api/interpreter';
-  let lastErr = null;
+  const postBody = 'data=' + encodeURIComponent(q);
+  const data = await suburbsFetchJson('overpass', overpassUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: postBody,
+  });
+  return (data && data.elements) || [];
+}
 
-  for (const areaName of areaNames) {
-    const q = buildOverpassAreaQuery(areaName);
-    const postBody = 'data=' + encodeURIComponent(q);
-    console.log('[suburbs-proxy] Overpass area query name="' + areaName + '"');
-    console.log('[suburbs-proxy] Overpass query text:\n' + q);
-    try {
-      const data = await suburbsFetchJson('overpass', overpassUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: postBody,
-      });
-      const elements = (data && data.elements) || [];
-      if (elements.length > 0) {
-        console.log('[suburbs-proxy] Overpass matched area="' + areaName + '" elements=' + elements.length);
-        return elements;
-      }
-      console.log('[suburbs-proxy] Overpass returned 0 elements for area="' + areaName + '"');
-    } catch (err) {
-      lastErr = err;
-      console.warn('[suburbs-proxy] Overpass error for area="' + areaName + '": ' + (err.message || err));
-    }
+async function fetchOverpassSuburbNodesInBbox(bbox) {
+  const q = buildOverpassBboxNodeQuery(bbox);
+  console.log('[suburbs-proxy] Overpass bbox node query:\n' + q);
+  try {
+    const elements = await overpassPostQuery(q);
+    console.log('[suburbs-proxy] Overpass bbox nodes found: ' + elements.length);
+    return elements;
+  } catch (err) {
+    console.warn('[suburbs-proxy] Overpass bbox node query failed: ' + (err.message || err));
+    return [];
   }
-
-  if (lastErr) {
-    console.warn('[suburbs-proxy] Overpass exhausted all area names, last error: ' + (lastErr.message || lastErr));
-  }
-  return [];
 }
 
 function suburbsRingFromGeoJSON(geojson) {
@@ -19406,27 +19409,87 @@ function suburbsRingFromGeoJSON(geojson) {
   return [];
 }
 
-async function fetchNominatimSuburbs(city) {
-  const url =
-    'https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=50&countrycodes=nz&q=' +
-    encodeURIComponent('suburb ' + city + ' New Zealand');
-  console.log('[suburbs-proxy] Nominatim suburb fallback — city="' + city + '"');
-  const results = await suburbsFetchJson('nominatim-suburbs', url);
-  if (!results || !results.length) return [];
+const SUBURB_PLACE_TYPES = new Set([
+  'suburb', 'neighbourhood', 'locality', 'quarter', 'hamlet', 'residential', 'village',
+]);
 
+function suburbsIsSuburbNominatimResult(item, city) {
+  const name = (item.name || String(item.display_name || '').split(',')[0] || '').trim();
+  if (!name || suburbsIsWholeCityName(name, city)) return false;
+  const type = String(item.type || '').toLowerCase();
+  const cls = String(item.class || '').toLowerCase();
+  if (cls === 'boundary' && (type === 'administrative' || type === 'city')) return false;
+  if (type === 'city' || type === 'town' || type === 'municipality') return false;
+  return SUBURB_PLACE_TYPES.has(type) || type === 'suburb';
+}
+
+function suburbsFromNominatimResults(results, city) {
   const seen = {};
   const out = [];
   results.forEach((item) => {
+    if (!suburbsIsSuburbNominatimResult(item, city)) return;
     const name = (item.name || String(item.display_name || '').split(',')[0] || '').trim();
-    const ring = suburbsRingFromGeoJSON(item.geojson);
-    if (ring.length < 4 || !name) return;
     const key = String(item.osm_id || item.place_id || name);
     if (seen[key]) return;
+    let ring = suburbsRingFromGeoJSON(item.geojson);
+    if (ring.length < 4) {
+      const lat = parseFloat(item.lat);
+      const lon = parseFloat(item.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      ring = suburbsRingAroundPoint(lat, lon);
+    }
     seen[key] = 1;
     out.push({ osmId: item.osm_id || item.place_id, name, boundary: ring });
   });
   out.sort((a, b) => a.name.localeCompare(b.name));
-  console.log('[suburbs-proxy] Nominatim suburb fallback found: ' + out.length);
+  return out;
+}
+
+async function fetchNominatimSettlements(city) {
+  const url =
+    'https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=50&countrycodes=nz&featuretype=settlement&q=' +
+    encodeURIComponent(city);
+  console.log('[suburbs-proxy] Nominatim settlement search — city="' + city + '"');
+  const results = await suburbsFetchJson('nominatim-settlements', url);
+  if (!results || !results.length) return [];
+  const out = suburbsFromNominatimResults(results, city);
+  console.log('[suburbs-proxy] Nominatim settlements (filtered suburbs): ' + out.length);
+  return out;
+}
+
+function suburbsSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchNominatimSuburbByName(name, city) {
+  const url =
+    'https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=1&countrycodes=nz&q=' +
+    encodeURIComponent(name + ' ' + city + ' New Zealand');
+  const results = await suburbsFetchJson('nominatim-suburb-' + name, url);
+  if (!results || !results.length) return null;
+  const item = results.find((r) => !suburbsIsWholeCityName(r.name || '', city)) || results[0];
+  const ring = suburbsRingFromGeoJSON(item.geojson);
+  if (ring.length >= 4) return ring;
+  const lat = parseFloat(item.lat);
+  const lon = parseFloat(item.lon);
+  if (Number.isFinite(lat) && Number.isFinite(lon)) return suburbsRingAroundPoint(lat, lon);
+  return null;
+}
+
+async function enrichSuburbsFromNominatim(suburbs, city) {
+  const out = [];
+  for (let i = 0; i < suburbs.length; i++) {
+    const s = suburbs[i];
+    try {
+      const ring = await fetchNominatimSuburbByName(s.name, city);
+      if (ring && ring.length >= 4) out.push({ ...s, boundary: ring });
+      else out.push(s);
+    } catch (err) {
+      console.warn('[suburbs-proxy] Nominatim lookup failed for "' + s.name + '": ' + (err.message || err));
+      out.push(s);
+    }
+    if (i < suburbs.length - 1) await suburbsSleep(1100);
+  }
   return out;
 }
 
@@ -19435,18 +19498,27 @@ async function loadSuburbsForCity(city) {
   const place = await fetchNominatimCity(city);
   console.log('[suburbs-proxy] Nominatim place found: ' + (place.display_name || place.name || city));
 
+  const bbox = suburbsBboxFromPlace(place);
+  if (bbox) {
+    console.log(
+      '[suburbs-proxy] City bbox: south=' + bbox.south + ' west=' + bbox.west +
+      ' north=' + bbox.north + ' east=' + bbox.east,
+    );
+  }
+
   let suburbs = [];
-  try {
-    const elements = await fetchOverpassSuburbs(city, place);
-    console.log('[suburbs-proxy] Overpass elements: ' + elements.length);
-    suburbs = suburbsDedupe(elements);
-    console.log('[suburbs-proxy] Overpass deduped suburbs: ' + suburbs.length);
-  } catch (overpassErr) {
-    console.warn('[suburbs-proxy] Overpass failed, will try Nominatim suburb search: ' + overpassErr.message);
+  if (bbox) {
+    const nodeElements = await fetchOverpassSuburbNodesInBbox(bbox);
+    suburbs = suburbsDedupe(nodeElements, city);
+    console.log('[suburbs-proxy] Overpass bbox suburb nodes: ' + suburbs.length);
+    if (suburbs.length > 0 && suburbs.length <= 40) {
+      console.log('[suburbs-proxy] Enriching suburb polygons via individual Nominatim lookups…');
+      suburbs = await enrichSuburbsFromNominatim(suburbs, city);
+    }
   }
 
   if (!suburbs.length) {
-    suburbs = await fetchNominatimSuburbs(city);
+    suburbs = await fetchNominatimSettlements(city);
   }
 
   if (!suburbs.length) throw new Error('No suburb boundaries found for ' + city);
