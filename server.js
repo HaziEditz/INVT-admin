@@ -19319,32 +19319,76 @@ async function fetchNominatimCity(city) {
   return res[0];
 }
 
-async function fetchOverpassSuburbs(bb) {
-  const s = parseFloat(bb[0]);
-  const n = parseFloat(bb[1]);
-  const w = parseFloat(bb[2]);
-  const e = parseFloat(bb[3]);
-  const q =
-    '[out:json][timeout:90];(' +
-    'relation["boundary"="administrative"]["admin_level"~"9|10"](' + w + ',' + s + ',' + e + ',' + n + ');' +
-    'way["boundary"="administrative"]["admin_level"~"9|10"](' + w + ',' + s + ',' + e + ',' + n + ');' +
-    'relation["place"="suburb"](' + w + ',' + s + ',' + e + ',' + n + ');' +
-    'way["place"="suburb"](' + w + ',' + s + ',' + e + ',' + n + ');' +
-    ');out geom;';
+function suburbsEscapeOverpassValue(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function suburbsAreaNameCandidates(city, place) {
+  const names = [];
+  const add = (n) => {
+    const t = String(n || '').trim();
+    if (t && !names.includes(t)) names.push(t);
+  };
+  const raw = String(city || '').trim();
+  if (place) {
+    add(place.name);
+    if (place.display_name) add(place.display_name.split(',')[0].trim());
+  }
+  add(raw);
+  if (raw && !/\bcity\b/i.test(raw)) add(raw + ' City');
+  if (raw && !/\bdistrict\b/i.test(raw)) add(raw + ' District');
+  return names;
+}
+
+function buildOverpassAreaQuery(areaName) {
+  const safeName = suburbsEscapeOverpassValue(areaName);
+  return (
+    '[out:json][timeout:90];\n' +
+    'area["name"="' + safeName + '"]["boundary"="administrative"]->.searchArea;\n' +
+    '(\n' +
+    '  relation["boundary"="administrative"]["admin_level"~"9|10"](area.searchArea);\n' +
+    '  way["boundary"="administrative"]["admin_level"~"9|10"](area.searchArea);\n' +
+    ');\n' +
+    'out geom;'
+  );
+}
+
+async function fetchOverpassSuburbs(city, place) {
+  const areaNames = suburbsAreaNameCandidates(city, place);
   const overpassUrl = 'https://overpass-api.de/api/interpreter';
-  const data = await suburbsFetchJson('overpass', overpassUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'data=' + encodeURIComponent(q),
-  });
-  return (data && data.elements) || [];
+  let lastErr = null;
+
+  for (const areaName of areaNames) {
+    const q = buildOverpassAreaQuery(areaName);
+    const postBody = 'data=' + encodeURIComponent(q);
+    console.log('[suburbs-proxy] Overpass area query name="' + areaName + '"');
+    console.log('[suburbs-proxy] Overpass query text:\n' + q);
+    try {
+      const data = await suburbsFetchJson('overpass', overpassUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: postBody,
+      });
+      const elements = (data && data.elements) || [];
+      if (elements.length > 0) {
+        console.log('[suburbs-proxy] Overpass matched area="' + areaName + '" elements=' + elements.length);
+        return elements;
+      }
+      console.log('[suburbs-proxy] Overpass returned 0 elements for area="' + areaName + '"');
+    } catch (err) {
+      lastErr = err;
+      console.warn('[suburbs-proxy] Overpass error for area="' + areaName + '": ' + (err.message || err));
+    }
+  }
+
+  throw lastErr || new Error('No suburb boundaries found in Overpass for ' + city);
 }
 
 async function loadSuburbsForCity(city) {
   console.log('[suburbs-proxy] loadSuburbsForCity — city="' + city + '"');
   const place = await fetchNominatimCity(city);
   console.log('[suburbs-proxy] Nominatim place found: ' + (place.display_name || place.name || city));
-  const elements = await fetchOverpassSuburbs(place.boundingbox);
+  const elements = await fetchOverpassSuburbs(city, place);
   console.log('[suburbs-proxy] Overpass elements: ' + elements.length);
   const suburbs = suburbsDedupe(elements);
   if (!suburbs.length) throw new Error('No suburb boundaries found for ' + city);
