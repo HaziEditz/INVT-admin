@@ -3926,105 +3926,9 @@ function showDAlert(id, msg, type) {
   return pageWrap(commonHead('Dispatch Settings', ''), body, commonScripts(js));
 }
 
-// ── SETTINGS: SERVICE AREA ───────────────────────────────────────────────────
+// ── SETTINGS: SERVICE AREA (unified zone editor) ───────────────────────────
 function serviceAreaPage() {
-  const body = `
-<div class="uk-grid" data-uk-grid-margin="">
-  <div class="uk-width-medium-3-4">
-    <div class="md-card">
-      <div class="md-card-toolbar">
-        <h3 class="md-card-toolbar-heading-text"><i class="material-icons" style="vertical-align:middle;font-size:18px;margin-right:6px">&#xE55B;</i>Service Zones <small style="font-size:12px;color:#9e9e9e;font-weight:normal">&nbsp;— Firebase node: <code>zones</code></small></h3>
-        <div class="md-card-toolbar-actions">
-          <a href="Define Zones.aspx" class="md-btn md-btn-primary">
-            <i class="material-icons" style="vertical-align:middle;font-size:15px;margin-right:4px">&#xE3C9;</i>Open Map Editor
-          </a>
-        </div>
-      </div>
-      <div class="md-card-content" style="padding:0;max-height:400px;overflow-y:auto">
-        <table class="uk-table uk-table-striped" style="margin:0">
-          <thead><tr><th>Zone Name</th><th>Type</th><th>Coordinates</th><th>Actions</th></tr></thead>
-          <tbody id="zones-tbody"><tr><td colspan="4" style="text-align:center;padding:20px;color:#9e9e9e">Loading…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  <div class="uk-width-medium-1-4">
-    <div class="md-card" style="margin-bottom:16px">
-      <div class="md-card-toolbar"><h3 class="md-card-toolbar-heading-text">Summary</h3></div>
-      <div class="md-card-content" style="padding:16px">
-        <div style="text-align:center;padding:16px 0">
-          <div style="font-size:42px;font-weight:700;color:#00695C" id="zone-count">—</div>
-          <div style="font-size:13px;color:#9e9e9e">Defined Zones</div>
-        </div>
-        <a href="Define Zones.aspx" class="md-btn md-btn-primary" style="width:100%;text-align:center;display:block">
-          <i class="material-icons" style="vertical-align:middle;font-size:15px;margin-right:4px">&#xE145;</i>Add New Zone
-        </a>
-      </div>
-    </div>
-    <div class="md-card">
-      <div class="md-card-toolbar"><h3 class="md-card-toolbar-heading-text">Linked Tariffs</h3></div>
-      <div class="md-card-content" style="padding:0;max-height:200px;overflow-y:auto">
-        <table class="uk-table uk-table-striped" style="margin:0;font-size:12px">
-          <thead><tr><th>Tariff Name</th><th>Base</th></tr></thead>
-          <tbody id="tariffs-tbody"><tr><td colspan="2" style="text-align:center;padding:12px;color:#9e9e9e">Loading…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>`;
-
-  const js = `
-<script>
-window._fbOnLogin = function(user) {
-  document.getElementById('lblName').textContent = user.email || user.displayName || '';
-  document.getElementById('header-user-email').textContent = user.email || '';
-  loadServiceArea();
-};
-
-function loadServiceArea() {
-  fbDB.ref('zones').once('value').then(function(snap) {
-    var data = snap.val() || {};
-    var entries = Object.entries(data);
-    document.getElementById('zone-count').textContent = entries.length;
-    var rows = entries.map(function(e) {
-      var id = e[0]; var z = e[1] || {};
-      var name = z.name || z.zoneName || id;
-      var type = z.type || z.zoneType || 'Polygon';
-      var coords = z.coordinates ? (Array.isArray(z.coordinates) ? z.coordinates.length + ' points' : 'Set') : '—';
-      return '<tr>' +
-        '<td><strong>' + name + '</strong></td>' +
-        '<td><span style="font-size:11px;background:#E0F2F1;color:#00695C;padding:2px 7px;border-radius:10px">' + type + '</span></td>' +
-        '<td style="font-size:11px;color:#9e9e9e">' + coords + '</td>' +
-        '<td><a href="Define Zones.aspx" class="md-btn md-btn-small" style="font-size:11px">Edit Map</a></td>' +
-        '</tr>';
-    }).join('');
-    document.getElementById('zones-tbody').innerHTML = rows ||
-      '<tr><td colspan="4" style="text-align:center;padding:16px;color:#9e9e9e">No zones defined yet. <a href="Define Zones.aspx">Open map editor</a> to draw zones.</td></tr>';
-  }).catch(function(e) {
-    document.getElementById('zones-tbody').innerHTML =
-      '<tr><td colspan="4" style="text-align:center;padding:16px;color:#F44336">Could not load zones: ' + e.message + '</td></tr>';
-  });
-
-  window.adminRead('tariffZones').then(function(data) {
-    data = data || {};
-    var rows = Object.values(data).filter(function(t) {
-      if (!t || typeof t !== 'object') return false;
-      if (t.companyId && t.companyId !== COMPANY_ID) return false;
-      if (!t.companyId && !IS_SUPER_ADMIN) return false;
-      return true;
-    }).map(function(t) {
-      return '<tr><td>' + (t.TariffName || t.zoneName || '?') + '</td><td>$' + (t.baseFare || 0) + '</td></tr>';
-    }).join('');
-    document.getElementById('tariffs-tbody').innerHTML = rows ||
-      '<tr><td colspan="2" style="text-align:center;padding:12px;color:#9e9e9e">No tariffs</td></tr>';
-  }).catch(function() {
-    document.getElementById('tariffs-tbody').innerHTML =
-      '<tr><td colspan="2" style="text-align:center;padding:12px;color:#9e9e9e">No tariffs</td></tr>';
-  });
-}
-</script>`;
-
-  return pageWrap(commonHead('Service Area', ''), body, commonScripts(js));
+  return zonesPage();
 }
 
 // ── SETTINGS: VEHICLE TYPES ──────────────────────────────────────────────────
@@ -8957,1263 +8861,350 @@ function deleteVehicle(id) {
 
 // ── ZONES PAGE ────────────────────────────────────────────────────────────────
 function zonesPage() {
-  const ZONE_COLORS = ['#EF5350','#E53935','#42A5F5','#00695C','#66BB6A','#2E7D32',
-    '#FFA726','#E65100','#AB47BC','#6A1B9A','#26C6DA','#00838F',
-    '#FF7043','#BF360C','#78909C','#37474F','#EC407A','#880E4F','#8D6E63','#4E342E'];
-
   const css = `
-/* ── Zones page ── */
-.zp-wrap{padding:16px 20px;}
-.zp-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap;}
-.zp-title{font-size:18px;font-weight:700;color:#212121;display:flex;align-items:center;gap:8px;}
-.zp-actions{display:flex;gap:8px;align-items:center;}
-
-/* Zone table */
-.zt-table{width:100%;border-collapse:collapse;font-size:13px;}
-.zt-table th{background:#F5F5F5;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;
-  color:#757575;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #E0E0E0;}
-.zt-table td{padding:10px 14px;border-bottom:1px solid #F0F0F0;vertical-align:middle;}
-.zt-table tr:hover td{background:#FAFAFA;}
-.zt-color-cell{display:flex;align-items:center;gap:8px;}
-.zt-swatch{width:22px;height:22px;border-radius:50%;border:2px solid rgba(0,0,0,.12);flex-shrink:0;}
-.zt-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;
-  background:#E0F2F1;color:#00695C;white-space:nowrap;}
-.zt-badge.no-map{background:#FFF8E1;color:#E65100;}
-.zt-act{display:flex;gap:4px;flex-wrap:nowrap;}
-.zt-act button{border:none;background:none;cursor:pointer;padding:4px 5px;border-radius:4px;
-  color:#757575;font-size:0;line-height:1;display:inline-flex;align-items:center;}
-.zt-act button i{font-size:18px;}
-.zt-act button:hover{background:#EEEEEE;}
-.zt-act button.del:hover{color:#D32F2F;background:#FFEBEE;}
-.zt-act button.draw-it:hover{color:#00897B;background:#E0F2F1;}
-.zt-empty{text-align:center;padding:48px;color:#9e9e9e;}
-.zt-empty i{font-size:48px;color:#E0E0E0;display:block;margin-bottom:12px;}
-
-/* Map section */
-.zmap-section{background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.1);overflow:hidden;margin-top:16px;}
-.zmap-toolbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #E0E0E0;flex-wrap:wrap;}
-.zmap-toolbar-title{font-size:13px;font-weight:700;color:#212121;}
-.drawing-hint{display:none;background:#E0F2F1;color:#00695C;padding:8px 16px;font-size:12px;
-  border-bottom:1px solid #B2DFDB;align-items:center;gap:8px;}
-.drawing-hint.active{display:flex;}
-#zones-map{height:440px;z-index:0;}
-/* Grid Zone Bar */
-.grid-zone-bar{display:flex;align-items:center;gap:8px;padding:8px 16px;background:#F5F5F5;
-  border-bottom:1px solid #E0E0E0;flex-wrap:wrap;}
-.grid-zone-bar-label{font-size:11px;font-weight:700;color:#616161;text-transform:uppercase;
-  letter-spacing:.4px;white-space:nowrap;}
-.grid-city-input{border:1.5px solid #CFD8DC;border-radius:4px;padding:5px 10px;font-size:13px;
-  color:#212121;outline:none;height:32px;background:#fff;flex:1;min-width:140px;max-width:220px;}
-.grid-city-input:focus{border-color:#00897B;}
-.grid-size-sel{border:1.5px solid #CFD8DC;border-radius:4px;padding:4px 8px;font-size:13px;
-  height:32px;background:#fff;color:#212121;cursor:pointer;outline:none;}
-.grid-size-sel:focus{border-color:#00897B;}
-.grid-btn{background:#00897B;color:#fff;border:none;border-radius:4px;padding:0 12px;
-  height:32px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;}
-.grid-btn:hover{background:#00695C;}
-.grid-btn .material-icons{font-size:15px;}
-.grid-btn-clear{background:#fff;color:#B71C1C;border:1.5px solid #FFCDD2;border-radius:4px;
-  padding:0 10px;height:32px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
-.grid-btn-clear:hover{background:#FFEBEE;}
-/* Grid label div-icons on map */
-.grid-cell-label{background:rgba(25,118,210,.85);color:#fff;font-size:11px;font-weight:700;
-  padding:2px 6px;border-radius:3px;white-space:nowrap;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.2);}
-.grid-cell-label.named{background:rgba(0,0,0,.65);}
-.grid-handle{border-radius:3px;box-shadow:0 1px 5px rgba(0,0,0,.4);border:2px solid #fff;}
-.grid-handle-corner{width:14px;height:14px;background:#00897B;}
-.grid-handle-center{width:18px;height:18px;background:#43A047;border-radius:50%;cursor:move;
-  display:flex;align-items:center;justify-content:center;}
-.grid-handle-center::after{content:'\\2725';color:#fff;font-size:11px;line-height:1;}
-
-/* Map location search */
-.map-search-wrap{position:relative;display:flex;align-items:center;flex:1;max-width:420px;min-width:180px;}
-.map-search-input{flex:1;border:1.5px solid #CFD8DC;border-right:none;border-radius:4px 0 0 4px;
-  padding:6px 10px;font-size:13px;color:#212121;outline:none;height:34px;background:#fff;}
-.map-search-input:focus{border-color:#00897B;}
-.map-search-btn{border:1.5px solid #00897B;border-left:none;border-radius:0 4px 4px 0;background:#00897B;
-  color:#fff;height:34px;padding:0 10px;cursor:pointer;display:flex;align-items:center;gap:3px;
-  font-size:12px;font-weight:600;white-space:nowrap;}
-.map-search-btn:hover{background:#00695C;}
-.map-search-btn .material-icons{font-size:16px;}
-.map-search-dropdown{position:absolute;top:36px;left:0;right:0;background:#fff;border:1.5px solid #CFD8DC;
-  border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;display:none;max-height:220px;overflow-y:auto;}
-.map-search-item{padding:8px 12px;font-size:12px;color:#212121;cursor:pointer;display:flex;align-items:flex-start;gap:6px;border-bottom:1px solid #F5F5F5;}
-.map-search-item:last-child{border-bottom:none;}
-.map-search-item:hover{background:#E0F2F1;}
-.map-search-item .msi-name{font-weight:600;color:#212121;}
-.map-search-item .msi-detail{color:#78909C;font-size:11px;margin-top:1px;}
-.map-search-no-result{padding:10px 12px;font-size:12px;color:#9e9e9e;text-align:center;}
-.map-search-loading{padding:10px 12px;font-size:12px;color:#00897B;text-align:center;}
-
-/* Modal */
-.zmodal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;align-items:center;justify-content:center;}
-.zmodal-bg.open{display:flex;}
-.zmodal{background:#fff;border-radius:8px;width:520px;max-width:95vw;box-shadow:0 10px 40px rgba(0,0,0,.3);max-height:92vh;overflow-y:auto;}
-.zmodal-head{background:#00897B;color:#fff;padding:14px 18px;border-radius:8px 8px 0 0;
-  display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:15px;}
-.zmodal-body{padding:20px 22px;}
-.zmodal-foot{padding:10px 22px 16px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #EEE;}
-.zfield{margin-bottom:16px;}
-.zfield label{display:block;font-size:11px;color:#616161;font-weight:700;text-transform:uppercase;
-  letter-spacing:.4px;margin-bottom:6px;}
-.zfield input{width:100%;padding:9px 11px;border:1px solid #DDD;border-radius:4px;font-size:13px;box-sizing:border-box;}
-.zfield input:focus,.zfield textarea:focus{outline:none;border-color:#00897B;}
-.zfield textarea{width:100%;padding:9px 11px;border:1px solid #DDD;border-radius:4px;font-size:13px;box-sizing:border-box;resize:vertical;min-height:60px;font-family:inherit;}
-.zmodal-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#00897B;border-bottom:1px solid #E0F2F1;padding-bottom:6px;margin:18px 0 14px;}
-.zrate-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-
-/* Color picker grid */
-.color-picker-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
-.cp-swatch{width:32px;height:32px;border-radius:50%;cursor:pointer;
-  border:3px solid transparent;transition:border-color .15s,transform .15s;flex-shrink:0;}
-.cp-swatch:hover{transform:scale(1.12);}
-.cp-swatch.selected{border-color:#212121;transform:scale(1.15);}
+.zn-wrap{display:flex;height:calc(100vh - 120px);min-height:560px;gap:0;background:#f8fafc}
+.zn-side{width:340px;min-width:300px;max-width:380px;background:#fff;border-right:1px solid #e2e8f0;display:flex;flex-direction:column}
+.zn-side-hdr{padding:16px 18px;border-bottom:1px solid #e2e8f0}
+.zn-title{font-size:18px;font-weight:800;color:#0f172a;margin:0 0 4px}
+.zn-sub{font-size:12px;color:#64748b;line-height:1.4}
+.zn-search{padding:14px 18px;border-bottom:1px solid #f1f5f9;display:flex;gap:8px}
+.zn-search input{flex:1;height:38px;border:1.5px solid #e2e8f0;border-radius:8px;padding:0 12px;font-size:14px}
+.zn-search button{height:38px;padding:0 14px;border:none;border-radius:8px;background:#00695C;color:#fff;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
+.zn-search button:disabled{opacity:.5;cursor:not-allowed}
+.zn-list{flex:1;overflow-y:auto;padding:8px 0}
+.zn-item{display:flex;align-items:flex-start;gap:10px;padding:10px 18px;border-bottom:1px solid #f8fafc;cursor:pointer}
+.zn-item:hover{background:#f8fafc}
+.zn-item.on{background:#ecfdf5}
+.zn-item input{margin-top:3px;accent-color:#00695C}
+.zn-item-body{flex:1;min-width:0}
+.zn-item-name{font-size:14px;font-weight:700;color:#0f172a}
+.zn-item-num{font-size:11px;color:#64748b;margin-top:2px}
+.zn-side-foot{padding:14px 18px;border-top:1px solid #e2e8f0;display:flex;gap:8px}
+.zn-btn{flex:1;height:40px;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer}
+.zn-btn-save{background:#00695C;color:#fff}
+.zn-btn-save:disabled{opacity:.5;cursor:not-allowed}
+.zn-map{flex:1;position:relative;min-width:0}
+#zn-map{position:absolute;inset:0;z-index:1}
+.zn-status{position:absolute;top:12px;left:12px;z-index:500;background:#fff;padding:8px 12px;border-radius:8px;font-size:12px;color:#334155;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.zn-alert{margin:10px 18px 0;padding:10px 12px;border-radius:8px;font-size:12px;display:none}
+.zn-alert.show{display:block}
+.zn-alert.ok{background:#ecfdf5;color:#166534;border:1px solid #86efac}
+.zn-alert.err{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+.zn-empty{padding:24px 18px;text-align:center;color:#94a3b8;font-size:13px;line-height:1.5}
+.zn-ov{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;align-items:center;justify-content:center;padding:20px}
+.zn-ov.show{display:flex}
+.zn-modal{background:#fff;border-radius:14px;padding:22px;width:420px;max-width:100%;box-shadow:0 20px 50px rgba(0,0,0,.18)}
+.zn-modal h3{margin:0 0 14px;font-size:16px;font-weight:800;color:#0f172a}
+.zn-fld{margin-bottom:12px}
+.zn-fld label{display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:5px}
+.zn-fld input{width:100%;height:38px;border:1.5px solid #e2e8f0;border-radius:8px;padding:0 12px;font-size:14px;box-sizing:border-box}
+.zn-mact{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+.zn-mbtn{padding:8px 14px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;font-weight:600;font-size:13px}
+.zn-mbtn.primary{background:#00695C;color:#fff;border-color:#00695C}
 `;
 
   const body = `
-<div class="page-content">
-  <div class="zp-wrap">
-    <!-- Header -->
-    <div class="zp-header">
-      <div class="zp-title">
-        <i class="material-icons" style="color:#00897B;font-size:24px">&#xE55B;</i>
-        Dispatch Zones
-        <span id="zone-count-badge" style="background:#00897B;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:700"></span>
-      </div>
-      <div class="zp-actions">
-        <button type="button" class="md-btn" id="draw-btn" onclick="startDrawNew()" style="background:#388E3C;color:#fff;border-color:#388E3C">
-          <i class="material-icons" style="vertical-align:middle;font-size:15px;margin-right:4px">&#xE254;</i>Draw New Zone
-        </button>
-        <button type="button" class="md-btn md-btn-primary" onclick="openSuburbPicker()">
-          <i class="material-icons" style="vertical-align:middle;font-size:15px;margin-right:4px">&#xE145;</i>Add Zone
-        </button>
-      </div>
+<div class="zn-wrap">
+  <aside class="zn-side">
+    <div class="zn-side-hdr">
+      <h2 class="zn-title">Service Zones</h2>
+      <p class="zn-sub">Load suburb boundaries from OpenStreetMap, toggle zones ON/OFF, then save to Firebase <code>zones/{companyId}</code>.</p>
     </div>
-
-    <!-- Zone Table -->
-    <div style="background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.1);overflow:hidden;">
-      <div id="zt-loading" style="text-align:center;padding:40px;color:#9e9e9e">
-        <i class="material-icons" style="font-size:36px;display:block;margin-bottom:8px;color:#e0e0e0">&#xE55B;</i>
-        Loading zones…
-      </div>
-      <div id="zt-wrap" style="display:none;overflow-x:auto;">
-        <table class="zt-table">
-          <thead>
-            <tr>
-              <th style="width:40px">#</th>
-              <th>Zone Name</th>
-              <th>Zone Colour</th>
-              <th>Boundary</th>
-              <th style="width:160px">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="zt-tbody"></tbody>
-        </table>
-      </div>
-      <div id="zt-empty" style="display:none;" class="zt-empty">
-        <i class="material-icons">&#xE55B;</i>
-        No zones defined yet.<br>Click <strong>Add Zone</strong> to activate Invercargill suburbs from the map.
-      </div>
+    <div class="zn-search">
+      <input id="zn-city" placeholder="City name e.g. Invercargill" autocomplete="off" />
+      <button id="zn-load-btn" onclick="znLoadSuburbs()">Load Suburbs</button>
     </div>
-
-    <!-- Map section -->
-    <div class="zmap-section">
-      <div class="zmap-toolbar">
-        <span class="zmap-toolbar-title">
-          <i class="material-icons" style="vertical-align:middle;font-size:17px;color:#00897B">&#xE894;</i>
-          Zone Map
-        </span>
-
-        <!-- Location Search -->
-        <div class="map-search-wrap" id="map-search-wrap">
-          <input class="map-search-input" id="map-search-input" type="text"
-            placeholder="Search city, area, country..."
-            oninput="onMapSearchInput()"
-            onkeydown="onMapSearchKey(event)"
-            autocomplete="off"/>
-          <button type="button" class="map-search-btn" onclick="triggerMapSearch()">
-            <i class="material-icons">&#xE8B6;</i> Go
-          </button>
-          <div class="map-search-dropdown" id="map-search-dropdown"></div>
-        </div>
-
-        <span id="map-status" style="font-size:12px;color:#9e9e9e"></span>
-        <button type="button" class="md-btn" id="cancel-draw-btn" onclick="cancelDraw()" style="display:none;background:#B71C1C;color:#fff;border-color:#B71C1C">
-          Cancel Drawing
-        </button>
-      </div>
-      <div class="drawing-hint" id="drawing-hint">
-        <i class="material-icons" style="font-size:16px">&#xE88F;</i>
-        Click points on the map to draw the zone boundary — click the first point to close and save.
-      </div>
-
-      <!-- Grid Zone Bar -->
-      <div class="grid-zone-bar" id="grid-zone-bar">
-        <span class="grid-zone-bar-label">
-          <i class="material-icons" style="font-size:14px;vertical-align:middle;margin-right:2px">&#xE1B3;</i>Grid Zones
-        </span>
-        <input class="grid-city-input" id="grid-city" type="text"
-          placeholder="City or area (e.g. Wellington)"
-          onkeydown="if(event.key==='Enter')drawCityGrid()"
-          autocomplete="off"/>
-        <select class="grid-size-sel" id="grid-size">
-          <option value="2x2">2×2 — 4 boxes</option>
-          <option value="2x3">2×3 — 6 boxes</option>
-          <option value="3x2">3×2 — 6 boxes</option>
-          <option value="3x3">3×3 — 9 boxes</option>
-          <option value="3x4" selected>3×4 — 12 boxes</option>
-          <option value="4x3">4×3 — 12 boxes</option>
-          <option value="4x4">4×4 — 16 boxes</option>
-        </select>
-        <button type="button" class="grid-btn" onclick="drawCityGrid()">
-          <i class="material-icons">&#xE1B3;</i>Draw Grid
-        </button>
-        <button type="button" class="grid-btn-clear" onclick="clearGrid()" id="grid-clear-btn" style="display:none">
-          Clear Grid
-        </button>
-        <span id="grid-status" style="font-size:11px;color:#9e9e9e"></span>
-      </div>
-
-      <div id="zones-map"></div>
+    <div id="zn-alert" class="zn-alert"></div>
+    <div id="zn-list" class="zn-list"><div class="zn-empty">Enter a New Zealand city and click <strong>Load Suburbs</strong>.</div></div>
+    <div class="zn-side-foot">
+      <button class="zn-btn zn-btn-save" id="zn-save-btn" onclick="znSave()" disabled>Save Active Zones</button>
     </div>
+  </aside>
+  <div class="zn-map">
+    <div id="zn-status" class="zn-status">New Zealand · OpenStreetMap</div>
+    <div id="zn-map"></div>
   </div>
 </div>
-
-<!-- Suburb Zone Picker (Invercargill OSM) -->
-<div class="zmodal-bg" id="suburb-modal">
-  <div class="zmodal" style="width:920px;max-width:96vw">
-    <div class="zmodal-head" style="background:#1565C0">
-      <span>Invercargill Suburbs — Select Zones to Activate</span>
-      <button type="button" onclick="closeSuburbPicker()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">&times;</button>
-    </div>
-    <div style="padding:10px 16px;background:#E3F2FD;font-size:12px;color:#1565C0;border-bottom:1px solid #BBDEFB">
-      Suburb boundaries load automatically from OpenStreetMap. Tick the suburbs you want active — no manual drawing required.
-    </div>
-    <div style="display:flex;height:460px;min-height:360px">
-      <div id="suburb-list" style="width:300px;min-width:260px;overflow-y:auto;border-right:1px solid #E0E0E0;padding:10px;background:#FAFAFA">
-        <div style="text-align:center;padding:30px 12px;color:#9e9e9e;font-size:12px">Loading suburbs…</div>
-      </div>
-      <div id="suburb-map" style="flex:1;min-height:360px;background:#ECEFF1"></div>
-    </div>
-    <div class="zmodal-foot">
-      <span id="suburb-count-lbl" style="margin-right:auto;font-size:12px;color:#616161"></span>
-      <button type="button" class="md-btn md-btn-flat" onclick="closeSuburbPicker()">Cancel</button>
-      <button type="button" class="md-btn md-btn-primary" id="suburb-activate-btn" onclick="activateSelectedSuburbs()">Activate Selected</button>
-    </div>
-  </div>
-</div>
-
-<!-- Add / Edit Zone Modal -->
-<div class="zmodal-bg" id="zone-modal">
-  <div class="zmodal">
-    <div class="zmodal-head" id="zmodal-head">
-      <span id="zmodal-title">Add Zone</span>
-      <button type="button" onclick="closeZoneModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">&times;</button>
-    </div>
-    <div class="zmodal-body">
-      <input type="hidden" id="z-edit-key"/>
-
-      <!-- Zone Identity -->
-      <div class="zmodal-section-title">Zone Details</div>
-      <div class="zfield">
-        <label>Zone Name *</label>
-        <input id="z-name" type="text" placeholder="e.g. City Centre, Airport, Suburbs"/>
-      </div>
-      <div class="zfield">
-        <label>Notes / Description <span style="font-size:10px;font-weight:400;text-transform:none;color:#9e9e9e">(optional)</span></label>
-        <textarea id="z-notes" placeholder="Internal notes about this zone..."></textarea>
-      </div>
-
-      <!-- Zone Colour -->
-      <div class="zmodal-section-title">Zone Colour</div>
-      <div class="zfield">
-        <div class="color-picker-grid" id="color-picker-grid"></div>
-        <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
-          <div id="picked-preview" style="width:28px;height:28px;border-radius:50%;border:2px solid #ccc"></div>
-          <span id="picked-hex" style="font-size:12px;color:#616161;font-family:monospace"></span>
-          <span style="font-size:11px;color:#9e9e9e">or</span>
-          <input type="color" id="z-color-custom" style="width:36px;height:28px;padding:0;border:none;cursor:pointer;background:none"
-            onchange="pickCustomColor(this.value)" title="Custom colour"/>
-        </div>
-      </div>
-
-      <!-- Fare Rates -->
-      <div class="zmodal-section-title">Fare Rates <span style="font-size:10px;font-weight:400;text-transform:none;color:#9e9e9e">(optional — used by dispatch)</span></div>
-      <div class="zrate-grid">
-        <div class="zfield" style="margin-bottom:0">
-          <label>Base / Flag Fall ($)</label>
-          <input id="z-base" type="number" min="0" step="0.01" placeholder="0.00"/>
-        </div>
-        <div class="zfield" style="margin-bottom:0">
-          <label>Price per km ($)</label>
-          <input id="z-perkm" type="number" min="0" step="0.01" placeholder="0.00"/>
-        </div>
-        <div class="zfield" style="margin-bottom:0">
-          <label>Waiting Rate ($ / min)</label>
-          <input id="z-waiting" type="number" min="0" step="0.01" placeholder="0.00"/>
-        </div>
-        <div class="zfield" style="margin-bottom:0">
-          <label>Minimum Fare ($)</label>
-          <input id="z-minfare" type="number" min="0" step="0.01" placeholder="0.00"/>
-        </div>
-      </div>
-
-      <div id="zmodal-err" style="display:none;background:#FFEBEE;color:#C62828;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:16px"></div>
-    </div>
-    <div class="zmodal-foot">
-      <button type="button" class="md-btn md-btn-flat" onclick="closeZoneModal()">Cancel</button>
-      <button type="button" class="md-btn md-btn-primary" id="zmodal-save-btn" onclick="saveZone()">Save Zone</button>
+<div class="zn-ov" id="zn-edit-ov">
+  <div class="zn-modal">
+    <h3>Edit Zone</h3>
+    <div class="zn-fld"><label>Zone number</label><input id="zn-edit-num" readonly /></div>
+    <div class="zn-fld"><label>Zone name</label><input id="zn-edit-name" /></div>
+    <p style="font-size:12px;color:#64748b;margin:0 0 12px">Drag polygon vertices on the map to adjust boundaries, then click Apply.</p>
+    <div class="zn-mact">
+      <button class="zn-mbtn" onclick="znCloseEdit()">Cancel</button>
+      <button class="zn-mbtn primary" onclick="znApplyEdit()">Apply</button>
     </div>
   </div>
 </div>`;
 
   const js = `
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
-<script>
-var allZones = {};      // key → zone object
-var zMap, drawnLayer;
-var pendingLayer = null;   // polygon layer not yet saved
-var redrawKey = null;      // key being redrawn
-var pickedColor = '#42A5F5';
-var ZONE_COLORS = ${JSON.stringify(ZONE_COLORS)};
-
-window._fbOnLogin = function(user) {
-  document.getElementById('lblName').textContent = user.email || user.displayName || '';
-  document.getElementById('header-user-email').textContent = user.email || '';
-  initMap();
-  loadZones();
-};
-
-/* ── MAP INIT ── */
-function initMap() {
-  zMap = L.map('zones-map').setView([-46.413, 168.353], 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors', maxZoom: 19
-  }).addTo(zMap);
-  drawnLayer = new L.FeatureGroup().addTo(zMap);
-  zMap.on(L.Draw.Event.CREATED, function(e) {
-    if (pendingLayer) drawnLayer.removeLayer(pendingLayer);
-    pendingLayer = e.layer;
-    pendingLayer.setStyle({ color: pickedColor, fillColor: pickedColor, fillOpacity: 0.35, weight: 2 });
-    drawnLayer.addLayer(pendingLayer);
-    stopDrawUI();
-    if (redrawKey) {
-      // Redrawing boundary for existing zone — save immediately
-      var coords = getCoords(pendingLayer);
-      var patch = { coordinates: coords, updatedAt: Date.now() };
-      adminWrite('tariffZones/' + redrawKey, 'PATCH', patch).then(function() {
-        allZones[redrawKey].coordinates = coords;
-        updateMapPoly(redrawKey);
-        pendingLayer = null; redrawKey = null;
-        renderTable();
-        setMapStatus('Boundary saved.', 3000);
-      }).catch(function(e){ alert('Save failed: ' + e.message); });
-    } else {
-      // New zone — open name/colour modal
-      openAddModal();
-    }
-  });
-}
-
-function getCoords(layer) {
-  return layer.getLatLngs()[0].map(function(ll){ return [ll.lat, ll.lng]; });
-}
-
-/* ── GRID ZONES ON MAP ── */
-var _gridLayers       = [];   // [{rect, label, cellIdx, named}]
-var _gridHandles      = [];   // [L.Marker] — 4 corners + 1 center
-var _gridBounds       = { south:0, north:0, west:0, east:0 };
-var _gridRows         = 3;
-var _gridCols         = 4;
-var _gridMode         = false;
-var _pendingGridCoords  = null;
-var _pendingGridRect    = null;
-var _pendingGridLabel   = null;
-var _pendingGridNum     = 0;
-
-/* ---- Public: search + draw ---- */
-function drawCityGrid() {
-  var city = (document.getElementById('grid-city').value || '').trim();
-  if (!city) { _setGridStatus('Enter a city name first.'); return; }
-  var sizeStr = document.getElementById('grid-size').value;
-  var parts = sizeStr.split('x');
-  _gridRows = parseInt(parts[0]); _gridCols = parseInt(parts[1]);
-  _setGridStatus('Searching for ' + city + '\u2026');
-  var url = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(city) +
-            '&format=json&limit=1&accept-language=en';
-  fetch(url).then(function(r){ return r.json(); }).then(function(res) {
-    if (!res || !res.length) { _setGridStatus('City not found \u2014 try a more specific name.'); return; }
-    var bb = (res[0].boundingbox || []).map(parseFloat);
-    if (bb.length < 4) { _setGridStatus('No bounds returned.'); return; }
-    _gridBounds = { south: bb[0], north: bb[1], west: bb[2], east: bb[3] };
-    zMap.fitBounds([[bb[0], bb[2]], [bb[1], bb[3]]], { padding: [20, 20] });
-    _drawGridOnBounds(city);
-  }).catch(function() { _setGridStatus('Search failed \u2014 check your connection.'); });
-}
-
-/* ---- Internal: build cell layers ---- */
-function _drawGridOnBounds(cityName) {
-  clearGrid();
-  _buildCells();
-  _createHandles();
-  var total = _gridRows * _gridCols;
-  var clrBtn = document.getElementById('grid-clear-btn');
-  if (clrBtn) clrBtn.style.display = '';
-  _setGridStatus(total + ' boxes drawn over ' + (cityName || '') +
-    ' \u2014 drag corners or centre to resize/move, click a box to name it.');
-}
-
-function _buildCells() {
-  var s = _gridBounds.south, n = _gridBounds.north;
-  var w = _gridBounds.west,  e = _gridBounds.east;
-  var latStep = (n - s) / _gridRows;
-  var lngStep = (e - w) / _gridCols;
-  var idx = 0;
-  for (var r = 0; r < _gridRows; r++) {
-    for (var c = 0; c < _gridCols; c++) {
-      var cs = s + r * latStep,     cn = s + (r + 1) * latStep;
-      var cw = w + c * lngStep,     ce = w + (c + 1) * lngStep;
-      var rect = L.rectangle([[cs, cw], [cn, ce]], {
-        color: '#00897B', fillColor: '#E0F2F1',
-        fillOpacity: 0.22, weight: 1, dashArray: null
-      });
-      var num = idx + 1;
-      var icon = L.divIcon({
-        html: '<div class="grid-cell-label">\u270E ' + num + '</div>',
-        className: '', iconSize: [40, 20], iconAnchor: [20, 10]
-      });
-      var marker = L.marker([(cs + cn) / 2, (cw + ce) / 2], { icon: icon, interactive: false });
-      rect.addTo(zMap); marker.addTo(zMap);
-      (function(ci, rectL, markerL) {
-        rectL.on('click', function() {
-          var b = rectL.getBounds();
-          openGridCellModal(ci, b.getSouth(), b.getNorth(), b.getWest(), b.getEast(), rectL, markerL);
-        });
-      })(idx, rect, marker);
-      _gridLayers.push({ rect: rect, label: marker, cellIdx: idx, named: false });
-      idx++;
-    }
-  }
-}
-
-/* ---- Fast update: move existing cells without remove/re-add ---- */
-function _updateCells() {
-  var s = _gridBounds.south, n = _gridBounds.north;
-  var w = _gridBounds.west,  e = _gridBounds.east;
-  var latStep = (n - s) / _gridRows;
-  var lngStep = (e - w) / _gridCols;
-  if (_gridLayers.length !== _gridRows * _gridCols) { _clearCells(); _buildCells(); return; }
-  var idx = 0;
-  for (var r = 0; r < _gridRows; r++) {
-    for (var c = 0; c < _gridCols; c++) {
-      var cs = s + r * latStep,  cn = s + (r + 1) * latStep;
-      var cw = w + c * lngStep,  ce = w + (c + 1) * lngStep;
-      var g = _gridLayers[idx];
-      g.rect.setBounds([[cs, cw], [cn, ce]]);
-      g.label.setLatLng([(cs + cn) / 2, (cw + ce) / 2]);
-      idx++;
-    }
-  }
-}
-
-function _clearCells() {
-  _gridLayers.forEach(function(g) {
-    try { zMap.removeLayer(g.rect); zMap.removeLayer(g.label); } catch(x){}
-  });
-  _gridLayers = [];
-}
-
-/* ---- Handles: 4 corners (resize) + 1 centre (move) ---- */
-var _handleCursors = ['nwse-resize','nesw-resize','nesw-resize','nwse-resize','move'];
-
-function _cornerIcon(cursor) {
-  return L.divIcon({
-    html: '<div class="grid-handle grid-handle-corner" style="cursor:' + cursor + '"></div>',
-    className: '', iconSize: [14, 14], iconAnchor: [7, 7]
-  });
-}
-function _centerIcon() {
-  return L.divIcon({
-    html: '<div class="grid-handle grid-handle-center"></div>',
-    className: '', iconSize: [18, 18], iconAnchor: [9, 9]
-  });
-}
-
-function _handlePositions() {
-  var s = _gridBounds.south, n = _gridBounds.north;
-  var w = _gridBounds.west,  e = _gridBounds.east;
-  return [
-    [n, w], // 0 NW
-    [n, e], // 1 NE
-    [s, w], // 2 SW
-    [s, e], // 3 SE
-    [(n + s) / 2, (w + e) / 2] // 4 centre
-  ];
-}
-
-function _createHandles() {
-  _gridHandles.forEach(function(h) { try { zMap.removeLayer(h); } catch(x){} });
-  _gridHandles = [];
-  var pos = _handlePositions();
-
-  // Corner handles 0-3
-  var cornerKeys = ['NW','NE','SW','SE'];
-  for (var i = 0; i < 4; i++) {
-    var m = L.marker(pos[i], {
-      draggable: true, zIndexOffset: 2000,
-      icon: _cornerIcon(_handleCursors[i])
-    });
-    m._hKey = cornerKeys[i];
-    m._hIdx = i;
-    m.addTo(zMap);
-    m.on('drag', _onCornerDrag);
-    _gridHandles.push(m);
-  }
-
-  // Centre handle index 4
-  var cm = L.marker(pos[4], {
-    draggable: true, zIndexOffset: 2000,
-    icon: _centerIcon()
-  });
-  cm._hIdx = 4;
-  cm._startLL = null;
-  cm._startBounds = null;
-  cm.on('dragstart', function(e) {
-    cm._startLL     = e.target.getLatLng();
-    cm._startBounds = Object.assign({}, _gridBounds);
-  });
-  cm.on('drag', _onCenterDrag);
-  cm.addTo(zMap);
-  _gridHandles.push(cm);
-}
-
-function _onCornerDrag(e) {
-  var ll = e.target.getLatLng();
-  var key = e.target._hKey;
-  var idx = e.target._hIdx;
-  if (key === 'NW' || key === 'NE') _gridBounds.north = ll.lat;
-  if (key === 'SW' || key === 'SE') _gridBounds.south = ll.lat;
-  if (key === 'NW' || key === 'SW') _gridBounds.west  = ll.lng;
-  if (key === 'NE' || key === 'SE') _gridBounds.east  = ll.lng;
-  // prevent collapse
-  if (_gridBounds.north < _gridBounds.south + 0.0005) _gridBounds.north = _gridBounds.south + 0.0005;
-  if (_gridBounds.east  < _gridBounds.west  + 0.0005) _gridBounds.east  = _gridBounds.west  + 0.0005;
-  _updateCells();
-  _syncHandles(idx);
-}
-
-function _onCenterDrag(e) {
-  var cm = e.target;
-  if (!cm._startLL) return;
-  var ll   = cm.getLatLng();
-  var dlat = ll.lat - cm._startLL.lat;
-  var dlng = ll.lng - cm._startLL.lng;
-  _gridBounds.south = cm._startBounds.south + dlat;
-  _gridBounds.north = cm._startBounds.north + dlat;
-  _gridBounds.west  = cm._startBounds.west  + dlng;
-  _gridBounds.east  = cm._startBounds.east  + dlng;
-  _updateCells();
-  _syncHandles(4); // skip centre marker (it's being dragged)
-}
-
-/* Update handle positions without disturbing the one currently being dragged */
-function _syncHandles(skipIdx) {
-  var pos = _handlePositions();
-  _gridHandles.forEach(function(h, i) {
-    if (i !== skipIdx) h.setLatLng(pos[i]);
-  });
-}
-
-/* ---- Clear everything ---- */
-function clearGrid() {
-  _clearCells();
-  _gridHandles.forEach(function(h) { try { zMap.removeLayer(h); } catch(x){} });
-  _gridHandles = [];
-  var clrBtn = document.getElementById('grid-clear-btn');
-  if (clrBtn) clrBtn.style.display = 'none';
-  _setGridStatus('');
-}
-
-function _setGridStatus(msg) {
-  var el = document.getElementById('grid-status');
-  if (el) el.textContent = msg;
-}
-
-/* ---- Open modal for a grid cell ---- */
-function openGridCellModal(cellIdx, cs, cn, cw, ce, rectLayer, markerLayer) {
-  _pendingGridCoords = [[cn, cw], [cn, ce], [cs, ce], [cs, cw]];
-  _gridMode = true;
-  _pendingGridRect  = rectLayer;
-  _pendingGridLabel = markerLayer;
-  _pendingGridNum   = cellIdx + 1;
-  document.getElementById('z-edit-key').value = '';
-  ['z-name','z-notes','z-base','z-perkm','z-waiting','z-minfare'].forEach(function(id){
-    document.getElementById(id).value = '';
-  });
-  pickedColor = '#42A5F5';
-  document.getElementById('zmodal-title').textContent = 'Name Grid Box ' + (cellIdx + 1);
-  document.getElementById('zmodal-save-btn').textContent = 'Save Zone';
-  document.getElementById('zmodal-err').style.display = 'none';
-  buildColorGrid();
-  document.getElementById('zone-modal').classList.add('open');
-  setTimeout(function(){ document.getElementById('z-name').focus(); }, 60);
-}
-
-// No-op — kept for compatibility with old loadZones call
-function _indexQuickSlots() {}
-
-/* ── MAP LOCATION SEARCH (Nominatim/OpenStreetMap) ── */
-var _mapSearchTimer  = null;
-var _mapSearchCache  = {};      // simple query cache
-var _mapSearchItems  = [];      // current result set
-var _mapSearchFocus  = -1;      // keyboard-focused index
-
-function onMapSearchInput() {
-  clearTimeout(_mapSearchTimer);
-  var q = document.getElementById('map-search-input').value.trim();
-  _mapSearchFocus = -1;
-  if (q.length < 2) { closeMapSearch(); return; }
-  showMapSearchLoading();
-  _mapSearchTimer = setTimeout(function() { doMapSearch(q); }, 380);
-}
-
-function triggerMapSearch() {
-  var q = document.getElementById('map-search-input').value.trim();
-  if (!q) return;
-  doMapSearch(q);
-}
-
-function onMapSearchKey(e) {
-  var dd = document.getElementById('map-search-dropdown');
-  var items = dd.querySelectorAll('.map-search-item');
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    _mapSearchFocus = Math.min(_mapSearchFocus + 1, items.length - 1);
-    highlightMapItem(items);
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    _mapSearchFocus = Math.max(_mapSearchFocus - 1, 0);
-    highlightMapItem(items);
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    if (_mapSearchFocus >= 0 && items[_mapSearchFocus]) {
-      items[_mapSearchFocus].click();
-    } else if (_mapSearchItems.length) {
-      flyToMapResult(0);
-    } else {
-      triggerMapSearch();
-    }
-  } else if (e.key === 'Escape') {
-    closeMapSearch();
-  }
-}
-
-function highlightMapItem(items) {
-  Array.prototype.forEach.call(items, function(el, i) {
-    el.style.background = i === _mapSearchFocus ? '#E0F2F1' : '';
-  });
-}
-
-function showMapSearchLoading() {
-  var dd = document.getElementById('map-search-dropdown');
-  dd.innerHTML = '<div class="map-search-loading"><i class="material-icons" style="font-size:14px;vertical-align:middle;margin-right:4px">&#xE8B6;</i>Searching...</div>';
-  dd.style.display = 'block';
-}
-
-function doMapSearch(q) {
-  if (_mapSearchCache[q]) { renderMapResults(_mapSearchCache[q]); return; }
-  var url = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(q) +
-            '&format=json&limit=7&addressdetails=1&accept-language=en';
-  fetch(url).then(function(r) { return r.json(); }).then(function(res) {
-    _mapSearchCache[q] = res;
-    renderMapResults(res);
-  }).catch(function() {
-    var dd = document.getElementById('map-search-dropdown');
-    dd.innerHTML = '<div class="map-search-no-result">Search failed — check connection</div>';
-    dd.style.display = 'block';
-  });
-}
-
-function renderMapResults(results) {
-  _mapSearchItems = results || [];
-  _mapSearchFocus = -1;
-  var dd = document.getElementById('map-search-dropdown');
-  if (!_mapSearchItems.length) {
-    dd.innerHTML = '<div class="map-search-no-result">No results found</div>';
-    dd.style.display = 'block';
-    return;
-  }
-  dd.innerHTML = _mapSearchItems.map(function(r, i) {
-    var addr = r.address || {};
-    var name = r.namedetails && r.namedetails.name ? r.namedetails.name
-             : (addr.city || addr.town || addr.village || addr.county || addr.state || r.display_name.split(',')[0]);
-    var detail = r.display_name.split(',').slice(1, 4).join(',').trim();
-    var _iconMap = {city:'&#xE7F1;',town:'&#xE7F1;',village:'&#xE7F1;',
-      country:'&#xE894;',state:'&#xE894;',county:'&#xE894;',
-      suburb:'&#xE55B;',neighbourhood:'&#xE55B;',region:'&#xE894;'};
-    var typeIcon = _iconMap[r.type] || _iconMap[r.addresstype] || '&#xE55B;';
-    return '<div class="map-search-item" onclick="flyToMapResult(' + i + ')" onmouseover="_mapSearchFocus=' + i + '">' +
-      '<i class="material-icons" style="font-size:15px;color:#00897B;flex-shrink:0;margin-top:1px">' + typeIcon + '</i>' +
-      '<div><div class="msi-name">' + escH(String(name)) + '</div>' +
-      '<div class="msi-detail">' + escH(detail.slice(0, 60) + (detail.length > 60 ? '...' : '')) + '</div></div>' +
-      '</div>';
-  }).join('');
-  dd.style.display = 'block';
-}
-
-function flyToMapResult(idx) {
-  var r = _mapSearchItems[idx];
-  if (!r || !zMap) return;
-  var lat = parseFloat(r.lat), lng = parseFloat(r.lon);
-  if (r.boundingbox && r.boundingbox.length === 4) {
-    var bb = r.boundingbox.map(parseFloat);
-    zMap.fitBounds([[bb[0], bb[2]], [bb[1], bb[3]]], { padding: [30, 30], maxZoom: 14 });
-  } else {
-    zMap.setView([lat, lng], 13, { animate: true });
-  }
-  var shortName = r.display_name.split(',').slice(0, 2).join(', ');
-  document.getElementById('map-search-input').value = shortName;
-  closeMapSearch();
-  setMapStatus('Navigated to: ' + shortName, 4000);
-}
-
-function closeMapSearch() {
-  var dd = document.getElementById('map-search-dropdown');
-  if (dd) dd.style.display = 'none';
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click', function(e) {
-  var wrap = document.getElementById('map-search-wrap');
-  if (wrap && !wrap.contains(e.target)) closeMapSearch();
-});
-
-/* ── DRAWING ── */
-var _activeDrawHandler = null;
-function startDrawWithColor(color) {
-  pickedColor = color || pickedColor;
-  _activeDrawHandler = new L.Draw.Polygon(zMap, {
-    allowIntersection: false,
-    shapeOptions: { color: pickedColor, fillColor: pickedColor, fillOpacity: 0.35, weight: 2 }
-  });
-  _activeDrawHandler.enable();
-  document.getElementById('cancel-draw-btn').style.display = '';
-  document.getElementById('drawing-hint').classList.add('active');
-  document.getElementById('draw-btn').disabled = true;
-}
-
-function startDrawNew() {
-  redrawKey = null;
-  if (pendingLayer) { drawnLayer.removeLayer(pendingLayer); pendingLayer = null; }
-  startDrawWithColor(pickedColor);
-}
-
-function startRedraw(key) {
-  redrawKey = key;
-  pickedColor = allZones[key] ? (allZones[key].color || pickedColor) : pickedColor;
-  if (pendingLayer) { drawnLayer.removeLayer(pendingLayer); pendingLayer = null; }
-  setMapStatus('Redrawing boundary for "' + (allZones[key] && allZones[key].zoneName || key) + '" - draw new shape on map.');
-  startDrawWithColor(pickedColor);
-  // Scroll map into view
-  document.getElementById('zones-map').scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-function stopDrawUI() {
-  if (_activeDrawHandler) { try { _activeDrawHandler.disable(); } catch(e){} _activeDrawHandler = null; }
-  document.getElementById('cancel-draw-btn').style.display = 'none';
-  document.getElementById('drawing-hint').classList.remove('active');
-  document.getElementById('draw-btn').disabled = false;
-}
-
-function cancelDraw() {
-  stopDrawUI();
-  if (pendingLayer) { drawnLayer.removeLayer(pendingLayer); pendingLayer = null; }
-  redrawKey = null;
-  setMapStatus('');
-}
-
-function setMapStatus(msg, clearAfter) {
-  var el = document.getElementById('map-status');
-  el.textContent = msg;
-  if (clearAfter) setTimeout(function(){ if (el.textContent === msg) el.textContent = ''; }, clearAfter);
-}
-
-/* ── COLOUR PICKER ── */
-function buildColorGrid() {
-  var grid = document.getElementById('color-picker-grid');
-  grid.innerHTML = '';
-  ZONE_COLORS.forEach(function(c) {
-    var el = document.createElement('div');
-    el.className = 'cp-swatch' + (c === pickedColor ? ' selected' : '');
-    el.style.background = c;
-    el.title = c;
-    el.onclick = function() { selectColor(c); };
-    grid.appendChild(el);
-  });
-  updateColorPreview();
-}
-
-function selectColor(c) {
-  pickedColor = c;
-  document.querySelectorAll('.cp-swatch').forEach(function(s){ s.classList.remove('selected'); });
-  document.querySelectorAll('.cp-swatch').forEach(function(s){
-    if (s.style.background === c || s.title === c) s.classList.add('selected');
-  });
-  document.getElementById('z-color-custom').value = c;
-  updateColorPreview();
-}
-
-function pickCustomColor(c) {
-  pickedColor = c;
-  document.querySelectorAll('.cp-swatch').forEach(function(s){ s.classList.remove('selected'); });
-  updateColorPreview();
-}
-
-function updateColorPreview() {
-  document.getElementById('picked-preview').style.background = pickedColor;
-  document.getElementById('picked-hex').textContent = pickedColor;
-}
-
-/* ── MODAL ── */
-function _clearZoneModal() {
-  ['z-name','z-notes','z-base','z-perkm','z-waiting','z-minfare'].forEach(function(id){
-    document.getElementById(id).value = '';
-  });
-}
-
-/* ── SUBURB ZONE PICKER (Invercargill / OSM) ── */
-var _suburbMap = null, _suburbItems = [], _suburbLayers = {}, _suburbLayerGroup = null;
-var INV_SUBURB_FALLBACK = ['Appleby','Ascot Park','Avenal','Clifton','Glengarry','Glendale','Grasmere','Greenhills','Georgetown','Hawthorndale','Heidelberg','Invercargill Central','Kew','Kingswell','Lucknow','Lorneville','Marama','Newfield','Otatara','Prestonville','Richmond','Rockdale','Rosedale','South Invercargill','Strathern','Tisbury','Waihopai','Waikiwi','Waverley','Windsor','Woodend'];
-
-function initSuburbMap() {
-  if (_suburbMap) return;
-  _suburbMap = L.map('suburb-map', { zoomControl: true }).setView([-46.413, 168.353], 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OSM' }).addTo(_suburbMap);
-  _suburbLayerGroup = L.featureGroup().addTo(_suburbMap);
-}
-
-function _geomToCoords(el) {
-  if (!el.geometry || !el.geometry.length) return [];
-  return el.geometry.map(function(p) { return [p.lat, p.lon]; });
-}
-
-function _suburbKey(name) {
-  return 'suburb_' + String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
-}
-
-function fetchInvSuburbs() {
-  var listEl = document.getElementById('suburb-list');
-  listEl.innerHTML = '<div style="text-align:center;padding:30px 12px;color:#9e9e9e;font-size:12px">Loading suburbs from OpenStreetMap…</div>';
-  var query = '[out:json][timeout:90];area["name"="Invercargill"]["admin_level"="6"]->.city;('
-    + 'relation["boundary"="administrative"]["admin_level"~"9|10"](area.city);'
-    + 'way["place"~"suburb|neighbourhood"](area.city);'
-    + 'relation["place"~"suburb|neighbourhood"](area.city);'
-    + ');out geom;';
-  return fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'data=' + encodeURIComponent(query)
-  }).then(function(r) { return r.json(); }).then(function(data) {
-    var items = [];
-    (data.elements || []).forEach(function(el) {
-      var name = el.tags && (el.tags.name || el.tags['name:en']);
-      var coords = _geomToCoords(el);
-      if (!name || coords.length < 3) return;
-      items.push({ id: el.id, name: name, coords: coords, source: 'overpass' });
-    });
-    if (items.length < 3) return fetchInvSuburbsFallback();
-    return items;
-  }).catch(function() { return fetchInvSuburbsFallback(); });
-}
-
-function fetchInvSuburbsFallback() {
-  var items = [], idx = 0;
-  function next() {
-    if (idx >= INV_SUBURB_FALLBACK.length) return Promise.resolve(items);
-    var name = INV_SUBURB_FALLBACK[idx++];
-    var url = 'https://nominatim.openstreetmap.org/search?suburb=' + encodeURIComponent(name)
-      + '&city=Invercargill&country=New+Zealand&format=json&polygon_geojson=1&limit=1';
-    return fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'BookaWaka/1.0' } })
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        if (res && res[0] && res[0].geojson) {
-          var coords = [];
-          var g = res[0].geojson;
-          if (g.type === 'Polygon') coords = (g.coordinates[0] || []).map(function(c) { return [c[1], c[0]]; });
-          else if (g.type === 'MultiPolygon' && g.coordinates[0]) coords = (g.coordinates[0][0] || []).map(function(c) { return [c[1], c[0]]; });
-          if (coords.length >= 3) items.push({ id: 'fb_' + name, name: name, coords: coords, source: 'nominatim' });
-        }
-        return new Promise(function(resolve) { setTimeout(resolve, 1100); }).then(next);
-      }).catch(function() { return new Promise(function(resolve) { setTimeout(resolve, 1100); }).then(next); });
-  }
-  return next();
-}
-
-function renderSuburbPicker() {
-  var listEl = document.getElementById('suburb-list');
-  if (!_suburbItems.length) {
-    listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#9e9e9e">No suburbs found. Try again later.</div>';
-    return;
-  }
-  _suburbItems.sort(function(a, b) { return a.name.localeCompare(b.name); });
-  listEl.innerHTML = _suburbItems.map(function(s, i) {
-    var key = _suburbKey(s.name);
-    var exists = !!allZones[key];
-    var checked = exists ? 'checked' : '';
-    var disabled = exists ? ' disabled title="Already active"' : '';
-    return '<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:13px' + (exists ? ';opacity:.55' : '') + '">'
-      + '<input type="checkbox" class="suburb-chk" data-idx="' + i + '" ' + checked + disabled + ' onchange="highlightSuburb(' + i + ',this.checked)"/>'
-      + '<span style="font-weight:500">' + escH(s.name) + '</span>'
-      + (exists ? '<span style="font-size:10px;color:#2E7D32;margin-left:auto">Active</span>' : '')
-      + '</label>';
-  }).join('');
-  document.getElementById('suburb-count-lbl').textContent = _suburbItems.length + ' suburbs loaded';
-  _suburbItems.forEach(function(s, i) {
-    var color = ZONE_COLORS[i % ZONE_COLORS.length];
-    var poly = L.polygon(s.coords, { color: color, fillColor: color, fillOpacity: 0.2, weight: 1.5 });
-    poly._suburbIdx = i;
-    poly.bindTooltip(s.name, { sticky: true });
-    poly.on('click', function() {
-      var chk = document.querySelector('.suburb-chk[data-idx="' + i + '"]');
-      if (chk && !chk.disabled) { chk.checked = !chk.checked; highlightSuburb(i, chk.checked); }
-    });
-    _suburbLayers[i] = poly;
-    _suburbLayerGroup.addLayer(poly);
-  });
-  if (_suburbLayerGroup.getLayers().length) _suburbMap.fitBounds(_suburbLayerGroup.getBounds(), { padding: [20, 20] });
-}
-
-function highlightSuburb(idx, on) {
-  var layer = _suburbLayers[idx];
-  if (!layer) return;
-  var color = ZONE_COLORS[idx % ZONE_COLORS.length];
-  layer.setStyle({ fillOpacity: on ? 0.45 : 0.2, weight: on ? 2.5 : 1.5, color: color, fillColor: color });
-}
-
-function openSuburbPicker() {
-  document.getElementById('suburb-modal').classList.add('open');
-  setTimeout(function() {
-    initSuburbMap();
-    if (_suburbMap) _suburbMap.invalidateSize();
-    _suburbItems = [];
-    Object.keys(_suburbLayers).forEach(function(k) { try { _suburbLayerGroup.removeLayer(_suburbLayers[k]); } catch(e) {} });
-    _suburbLayers = {};
-    fetchInvSuburbs().then(function(items) {
-      _suburbItems = items || [];
-      renderSuburbPicker();
-      if (_suburbMap) _suburbMap.invalidateSize();
-    });
-  }, 80);
-}
-
-function closeSuburbPicker() {
-  document.getElementById('suburb-modal').classList.remove('open');
-}
-
-function activateSelectedSuburbs() {
-  var chks = document.querySelectorAll('.suburb-chk:checked:not(:disabled)');
-  if (!chks.length) { alert('Select at least one suburb to activate.'); return; }
-  var btn = document.getElementById('suburb-activate-btn');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  var promises = [], maxId = Object.keys(allZones).length;
-  chks.forEach(function(chk) {
-    var s = _suburbItems[parseInt(chk.getAttribute('data-idx'), 10)];
-    if (!s) return;
-    var key = _suburbKey(s.name);
-    if (allZones[key]) return;
-    maxId++;
-    var color = ZONE_COLORS[(maxId - 1) % ZONE_COLORS.length];
-    var zone = {
-      companyId: COMPANY_ID,
-      zoneName: s.name, TariffName: s.name, name: s.name,
-      color: color, coordinates: s.coords,
-      active: true, isSuburbZone: true, osmId: s.id, suburbSource: s.source,
-      createdAt: Date.now(), updatedAt: Date.now(), Id: maxId
-    };
-    promises.push(adminWrite('tariffZones/' + key, 'PUT', zone).then(function() {
-      allZones[key] = zone;
-      drawZonePoly(key, zone);
-    }));
-  });
-  Promise.all(promises).then(function() {
-    renderTable();
-    _indexQuickSlots();
-    closeSuburbPicker();
-    setMapStatus('Activated ' + promises.length + ' suburb zone(s).', 4000);
-    if (drawnLayer.getLayers().length) zMap.fitBounds(drawnLayer.getBounds(), { padding: [24, 24] });
-  }).catch(function(e) { alert('Save failed: ' + e.message); })
-    .finally(function() { btn.disabled = false; btn.textContent = 'Activate Selected'; });
-}
-
-function openAddModal() {
-  document.getElementById('z-edit-key').value = '';
-  _clearZoneModal();
-  pickedColor = '#42A5F5';
-  document.getElementById('zmodal-title').textContent = 'Add Zone';
-  document.getElementById('zmodal-save-btn').textContent = 'Save Zone';
-  document.getElementById('zmodal-err').style.display = 'none';
-  buildColorGrid();
-  document.getElementById('zone-modal').classList.add('open');
-  setTimeout(function(){ document.getElementById('z-name').focus(); }, 60);
-}
-
-function openEditModal(key) {
-  var z = allZones[key] || {};
-  document.getElementById('z-edit-key').value = key;
-  document.getElementById('z-name').value    = z.zoneName    || z.TariffName || '';
-  document.getElementById('z-notes').value   = z.notes       || '';
-  document.getElementById('z-base').value    = z.baseFare    || '';
-  document.getElementById('z-perkm').value   = z.pricePerKm  || '';
-  document.getElementById('z-waiting').value = z.waitingRate  || '';
-  document.getElementById('z-minfare').value = z.minimumFare  || '';
-  pickedColor = z.color || '#42A5F5';
-  document.getElementById('zmodal-title').textContent = 'Edit Zone — ' + (z.zoneName || z.TariffName || key);
-  document.getElementById('zmodal-save-btn').textContent = 'Update Zone';
-  document.getElementById('zmodal-err').style.display = 'none';
-  buildColorGrid();
-  document.getElementById('zone-modal').classList.add('open');
-  setTimeout(function(){ document.getElementById('z-name').focus(); }, 60);
-}
-
-function closeZoneModal() {
-  document.getElementById('zone-modal').classList.remove('open');
-  _gridMode = false; _pendingGridCoords = null; _pendingGridRect = null; _pendingGridLabel = null;
-  // If modal cancelled after drawing, remove pending shape
-  if (!document.getElementById('z-edit-key').value && pendingLayer && !redrawKey) {
-    drawnLayer.removeLayer(pendingLayer);
-    pendingLayer = null;
-  }
-}
-
-/* ── SAVE ── */
-function saveZone() {
-  var name    = document.getElementById('z-name').value.trim();
-  if (!name) { showModalErr('Zone name is required.'); return; }
-  var notes   = document.getElementById('z-notes').value.trim();
-  var base    = parseFloat(document.getElementById('z-base').value)    || 0;
-  var perkm   = parseFloat(document.getElementById('z-perkm').value)   || 0;
-  var waiting = parseFloat(document.getElementById('z-waiting').value) || 0;
-  var minfare = parseFloat(document.getElementById('z-minfare').value) || 0;
-  var key = document.getElementById('z-edit-key').value;
-  var btn = document.getElementById('zmodal-save-btn');
-  btn.disabled = true; btn.textContent = 'Saving...';
-
-  if (key) {
-    // Edit existing — update all fields (boundary unchanged)
-    var oldColor = allZones[key] && allZones[key].color;
-    var patch = {
-      companyId: COMPANY_ID,
-      zoneName: name, TariffName: name, color: pickedColor,
-      notes: notes, baseFare: base, pricePerKm: perkm,
-      waitingRate: waiting, minimumFare: minfare,
-      updatedAt: Date.now()
-    };
-    adminWrite('tariffZones/' + key, 'PATCH', patch).then(function() {
-      Object.assign(allZones[key], patch);
-      if (pickedColor !== oldColor) {
-        drawnLayer.eachLayer(function(l){
-          if (l._zoneKey === key) l.setStyle({ color: pickedColor, fillColor: pickedColor });
-        });
-      }
-      renderTable();
-      _indexQuickSlots();
-      closeZoneModal();
-      setMapStatus('"' + name + '" updated.', 3000);
-    }).catch(function(e){ showModalErr('Error: ' + e.message); })
-      .finally(function(){ btn.disabled = false; btn.textContent = 'Update Zone'; });
-  } else if (_gridMode && _pendingGridCoords) {
-    // Grid cell — use rectangle boundary coordinates
-    var coords = _pendingGridCoords;
-    var newKey  = 'zone_grid_' + Date.now();
-    var zone = {
-      companyId: COMPANY_ID,
-      zoneName: name, TariffName: name, color: pickedColor,
-      coordinates: coords, notes: notes,
-      baseFare: base, pricePerKm: perkm, waitingRate: waiting, minimumFare: minfare,
-      isGridZone: true,
-      createdAt: Date.now(), updatedAt: Date.now(),
-      Id: Object.keys(allZones).length + 1
-    };
-    adminWrite('tariffZones/' + newKey, 'PUT', zone).then(function() {
-      allZones[newKey] = zone;
-      // Re-style the grid rectangle to show it's been named
-      if (_pendingGridRect) {
-        _pendingGridRect.setStyle({ color: pickedColor, fillColor: pickedColor, fillOpacity: 0.35, weight: 2, dashArray: null });
-        _pendingGridRect.bindPopup('<strong>' + escH(name) + '</strong>').openPopup();
-      }
-      // Update label
-      if (_pendingGridLabel) {
-        _pendingGridLabel.setIcon(L.divIcon({
-          html: '<div class="grid-cell-label named">' + escH(name) + '</div>',
-          className: '', iconSize: [80, 20], iconAnchor: [40, 10]
-        }));
-      }
-      renderTable();
-      closeZoneModal();
-      _setGridStatus('"' + name + '" saved. Click another box to name it.');
-      setMapStatus('"' + name + '" saved.', 3000);
-    }).catch(function(e){ showModalErr('Error: ' + e.message); })
-      .finally(function(){ btn.disabled = false; btn.textContent = 'Save Zone'; });
-  } else {
-    // New zone — must have a drawn boundary
-    if (!pendingLayer) { showModalErr('Please draw the zone boundary on the map first.'); btn.disabled = false; btn.textContent = 'Save Zone'; return; }
-    var coords = getCoords(pendingLayer);
-    var newKey = 'zone_' + Date.now();
-    var zone = {
-      companyId: COMPANY_ID,
-      zoneName: name, TariffName: name, color: pickedColor,
-      coordinates: coords, notes: notes,
-      baseFare: base, pricePerKm: perkm, waitingRate: waiting, minimumFare: minfare,
-      createdAt: Date.now(), updatedAt: Date.now(),
-      Id: Object.keys(allZones).length + 1
-    };
-    adminWrite('tariffZones/' + newKey, 'PUT', zone).then(function() {
-      allZones[newKey] = zone;
-      pendingLayer._zoneKey = newKey;
-      pendingLayer.setStyle({ color: pickedColor, fillColor: pickedColor, fillOpacity: 0.35, weight: 2 });
-      pendingLayer.bindPopup('<strong>' + name + '</strong>').openPopup();
-      pendingLayer = null;
-      renderTable();
-      closeZoneModal();
-      setMapStatus('"' + name + '" saved and synced to Firebase.', 4000);
-    }).catch(function(e){ showModalErr('Error: ' + e.message); })
-      .finally(function(){ btn.disabled = false; btn.textContent = 'Save Zone'; });
-  }
-}
-
-function showModalErr(msg) {
-  var el = document.getElementById('zmodal-err');
-  el.textContent = msg; el.style.display = 'block';
-}
-
-/* ── DELETE ── */
-function deleteZone(key) {
-  var z = allZones[key];
-  if (!confirm('Delete zone "' + (z ? z.zoneName : key) + '"?\\n\\nThis will be removed from Firebase and will update the dispatch system and driver app immediately.')) return;
-  adminWrite('tariffZones/' + key, 'DELETE', null).then(function() {
-    delete allZones[key];
-    drawnLayer.eachLayer(function(l){ if (l._zoneKey === key) drawnLayer.removeLayer(l); });
-    renderTable();
-  }).catch(function(e){ alert('Delete failed: ' + e.message); });
-}
-
-/* ── LOAD ── */
-function loadZones() {
-  adminRead('tariffZones').then(function(data) {
-    allZones = {};
-    drawnLayer.clearLayers();
-    if (data && typeof data === 'object') {
-      Object.keys(data).forEach(function(key) {
-        var z = data[key];
-        if (!z) return;
-        // Company isolation: skip zones belonging to other companies.
-        // Legacy zones (no companyId) are only shown for super-admin.
-        if (z.companyId && z.companyId !== COMPANY_ID) return;
-        if (!z.companyId && !IS_SUPER_ADMIN) return;
-        allZones[key] = z;
-        drawZonePoly(key, z);
-      });
-      if (drawnLayer.getLayers().length) zMap.fitBounds(drawnLayer.getBounds(), { padding: [24,24] });
-    }
-    renderTable();
-    _indexQuickSlots();
-  }).catch(function(err) {
-    console.warn('Could not load zones:', err.message);
-    renderTable();
-    _indexQuickSlots();
-  });
-}
-
-function drawZonePoly(key, z) {
-  if (!z.coordinates || z.coordinates.length < 3) return;
-  var lls = z.coordinates.map(function(c){ return L.latLng(c[0], c[1]); });
-  var poly = L.polygon(lls, {
-    color: z.color || '#42A5F5', fillColor: z.color || '#42A5F5', fillOpacity: 0.3, weight: 2
-  });
-  poly._zoneKey = key;
-  poly.bindPopup('<strong>' + (z.zoneName||'Zone') + '</strong>');
-  poly.on('click', function(){ zMap.fitBounds(poly.getBounds(), { padding: [30,30] }); });
-  drawnLayer.addLayer(poly);
-}
-
-function updateMapPoly(key) {
-  // Remove old poly and redraw
-  drawnLayer.eachLayer(function(l){ if (l._zoneKey === key) drawnLayer.removeLayer(l); });
-  if (allZones[key]) drawZonePoly(key, allZones[key]);
-}
-
-/* ── TABLE ── */
-function renderTable() {
-  var keys = Object.keys(allZones);
-  document.getElementById('zt-loading').style.display = 'none';
-  var badge = document.getElementById('zone-count-badge');
-  badge.textContent = keys.length;
-  badge.style.display = keys.length ? '' : 'none';
-
-  if (!keys.length) {
-    document.getElementById('zt-wrap').style.display = 'none';
-    document.getElementById('zt-empty').style.display = '';
-    return;
-  }
-  document.getElementById('zt-wrap').style.display = '';
-  document.getElementById('zt-empty').style.display = 'none';
-
-  var html = '';
-  keys.forEach(function(key, i) {
-    var z = allZones[key];
-    var hasMap = z.coordinates && z.coordinates.length >= 3;
-    var pts = hasMap ? z.coordinates.length + ' pts' : '-';
-    var color = z.color || '#9e9e9e';
-    html +=
-      '<tr>' +
-      '<td style="color:#9e9e9e;font-size:12px">' + (i+1) + '</td>' +
-      '<td style="font-weight:600;color:#212121">' + escH(z.zoneName || z.TariffName || 'Unnamed') + '</td>' +
-      '<td>' +
-        '<div class="zt-color-cell">' +
-          '<div class="zt-swatch" style="background:' + color + '"></div>' +
-          '<span style="font-size:12px;font-family:monospace;color:#757575">' + color + '</span>' +
-        '</div>' +
-      '</td>' +
-      '<td>' +
-        (hasMap
-          ? '<span class="zt-badge">' + pts + '</span>'
-          : '<span class="zt-badge no-map">No boundary</span>') +
-      '</td>' +
-      '<td>' +
-        '<div class="zt-act">' +
-          '<button type="button" class="draw-it" data-key="' + key + '" onclick="startRedraw(this.dataset.key)" title="Draw / Redraw boundary">' +
-            '<i class="material-icons" style="color:#388E3C">&#xE254;</i>' +
-          '</button>' +
-          '<button type="button" data-key="' + key + '" onclick="openEditModal(this.dataset.key)" title="Edit name &amp; colour">' +
-            '<i class="material-icons">&#xE3C9;</i>' +
-          '</button>' +
-          '<button type="button" data-key="' + key + '" onclick="zoomToZone(this.dataset.key)" title="Zoom to zone" ' + (hasMap ? '' : 'disabled style="opacity:.4"') + '>' +
-            '<i class="material-icons">&#xE55C;</i>' +
-          '</button>' +
-          '<button type="button" class="del" data-key="' + key + '" onclick="deleteZone(this.dataset.key)" title="Delete zone">' +
-            '<i class="material-icons">&#xE872;</i>' +
-          '</button>' +
-        '</div>' +
-      '</td>' +
-      '</tr>';
-  });
-  document.getElementById('zt-tbody').innerHTML = html;
-}
-
-function zoomToZone(key) {
-  drawnLayer.eachLayer(function(l){
-    if (l._zoneKey === key) {
-      zMap.fitBounds(l.getBounds(), { padding: [30,30] });
-      document.getElementById('zones-map').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  });
-}
-
-function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-<\/script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>`;
+<script>
+var znMap=null,znLayers={},znZones=[],znEditKey=null,znEditLayer=null,znDrawGroup=null;
+var ZN_COLORS=['#00695C','#1565C0','#6A1B9A','#C62828','#E65100','#00838F','#558B2F','#4527A0'];
+
+function znAlert(msg,type){
+  var el=document.getElementById('zn-alert');
+  el.className='zn-alert show '+(type==='ok'?'ok':'err');
+  el.textContent=msg;
+  if(type==='ok') setTimeout(function(){el.className='zn-alert';},4000);
+}
+
+function znInitMap(){
+  if(znMap) return;
+  znMap=L.map('zn-map',{zoomControl:true}).setView([-41.0,174.0],5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(znMap);
+  znDrawGroup=new L.FeatureGroup().addTo(znMap);
+  setTimeout(function(){ znMap.invalidateSize(); }, 300);
+}
+
+function znRingFromEl(el){
+  var ring=[];
+  if(el.type==='way' && el.geometry){
+    el.geometry.forEach(function(g){ ring.push([g.lat,g.lon]); });
+  } else if(el.type==='relation' && el.members){
+    el.members.forEach(function(m){
+      if(m.role==='outer' && m.geometry){
+        m.geometry.forEach(function(g){ ring.push([g.lat,g.lon]); });
+      }
+    });
+  }
+  if(ring.length>2){
+    var f=ring[0],l=ring[ring.length-1];
+    if(Math.abs(f[0]-l[0])>1e-6 || Math.abs(f[1]-l[1])>1e-6) ring.push([f[0],f[1]]);
+  }
+  return ring.length>=4?ring:[];
+}
+
+function znFetchCity(city){
+  return fetch('https://nominatim.openstreetmap.org/search?format=json&countrycodes=nz&limit=1&q='+encodeURIComponent(city+', New Zealand'),{
+    headers:{'Accept-Language':'en'}
+  }).then(function(r){return r.json();}).then(function(res){
+    if(!res||!res.length) throw new Error('City not found in New Zealand');
+    return res[0];
+  });
+}
+
+function znFetchSuburbs(bb){
+  var s=bb[0],n=bb[1],w=bb[2],e=bb[3];
+  var q='[out:json][timeout:90];('+
+    'relation["boundary"="administrative"]["admin_level"~"9|10"]('+w+','+s+','+e+','+n+');'+
+    'way["boundary"="administrative"]["admin_level"~"9|10"]('+w+','+s+','+e+','+n+');'+
+    'relation["place"="suburb"]('+w+','+s+','+e+','+n+');'+
+    'way["place"="suburb"]('+w+','+s+','+e+','+n+');'+
+    ');out geom;';
+  return fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q})
+    .then(function(r){return r.json();})
+    .then(function(data){ return (data&&data.elements)||[]; });
+}
+
+function znDedupe(elements){
+  var seen={},out=[];
+  elements.forEach(function(el){
+    var ring=znRingFromEl(el);
+    if(ring.length<4) return;
+    var name=(el.tags&&(el.tags.name||el.tags['name:en']))||'';
+    if(!name) return;
+    var key=String(el.id||name);
+    if(seen[key]) return;
+    seen[key]=1;
+    out.push({osmId:el.id,name:name,boundary:ring,active:true});
+  });
+  out.sort(function(a,b){return a.name.localeCompare(b.name);});
+  return out;
+}
+
+function znClearMapLayers(){
+  Object.keys(znLayers).forEach(function(k){
+    if(znLayers[k]) znMap.removeLayer(znLayers[k]);
+  });
+  znLayers={};
+}
+
+function znDrawZone(z,selected){
+  if(!z.boundary||!z.boundary.length) return null;
+  var color=ZN_COLORS[(z.zoneNumber-1)%ZN_COLORS.length];
+  var layer=L.polygon(z.boundary.map(function(p){return [p[0],p[1]];}),{
+    color:selected?color:(z.active?color:'#94a3b8'),
+    weight:selected?3:2,
+    fillColor:color,
+    fillOpacity:z.active?0.22:0.05
+  }).addTo(znMap);
+  layer.bindTooltip('#'+z.zoneNumber+' '+z.name);
+  layer.on('click',function(){ znOpenEdit(z.key); });
+  znLayers[z.key]=layer;
+  return layer;
+}
+
+function znRenderList(){
+  var list=document.getElementById('zn-list');
+  if(!znZones.length){
+    list.innerHTML='<div class="zn-empty">No suburbs found. Try another city name.</div>';
+    document.getElementById('zn-save-btn').disabled=true;
+    return;
+  }
+  list.innerHTML=znZones.map(function(z){
+    return '<label class="zn-item'+(z.active?' on':'')+'" data-key="'+z.key+'">'+
+      '<input type="checkbox" '+(z.active?'checked':'')+' onchange="znToggle(\\''+z.key+'\\',this.checked)" />'+
+      '<div class="zn-item-body"><div class="zn-item-name">'+znEsc(z.name)+'</div>'+
+      '<div class="zn-item-num">Zone #'+z.zoneNumber+' · '+z.boundary.length+' points</div></div></label>';
+  }).join('');
+  document.getElementById('zn-save-btn').disabled=false;
+}
+
+function znRedrawAll(){
+  znClearMapLayers();
+  var bounds=[];
+  znZones.forEach(function(z){
+    var layer=znDrawZone(z,false);
+    if(layer && z.active) bounds.push(layer.getBounds());
+  });
+  if(bounds.length) znMap.fitBounds(L.latLngBounds(bounds),{padding:[30,30]});
+}
+
+function znLoadSuburbs(){
+  var city=(document.getElementById('zn-city').value||'').trim();
+  if(!city){ znAlert('Enter a city name.','err'); return; }
+  var btn=document.getElementById('zn-load-btn');
+  btn.disabled=true;
+  document.getElementById('zn-status').textContent='Loading suburbs for '+city+'…';
+  znInitMap();
+  znFetchCity(city).then(function(place){
+    var bb=place.boundingbox;
+    return znFetchSuburbs(bb).then(function(elements){
+      var suburbs=znDedupe(elements);
+      if(!suburbs.length) throw new Error('No suburb boundaries found for '+city);
+      znZones=suburbs.map(function(s,i){
+        return {
+          key:'zone_'+(i+1),
+          zoneNumber:i+1,
+          name:s.name,
+          boundary:s.boundary,
+          active:true,
+          osmId:s.osmId,
+          companyId:window.COMPANY_ID||''
+        };
+      });
+      znRenderList();
+      znRedrawAll();
+      document.getElementById('zn-status').textContent=suburbs.length+' suburbs loaded for '+city;
+      znAlert('Loaded '+suburbs.length+' suburb zones. Toggle OFF any you do not need.','ok');
+    });
+  }).catch(function(e){
+    znAlert(e.message||'Failed to load suburbs','err');
+    document.getElementById('zn-status').textContent='Load failed';
+  }).finally(function(){ btn.disabled=false; });
+}
+
+function znToggle(key,on){
+  var z=znZones.find(function(x){return x.key===key;});
+  if(!z) return;
+  z.active=!!on;
+  znRenderList();
+  znRedrawAll();
+}
+
+function znOpenEdit(key){
+  var z=znZones.find(function(x){return x.key===key;});
+  if(!z||!znMap) return;
+  znEditKey=key;
+  document.getElementById('zn-edit-num').value='#'+z.zoneNumber;
+  document.getElementById('zn-edit-name').value=z.name;
+  document.getElementById('zn-edit-ov').classList.add('show');
+  if(znEditLayer){ znDrawGroup.removeLayer(znEditLayer); znEditLayer=null; }
+  znEditLayer=L.polygon(z.boundary.map(function(p){return [p[0],p[1]];}),{color:'#00695C',weight:3,fillOpacity:0.15}).addTo(znDrawGroup);
+  znEditLayer.editing&&znEditLayer.editing.enable();
+  if(!znEditLayer.editing && L.Edit&&L.Edit.Poly){
+    try{ new L.Edit.Poly(znEditLayer).enable(); }catch(e){}
+  }
+  znMap.fitBounds(znEditLayer.getBounds(),{padding:[40,40]});
+}
+
+function znCloseEdit(){
+  document.getElementById('zn-edit-ov').classList.remove('show');
+  if(znEditLayer){ znDrawGroup.removeLayer(znEditLayer); znEditLayer=null; }
+  znEditKey=null;
+  znRedrawAll();
+}
+
+function znApplyEdit(){
+  if(!znEditKey) return;
+  var z=znZones.find(function(x){return x.key===znEditKey;});
+  if(!z||!znEditLayer) return;
+  var latlngs=znEditLayer.getLatLngs();
+  var ring=(Array.isArray(latlngs[0])?latlngs[0]:latlngs).map(function(ll){return [ll.lat,ll.lng];});
+  if(ring.length<3){ znAlert('Boundary needs at least 3 points.','err'); return; }
+  z.boundary=ring;
+  z.name=(document.getElementById('zn-edit-name').value||z.name).trim();
+  znCloseEdit();
+  znRenderList();
+  znAlert('Zone updated locally — click Save Active Zones to publish.','ok');
+}
+
+function znEsc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+function znSave(){
+  var cid=window.COMPANY_ID||'';
+  if(!cid){ znAlert('Company ID missing.','err'); return; }
+  var active=znZones.filter(function(z){return z.active;});
+  if(!active.length){ znAlert('Select at least one active zone.','err'); return; }
+  var btn=document.getElementById('zn-save-btn');
+  btn.disabled=true;
+  var writes=active.map(function(z){
+    var payload={
+      zoneNumber:z.zoneNumber,
+      name:z.name,
+      zoneName:z.name,
+      active:true,
+      boundary:z.boundary,
+      coordinates:z.boundary,
+      companyId:cid,
+      osmId:z.osmId||null,
+      updatedAt:Date.now()
+    };
+    return window.adminWrite('zones/'+cid+'/'+z.zoneNumber,'PUT',payload);
+  });
+  Promise.all(writes).then(function(){
+    znAlert('Saved '+active.length+' zones to zones/'+cid,'ok');
+    document.getElementById('zn-status').textContent=active.length+' active zones saved';
+  }).catch(function(e){
+    znAlert('Save failed: '+(e.message||e),'err');
+  }).finally(function(){ btn.disabled=false; });
+}
+
+function znLoadSaved(){
+  var cid=window.COMPANY_ID||'';
+  if(!cid) return;
+  window.adminRead('zones/'+cid).then(function(data){
+    if(!data||typeof data!=='object'||!Object.keys(data).length) return;
+    znZones=Object.keys(data).map(function(k){
+      var z=data[k]||{};
+      var boundary=z.boundary||z.coordinates||[];
+      return {
+        key:'zone_'+(z.zoneNumber||k),
+        zoneNumber:Number(z.zoneNumber||k),
+        name:z.name||z.zoneName||('Zone '+k),
+        boundary:boundary,
+        active:z.active!==false,
+        osmId:z.osmId||null,
+        companyId:cid
+      };
+    }).sort(function(a,b){return a.zoneNumber-b.zoneNumber;});
+    znInitMap();
+    znRenderList();
+    znRedrawAll();
+    document.getElementById('zn-status').textContent=znZones.filter(function(z){return z.active;}).length+' saved zones loaded';
+  }).catch(function(){});
+}
+
+window._fbOnLogin=function(){
+  znInitMap();
+  znLoadSaved();
+};
+if(window.COMPANY_ID) znLoadSaved();
+<\/script>`;
 
   return pageWrap(commonHead('Define Zones', css), body, commonScripts(js));
 }
