@@ -19206,7 +19206,7 @@ function executeJobCommand(cmd, cb){
   });
 }
 
-// ── SUBURBS PROXY (Nominatim + Overpass server-side) ─────────────────────────
+// ── SUBURBS PROXY (Nominatim server-side) ────────────────────────────────────
 const SUBURBS_UA = 'BookaWaka-OwnerPanel/1.0 (zones@bookawaka.nz)';
 
 function suburbsLogResponse(label, url, res, bodyText) {
@@ -19266,129 +19266,17 @@ function suburbsIsWholeCityName(name, city) {
   return n === base || n === base + ' city' || n === base + ' district';
 }
 
-function suburbsRingAroundPoint(lat, lon, delta = 0.007) {
-  return [
-    [lat - delta, lon - delta],
-    [lat - delta, lon + delta],
-    [lat + delta, lon + delta],
-    [lat + delta, lon - delta],
-    [lat - delta, lon - delta],
-  ];
-}
-
-function suburbsRingFromEl(el) {
+function suburbsCircleAroundPoint(lat, lon, radiusDeg = 0.006, steps = 16) {
   const ring = [];
-  if (el.type === 'node') {
-    const lat = el.lat != null ? el.lat : (el.geometry && el.geometry[0] && el.geometry[0].lat);
-    const lon = el.lon != null ? el.lon : (el.geometry && el.geometry[0] && el.geometry[0].lon);
-    if (lat != null && lon != null) return suburbsRingAroundPoint(lat, lon);
-    return [];
+  const cosLat = Math.cos((lat * Math.PI) / 180) || 1;
+  for (let i = 0; i <= steps; i++) {
+    const a = (2 * Math.PI * i) / steps;
+    ring.push([
+      lat + radiusDeg * Math.sin(a),
+      lon + (radiusDeg * Math.cos(a)) / cosLat,
+    ]);
   }
-  if (el.type === 'way' && el.geometry) {
-    el.geometry.forEach((g) => ring.push([g.lat, g.lon]));
-  } else if (el.type === 'relation' && el.members) {
-    el.members.forEach((m) => {
-      if (m.role === 'outer' && m.geometry) {
-        m.geometry.forEach((g) => ring.push([g.lat, g.lon]));
-      }
-    });
-  }
-  if (ring.length > 2) {
-    const f = ring[0];
-    const l = ring[ring.length - 1];
-    if (Math.abs(f[0] - l[0]) > 1e-6 || Math.abs(f[1] - l[1]) > 1e-6) ring.push([f[0], f[1]]);
-  }
-  return ring.length >= 4 ? ring : [];
-}
-
-function suburbsDedupe(elements, city) {
-  const seen = {};
-  const out = [];
-  elements.forEach((el) => {
-    const name = (el.tags && (el.tags.name || el.tags['name:en'])) || '';
-    if (!name || suburbsIsWholeCityName(name, city)) return;
-    if (el.type === 'relation' && el.tags && el.tags.admin_level && Number(el.tags.admin_level) <= 8) return;
-    const ring = suburbsRingFromEl(el);
-    if (ring.length < 4) return;
-    const key = String(el.id || name);
-    if (seen[key]) return;
-    seen[key] = 1;
-    out.push({ osmId: el.id, name, boundary: ring });
-  });
-  out.sort((a, b) => a.name.localeCompare(b.name));
-  return out;
-}
-
-function suburbsBboxFromPlace(place) {
-  const bb = place && place.boundingbox;
-  if (!bb || bb.length < 4) return null;
-  return {
-    south: parseFloat(bb[0]),
-    north: parseFloat(bb[1]),
-    west: parseFloat(bb[2]),
-    east: parseFloat(bb[3]),
-  };
-}
-
-function suburbsToGeoJSON(suburbs) {
-  return {
-    type: 'FeatureCollection',
-    features: suburbs.map((s, i) => ({
-      type: 'Feature',
-      id: s.osmId || i + 1,
-      properties: {
-        name: s.name,
-        osmId: s.osmId || null,
-        zoneNumber: i + 1,
-      },
-      geometry: {
-        type: 'Polygon',
-        coordinates: [s.boundary.map(([lat, lng]) => [lng, lat])],
-      },
-    })),
-  };
-}
-
-async function fetchNominatimCity(city) {
-  const url =
-    'https://nominatim.openstreetmap.org/search?format=json&countrycodes=nz&limit=1&q=' +
-    encodeURIComponent(city + ', New Zealand');
-  const res = await suburbsFetchJson('nominatim', url);
-  if (!res || !res.length) throw new Error('City not found in New Zealand');
-  return res[0];
-}
-
-function buildOverpassBboxNodeQuery(bbox) {
-  const { south, west, north, east } = bbox;
-  return (
-    '[out:json][timeout:90];\n' +
-    'node["place"~"suburb|locality|neighbourhood"](' + south + ',' + west + ',' + north + ',' + east + ');\n' +
-    'out geom;'
-  );
-}
-
-async function overpassPostQuery(q) {
-  const overpassUrl = 'https://overpass-api.de/api/interpreter';
-  const postBody = 'data=' + encodeURIComponent(q);
-  const data = await suburbsFetchJson('overpass', overpassUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: postBody,
-  });
-  return (data && data.elements) || [];
-}
-
-async function fetchOverpassSuburbNodesInBbox(bbox) {
-  const q = buildOverpassBboxNodeQuery(bbox);
-  console.log('[suburbs-proxy] Overpass bbox node query:\n' + q);
-  try {
-    const elements = await overpassPostQuery(q);
-    console.log('[suburbs-proxy] Overpass bbox nodes found: ' + elements.length);
-    return elements;
-  } catch (err) {
-    console.warn('[suburbs-proxy] Overpass bbox node query failed: ' + (err.message || err));
-    return [];
-  }
+  return ring;
 }
 
 function suburbsRingFromGeoJSON(geojson) {
@@ -19409,127 +19297,95 @@ function suburbsRingFromGeoJSON(geojson) {
   return [];
 }
 
-const SUBURB_PLACE_TYPES = new Set([
-  'suburb', 'neighbourhood', 'locality', 'quarter', 'hamlet', 'residential', 'village',
-]);
-
-function suburbsIsSuburbNominatimResult(item, city) {
-  const name = (item.name || String(item.display_name || '').split(',')[0] || '').trim();
-  if (!name || suburbsIsWholeCityName(name, city)) return false;
-  const type = String(item.type || '').toLowerCase();
-  const cls = String(item.class || '').toLowerCase();
-  if (cls === 'boundary' && (type === 'administrative' || type === 'city')) return false;
-  if (type === 'city' || type === 'town' || type === 'municipality') return false;
-  return SUBURB_PLACE_TYPES.has(type) || type === 'suburb';
+function buildNominatimSuburbsUrl(city) {
+  const params = new URLSearchParams({
+    city: city,
+    countrycodes: 'nz',
+    format: 'json',
+    polygon_geojson: '1',
+    limit: '50',
+    featuretypes: 'suburb,locality,neighbourhood,quarter',
+  });
+  return 'https://nominatim.openstreetmap.org/search?' + params.toString();
 }
 
-function suburbsFromNominatimResults(results, city) {
+function parseNominatimSuburbs(results, city) {
+  if (!Array.isArray(results)) return [];
   const seen = {};
   const out = [];
   results.forEach((item) => {
-    if (!suburbsIsSuburbNominatimResult(item, city)) return;
-    const name = (item.name || String(item.display_name || '').split(',')[0] || '').trim();
+    const name = String(item.display_name || item.name || '').split(',')[0].trim();
+    if (!name || suburbsIsWholeCityName(name, city)) return;
+
+    const type = String(item.type || '').toLowerCase();
+    const cls = String(item.class || '').toLowerCase();
+    if (cls === 'boundary' || type === 'city' || type === 'administrative') return;
+
     const key = String(item.osm_id || item.place_id || name);
     if (seen[key]) return;
-    let ring = suburbsRingFromGeoJSON(item.geojson);
-    if (ring.length < 4) {
+
+    let boundary = suburbsRingFromGeoJSON(item.geojson);
+    if (boundary.length < 4) {
       const lat = parseFloat(item.lat);
       const lon = parseFloat(item.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-      ring = suburbsRingAroundPoint(lat, lon);
+      boundary = suburbsCircleAroundPoint(lat, lon);
     }
+
     seen[key] = 1;
-    out.push({ osmId: item.osm_id || item.place_id, name, boundary: ring });
+    out.push({
+      osmId: item.osm_id || item.place_id || null,
+      name,
+      boundary,
+    });
   });
   out.sort((a, b) => a.name.localeCompare(b.name));
+  out.forEach((s, i) => { s.zoneNumber = i + 1; });
   return out;
 }
 
-async function fetchNominatimSettlements(city) {
-  const url =
-    'https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=50&countrycodes=nz&featuretype=settlement&q=' +
-    encodeURIComponent(city);
-  console.log('[suburbs-proxy] Nominatim settlement search — city="' + city + '"');
-  const results = await suburbsFetchJson('nominatim-settlements', url);
-  if (!results || !results.length) return [];
-  const out = suburbsFromNominatimResults(results, city);
-  console.log('[suburbs-proxy] Nominatim settlements (filtered suburbs): ' + out.length);
-  return out;
-}
-
-function suburbsSleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchNominatimSuburbByName(name, city) {
-  const url =
-    'https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=1&countrycodes=nz&q=' +
-    encodeURIComponent(name + ' ' + city + ' New Zealand');
-  const results = await suburbsFetchJson('nominatim-suburb-' + name, url);
-  if (!results || !results.length) return null;
-  const item = results.find((r) => !suburbsIsWholeCityName(r.name || '', city)) || results[0];
-  const ring = suburbsRingFromGeoJSON(item.geojson);
-  if (ring.length >= 4) return ring;
-  const lat = parseFloat(item.lat);
-  const lon = parseFloat(item.lon);
-  if (Number.isFinite(lat) && Number.isFinite(lon)) return suburbsRingAroundPoint(lat, lon);
-  return null;
-}
-
-async function enrichSuburbsFromNominatim(suburbs, city) {
-  const out = [];
-  for (let i = 0; i < suburbs.length; i++) {
-    const s = suburbs[i];
-    try {
-      const ring = await fetchNominatimSuburbByName(s.name, city);
-      if (ring && ring.length >= 4) out.push({ ...s, boundary: ring });
-      else out.push(s);
-    } catch (err) {
-      console.warn('[suburbs-proxy] Nominatim lookup failed for "' + s.name + '": ' + (err.message || err));
-      out.push(s);
-    }
-    if (i < suburbs.length - 1) await suburbsSleep(1100);
-  }
-  return out;
+function suburbsToGeoJSON(suburbs) {
+  return {
+    type: 'FeatureCollection',
+    features: suburbs.map((s, i) => ({
+      type: 'Feature',
+      id: s.osmId || i + 1,
+      properties: {
+        name: s.name,
+        osmId: s.osmId || null,
+        zoneNumber: s.zoneNumber || i + 1,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [s.boundary.map(([lat, lng]) => [lng, lat])],
+      },
+    })),
+  };
 }
 
 async function loadSuburbsForCity(city) {
-  console.log('[suburbs-proxy] loadSuburbsForCity — city="' + city + '"');
-  const place = await fetchNominatimCity(city);
-  console.log('[suburbs-proxy] Nominatim place found: ' + (place.display_name || place.name || city));
+  const trimmed = String(city || '').trim();
+  console.log('[suburbs-proxy] loadSuburbsForCity — city="' + trimmed + '"');
 
-  const bbox = suburbsBboxFromPlace(place);
-  if (bbox) {
-    console.log(
-      '[suburbs-proxy] City bbox: south=' + bbox.south + ' west=' + bbox.west +
-      ' north=' + bbox.north + ' east=' + bbox.east,
-    );
-  }
+  const url = buildNominatimSuburbsUrl(trimmed);
+  const results = await suburbsFetchJson('nominatim-suburbs', url);
+  console.log('[suburbs-proxy] Nominatim raw results: ' + (results ? results.length : 0));
 
-  let suburbs = [];
-  if (bbox) {
-    const nodeElements = await fetchOverpassSuburbNodesInBbox(bbox);
-    suburbs = suburbsDedupe(nodeElements, city);
-    console.log('[suburbs-proxy] Overpass bbox suburb nodes: ' + suburbs.length);
-    if (suburbs.length > 0 && suburbs.length <= 40) {
-      console.log('[suburbs-proxy] Enriching suburb polygons via individual Nominatim lookups…');
-      suburbs = await enrichSuburbsFromNominatim(suburbs, city);
-    }
-  }
-
+  const suburbs = parseNominatimSuburbs(results, trimmed);
   if (!suburbs.length) {
-    suburbs = await fetchNominatimSettlements(city);
+    throw new Error('No suburb boundaries found for ' + trimmed + '. Try a different city name.');
   }
 
-  if (!suburbs.length) throw new Error('No suburb boundaries found for ' + city);
-  console.log('[suburbs-proxy] Final suburb count: ' + suburbs.length);
+  console.log('[suburbs-proxy] Parsed suburbs: ' + suburbs.map((s) => s.name).join(', '));
+
+  const first = Array.isArray(results) && results.length ? results[0] : null;
   return {
-    city: city.trim(),
+    city: trimmed,
     place: {
-      name: place.display_name,
-      lat: parseFloat(place.lat),
-      lon: parseFloat(place.lon),
-      boundingbox: place.boundingbox,
+      name: trimmed,
+      lat: first ? parseFloat(first.lat) : null,
+      lon: first ? parseFloat(first.lon) : null,
+      boundingbox: first && first.boundingbox ? first.boundingbox : null,
     },
     suburbs,
     geojson: suburbsToGeoJSON(suburbs),
