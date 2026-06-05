@@ -8968,18 +8968,6 @@ function zonesPage() {
 <script>
 var znMap=null,znLayers={},znZones=[],znEditKey=null,znEditLayer=null,znDrawGroup=null;
 var ZN_COLORS=['#0d9488','#2563eb','#7c3aed','#dc2626','#d97706','#0891b2','#16a34a','#9333ea'];
-var ZN_UA='BookaWaka-OwnerPanel/1.0 (zones@bookawaka.nz)';
-
-function znParseJson(r){
-  var ct=(r.headers.get('content-type')||'').toLowerCase();
-  if(ct.indexOf('json')===-1){
-    return r.text().then(function(t){
-      var hint=(t&&t.charAt(0)==='<')?' (XML/HTML response — check format=json)':'';
-      throw new Error('API returned non-JSON'+hint);
-    });
-  }
-  return r.json();
-}
 
 function znAlert(msg,type){
   var el=document.getElementById('zn-alert');
@@ -9003,72 +8991,15 @@ function znInitMap(){
   });
 }
 
-function znRingFromEl(el){
-  var ring=[];
-  if(el.type==='way' && el.geometry){
-    el.geometry.forEach(function(g){ ring.push([g.lat,g.lon]); });
-  } else if(el.type==='relation' && el.members){
-    el.members.forEach(function(m){
-      if(m.role==='outer' && m.geometry){
-        m.geometry.forEach(function(g){ ring.push([g.lat,g.lon]); });
-      }
+function znFetchSuburbsApi(city){
+  return fetch('/api/suburbs?city='+encodeURIComponent(city),{
+    headers:{Accept:'application/json'}
+  }).then(function(r){
+    return r.json().then(function(data){
+      if(!r.ok) throw new Error(data.error||'Failed to load suburbs');
+      return data;
     });
-  }
-  if(ring.length>2){
-    var f=ring[0],l=ring[ring.length-1];
-    if(Math.abs(f[0]-l[0])>1e-6 || Math.abs(f[1]-l[1])>1e-6) ring.push([f[0],f[1]]);
-  }
-  return ring.length>=4?ring:[];
-}
-
-function znFetchCity(city){
-  var url='https://nominatim.openstreetmap.org/search?format=json&countrycodes=nz&limit=1&q='+encodeURIComponent(city+', New Zealand');
-  return fetch(url,{
-    headers:{
-      'Accept':'application/json',
-      'Accept-Language':'en',
-      'User-Agent':ZN_UA
-    }
-  }).then(znParseJson).then(function(res){
-    if(!res||!res.length) throw new Error('City not found in New Zealand');
-    return res[0];
   });
-}
-
-function znFetchSuburbs(bb){
-  var s=parseFloat(bb[0]),n=parseFloat(bb[1]),w=parseFloat(bb[2]),e=parseFloat(bb[3]);
-  var q='[out:json][timeout:90];('+
-    'relation["boundary"="administrative"]["admin_level"~"9|10"]('+w+','+s+','+e+','+n+');'+
-    'way["boundary"="administrative"]["admin_level"~"9|10"]('+w+','+s+','+e+','+n+');'+
-    'relation["place"="suburb"]('+w+','+s+','+e+','+n+');'+
-    'way["place"="suburb"]('+w+','+s+','+e+','+n+');'+
-    ');out geom;';
-  return fetch('https://overpass-api.de/api/interpreter',{
-    method:'POST',
-    headers:{
-      'Content-Type':'application/x-www-form-urlencoded',
-      'Accept':'application/json'
-    },
-    body:'data='+encodeURIComponent(q)
-  }).then(znParseJson).then(function(data){
-    return (data&&data.elements)||[];
-  });
-}
-
-function znDedupe(elements){
-  var seen={},out=[];
-  elements.forEach(function(el){
-    var ring=znRingFromEl(el);
-    if(ring.length<4) return;
-    var name=(el.tags&&(el.tags.name||el.tags['name:en']))||'';
-    if(!name) return;
-    var key=String(el.id||name);
-    if(seen[key]) return;
-    seen[key]=1;
-    out.push({osmId:el.id,name:name,boundary:ring,active:true});
-  });
-  out.sort(function(a,b){return a.name.localeCompare(b.name);});
-  return out;
 }
 
 function znClearMapLayers(){
@@ -9134,27 +9065,24 @@ function znLoadSuburbs(){
   btn.disabled=true;
   document.getElementById('zn-status').textContent='Loading suburbs for '+city+'…';
   znInitMap();
-  znFetchCity(city).then(function(place){
-    var bb=place.boundingbox;
-    return znFetchSuburbs(bb).then(function(elements){
-      var suburbs=znDedupe(elements);
-      if(!suburbs.length) throw new Error('No suburb boundaries found for '+city);
-      znZones=suburbs.map(function(s,i){
-        return {
-          key:'zone_'+(i+1),
-          zoneNumber:i+1,
-          name:s.name,
-          boundary:s.boundary,
-          active:true,
-          osmId:s.osmId,
-          companyId:window.COMPANY_ID||''
-        };
-      });
-      znRenderList();
-      znRedrawAll();
-      document.getElementById('zn-status').textContent=suburbs.length+' suburbs loaded for '+city;
-      znAlert('Loaded '+suburbs.length+' suburb zones. Toggle OFF any you do not need.','ok');
+  znFetchSuburbsApi(city).then(function(data){
+    var suburbs=data.suburbs||[];
+    if(!suburbs.length) throw new Error('No suburb boundaries found for '+city);
+    znZones=suburbs.map(function(s,i){
+      return {
+        key:'zone_'+(i+1),
+        zoneNumber:i+1,
+        name:s.name,
+        boundary:s.boundary,
+        active:true,
+        osmId:s.osmId,
+        companyId:window.COMPANY_ID||''
+      };
     });
+    znRenderList();
+    znRedrawAll();
+    document.getElementById('zn-status').textContent=suburbs.length+' suburbs loaded for '+city;
+    znAlert('Loaded '+suburbs.length+' suburb zones. Toggle OFF any you do not need.','ok');
   }).catch(function(e){
     znAlert(e.message||'Failed to load suburbs','err');
     document.getElementById('zn-status').textContent='Load failed';
@@ -19270,9 +19198,162 @@ function executeJobCommand(cmd, cb){
   });
 }
 
+// ── SUBURBS PROXY (Nominatim + Overpass server-side) ─────────────────────────
+const SUBURBS_UA = 'BookaWaka-OwnerPanel/1.0 (zones@bookawaka.nz)';
+
+async function suburbsFetchJson(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      'Accept-Language': 'en',
+      'User-Agent': SUBURBS_UA,
+      ...(options.headers || {}),
+    },
+  });
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('json')) {
+    const text = await res.text();
+    const hint = text && text.charAt(0) === '<' ? ' (XML/HTML — expected JSON)' : '';
+    throw new Error('API returned non-JSON' + hint);
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error((data && data.error) || 'HTTP ' + res.status);
+  }
+  return data;
+}
+
+function suburbsRingFromEl(el) {
+  const ring = [];
+  if (el.type === 'way' && el.geometry) {
+    el.geometry.forEach((g) => ring.push([g.lat, g.lon]));
+  } else if (el.type === 'relation' && el.members) {
+    el.members.forEach((m) => {
+      if (m.role === 'outer' && m.geometry) {
+        m.geometry.forEach((g) => ring.push([g.lat, g.lon]));
+      }
+    });
+  }
+  if (ring.length > 2) {
+    const f = ring[0];
+    const l = ring[ring.length - 1];
+    if (Math.abs(f[0] - l[0]) > 1e-6 || Math.abs(f[1] - l[1]) > 1e-6) ring.push([f[0], f[1]]);
+  }
+  return ring.length >= 4 ? ring : [];
+}
+
+function suburbsDedupe(elements) {
+  const seen = {};
+  const out = [];
+  elements.forEach((el) => {
+    const ring = suburbsRingFromEl(el);
+    if (ring.length < 4) return;
+    const name = (el.tags && (el.tags.name || el.tags['name:en'])) || '';
+    if (!name) return;
+    const key = String(el.id || name);
+    if (seen[key]) return;
+    seen[key] = 1;
+    out.push({ osmId: el.id, name, boundary: ring });
+  });
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+function suburbsToGeoJSON(suburbs) {
+  return {
+    type: 'FeatureCollection',
+    features: suburbs.map((s, i) => ({
+      type: 'Feature',
+      id: s.osmId || i + 1,
+      properties: {
+        name: s.name,
+        osmId: s.osmId || null,
+        zoneNumber: i + 1,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [s.boundary.map(([lat, lng]) => [lng, lat])],
+      },
+    })),
+  };
+}
+
+async function fetchNominatimCity(city) {
+  const url =
+    'https://nominatim.openstreetmap.org/search?format=json&countrycodes=nz&limit=1&q=' +
+    encodeURIComponent(city + ', New Zealand');
+  const res = await suburbsFetchJson(url);
+  if (!res || !res.length) throw new Error('City not found in New Zealand');
+  return res[0];
+}
+
+async function fetchOverpassSuburbs(bb) {
+  const s = parseFloat(bb[0]);
+  const n = parseFloat(bb[1]);
+  const w = parseFloat(bb[2]);
+  const e = parseFloat(bb[3]);
+  const q =
+    '[out:json][timeout:90];(' +
+    'relation["boundary"="administrative"]["admin_level"~"9|10"](' + w + ',' + s + ',' + e + ',' + n + ');' +
+    'way["boundary"="administrative"]["admin_level"~"9|10"](' + w + ',' + s + ',' + e + ',' + n + ');' +
+    'relation["place"="suburb"](' + w + ',' + s + ',' + e + ',' + n + ');' +
+    'way["place"="suburb"](' + w + ',' + s + ',' + e + ',' + n + ');' +
+    ');out geom;';
+  const data = await suburbsFetchJson('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'data=' + encodeURIComponent(q),
+  });
+  return (data && data.elements) || [];
+}
+
+async function loadSuburbsForCity(city) {
+  const place = await fetchNominatimCity(city);
+  const elements = await fetchOverpassSuburbs(place.boundingbox);
+  const suburbs = suburbsDedupe(elements);
+  if (!suburbs.length) throw new Error('No suburb boundaries found for ' + city);
+  return {
+    city: city.trim(),
+    place: {
+      name: place.display_name,
+      lat: parseFloat(place.lat),
+      lon: parseFloat(place.lon),
+      boundingbox: place.boundingbox,
+    },
+    suburbs,
+    geojson: suburbsToGeoJSON(suburbs),
+    count: suburbs.length,
+  };
+}
+
 // ── SERVER ───────────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   let urlPath = req.url.split('?')[0];
+
+  // ── API: suburb boundaries via Nominatim + Overpass (server-side proxy)
+  if (urlPath === '/api/suburbs') {
+    const qs = new URLSearchParams(req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '');
+    const city = (qs.get('city') || '').trim();
+    if (!city) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'city query param required' }));
+      return;
+    }
+    loadSuburbsForCity(city)
+      .then((payload) => {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'private, max-age=3600',
+        });
+        res.end(JSON.stringify(payload));
+      })
+      .catch((err) => {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Failed to load suburbs' }));
+      });
+    return;
+  }
 
   // ── API: server time (so browser can compare its clock vs server)
   if (urlPath === '/api/servertime') {
