@@ -8862,35 +8862,49 @@ function deleteVehicle(id) {
 // ── ZONES PAGE ────────────────────────────────────────────────────────────────
 function zonesPage() {
   const css = `
-.zn-wrap{display:flex;height:calc(100vh - 120px);min-height:560px;gap:0;background:#f8fafc}
-.zn-side{width:340px;min-width:300px;max-width:380px;background:#fff;border-right:1px solid #e2e8f0;display:flex;flex-direction:column}
-.zn-side-hdr{padding:16px 18px;border-bottom:1px solid #e2e8f0}
-.zn-title{font-size:18px;font-weight:800;color:#0f172a;margin:0 0 4px}
-.zn-sub{font-size:12px;color:#64748b;line-height:1.4}
-.zn-search{padding:14px 18px;border-bottom:1px solid #f1f5f9;display:flex;gap:8px}
-.zn-search input{flex:1;height:38px;border:1.5px solid #e2e8f0;border-radius:8px;padding:0 12px;font-size:14px}
-.zn-search button{height:38px;padding:0 14px;border:none;border-radius:8px;background:#00695C;color:#fff;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
-.zn-search button:disabled{opacity:.5;cursor:not-allowed}
-.zn-list{flex:1;overflow-y:auto;padding:8px 0}
-.zn-item{display:flex;align-items:flex-start;gap:10px;padding:10px 18px;border-bottom:1px solid #f8fafc;cursor:pointer}
-.zn-item:hover{background:#f8fafc}
-.zn-item.on{background:#ecfdf5}
-.zn-item input{margin-top:3px;accent-color:#00695C}
-.zn-item-body{flex:1;min-width:0}
-.zn-item-name{font-size:14px;font-weight:700;color:#0f172a}
-.zn-item-num{font-size:11px;color:#64748b;margin-top:2px}
-.zn-side-foot{padding:14px 18px;border-top:1px solid #e2e8f0;display:flex;gap:8px}
-.zn-btn{flex:1;height:40px;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer}
-.zn-btn-save{background:#00695C;color:#fff}
-.zn-btn-save:disabled{opacity:.5;cursor:not-allowed}
-.zn-map{flex:1;position:relative;min-width:0}
-#zn-map{position:absolute;inset:0;z-index:1}
-.zn-status{position:absolute;top:12px;left:12px;z-index:500;background:#fff;padding:8px 12px;border-radius:8px;font-size:12px;color:#334155;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
-.zn-alert{margin:10px 18px 0;padding:10px 12px;border-radius:8px;font-size:12px;display:none}
+#page_content_inner:has(.zn-page){padding:16px!important;}
+.zn-page{display:flex;flex-direction:column;height:calc(100vh - 132px);min-height:520px;max-height:calc(100vh - 132px);background:#fff;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;font-family:'Inter',sans-serif}
+.zn-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;border-bottom:1px solid #e2e8f0;background:#fff;flex-shrink:0;flex-wrap:wrap}
+.zn-topbar-left{min-width:200px}
+.zn-title{font-size:20px;font-weight:800;color:#0f172a;margin:0 0 2px;letter-spacing:-.02em}
+.zn-sub{font-size:12px;color:#64748b;margin:0;line-height:1.4}
+.zn-search{display:flex;align-items:center;gap:10px;flex:1;max-width:520px;min-width:280px}
+.zn-search input{flex:1;height:40px;border:1.5px solid #e2e8f0;border-radius:8px;padding:0 14px;font-size:14px;background:#f8fafc;transition:border-color .15s,box-shadow .15s}
+.zn-search input:focus{outline:none;border-color:#0d9488;background:#fff;box-shadow:0 0 0 3px rgba(13,148,136,.12)}
+.zn-search button{height:40px;padding:0 18px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;transition:background .15s}
+.zn-search button:hover{background:#0f766e}
+.zn-search button:disabled{opacity:.55;cursor:not-allowed}
+.zn-alert{margin:0 20px;padding:10px 14px;border-radius:8px;font-size:13px;display:none;flex-shrink:0}
 .zn-alert.show{display:block}
 .zn-alert.ok{background:#ecfdf5;color:#166534;border:1px solid #86efac}
 .zn-alert.err{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
-.zn-empty{padding:24px 18px;text-align:center;color:#94a3b8;font-size:13px;line-height:1.5}
+.zn-main{flex:1;display:flex;min-height:0;overflow:hidden}
+.zn-map-col{flex:1 1 68%;min-width:0;position:relative;background:#e2e8f0;border-right:1px solid #e2e8f0}
+#zn-map{position:absolute;inset:0;z-index:1;width:100%;height:100%}
+.zn-status{position:absolute;top:14px;left:14px;z-index:500;background:#fff;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;color:#334155;border:1px solid #e2e8f0;box-shadow:0 2px 10px rgba(0,0,0,.08);pointer-events:none}
+.zn-list-col{flex:0 0 360px;width:360px;max-width:42%;display:flex;flex-direction:column;min-height:0;background:#f8fafc}
+.zn-list-hdr{padding:14px 18px 10px;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #e2e8f0;background:#fff;flex-shrink:0}
+.zn-list-hdr span{color:#0d9488;font-weight:800}
+.zn-list{flex:1;overflow-y:auto;overflow-x:hidden;min-height:0;padding:6px 0}
+.zn-item{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #eef2f6;background:#fff;margin:0 8px 6px;border-radius:8px;border:1px solid #e2e8f0;transition:background .15s,border-color .15s}
+.zn-item:hover{background:#f8fafc}
+.zn-item.active{border-color:#99f6e4;background:#ecfdf5}
+.zn-item-info{flex:1;min-width:0}
+.zn-item-name{font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.zn-item-meta{font-size:11px;color:#64748b;margin-top:3px}
+.zn-switch{position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0}
+.zn-switch input{opacity:0;width:0;height:0;position:absolute}
+.zn-switch-track{position:absolute;inset:0;background:#cbd5e1;border-radius:999px;cursor:pointer;transition:background .2s}
+.zn-switch-track:before{content:'';position:absolute;height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.zn-switch input:checked+.zn-switch-track{background:#0d9488}
+.zn-switch input:checked+.zn-switch-track:before{transform:translateX(20px)}
+.zn-empty{padding:32px 20px;text-align:center;color:#94a3b8;font-size:13px;line-height:1.6}
+.zn-footer{padding:14px 20px;border-top:1px solid #e2e8f0;background:#fff;display:flex;justify-content:flex-end;align-items:center;gap:12px;flex-shrink:0}
+.zn-save-btn{height:42px;padding:0 24px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-weight:700;font-size:14px;cursor:pointer;transition:background .15s;box-shadow:0 2px 8px rgba(13,148,136,.25)}
+.zn-save-btn:hover{background:#0f766e}
+.zn-save-btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.zn-legend{display:flex;gap:14px;font-size:11px;color:#64748b;margin-right:auto}
+.zn-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
 .zn-ov{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;align-items:center;justify-content:center;padding:20px}
 .zn-ov.show{display:flex}
 .zn-modal{background:#fff;border-radius:14px;padding:22px;width:420px;max-width:100%;box-shadow:0 20px 50px rgba(0,0,0,.18)}
@@ -8900,29 +8914,39 @@ function zonesPage() {
 .zn-fld input{width:100%;height:38px;border:1.5px solid #e2e8f0;border-radius:8px;padding:0 12px;font-size:14px;box-sizing:border-box}
 .zn-mact{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
 .zn-mbtn{padding:8px 14px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;font-weight:600;font-size:13px}
-.zn-mbtn.primary{background:#00695C;color:#fff;border-color:#00695C}
+.zn-mbtn.primary{background:#0d9488;color:#fff;border-color:#0d9488}
+@media(max-width:900px){.zn-main{flex-direction:column}.zn-map-col{flex:1 1 50%;min-height:280px;border-right:none;border-bottom:1px solid #e2e8f0}.zn-list-col{flex:1 1 50%;width:100%;max-width:100%}}
 `;
 
   const body = `
-<div class="zn-wrap">
-  <aside class="zn-side">
-    <div class="zn-side-hdr">
+<div class="zn-page">
+  <div class="zn-topbar">
+    <div class="zn-topbar-left">
       <h2 class="zn-title">Service Zones</h2>
-      <p class="zn-sub">Load suburb boundaries from OpenStreetMap, toggle zones ON/OFF, then save to Firebase <code>zones/{companyId}</code>.</p>
+      <p class="zn-sub">Load suburb boundaries from OpenStreetMap and save to <code>zones/{companyId}</code></p>
     </div>
     <div class="zn-search">
-      <input id="zn-city" placeholder="City name e.g. Invercargill" autocomplete="off" />
-      <button id="zn-load-btn" onclick="znLoadSuburbs()">Load Suburbs</button>
+      <input id="zn-city" placeholder="City e.g. Invercargill" autocomplete="off" />
+      <button id="zn-load-btn" type="button" onclick="znLoadSuburbs()">Load Suburbs</button>
     </div>
-    <div id="zn-alert" class="zn-alert"></div>
-    <div id="zn-list" class="zn-list"><div class="zn-empty">Enter a New Zealand city and click <strong>Load Suburbs</strong>.</div></div>
-    <div class="zn-side-foot">
-      <button class="zn-btn zn-btn-save" id="zn-save-btn" onclick="znSave()" disabled>Save Active Zones</button>
+  </div>
+  <div id="zn-alert" class="zn-alert"></div>
+  <div class="zn-main">
+    <div class="zn-map-col">
+      <div id="zn-status" class="zn-status">New Zealand · OpenStreetMap</div>
+      <div id="zn-map"></div>
     </div>
-  </aside>
-  <div class="zn-map">
-    <div id="zn-status" class="zn-status">New Zealand · OpenStreetMap</div>
-    <div id="zn-map"></div>
+    <aside class="zn-list-col">
+      <div class="zn-list-hdr">Suburbs <span id="zn-count">(0)</span></div>
+      <div id="zn-list" class="zn-list"><div class="zn-empty">Enter a New Zealand city above and click <strong>Load Suburbs</strong> to populate the list.</div></div>
+    </aside>
+  </div>
+  <div class="zn-footer">
+    <div class="zn-legend">
+      <span><i style="background:#0d9488"></i>Active zone</span>
+      <span><i style="background:#cbd5e1"></i>Inactive</span>
+    </div>
+    <button class="zn-save-btn" id="zn-save-btn" type="button" onclick="znSave()" disabled>Save Active Zones</button>
   </div>
 </div>
 <div class="zn-ov" id="zn-edit-ov">
@@ -8943,7 +8967,19 @@ function zonesPage() {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 var znMap=null,znLayers={},znZones=[],znEditKey=null,znEditLayer=null,znDrawGroup=null;
-var ZN_COLORS=['#00695C','#1565C0','#6A1B9A','#C62828','#E65100','#00838F','#558B2F','#4527A0'];
+var ZN_COLORS=['#0d9488','#2563eb','#7c3aed','#dc2626','#d97706','#0891b2','#16a34a','#9333ea'];
+var ZN_UA='BookaWaka-OwnerPanel/1.0 (zones@bookawaka.nz)';
+
+function znParseJson(r){
+  var ct=(r.headers.get('content-type')||'').toLowerCase();
+  if(ct.indexOf('json')===-1){
+    return r.text().then(function(t){
+      var hint=(t&&t.charAt(0)==='<')?' (XML/HTML response — check format=json)':'';
+      throw new Error('API returned non-JSON'+hint);
+    });
+  }
+  return r.json();
+}
 
 function znAlert(msg,type){
   var el=document.getElementById('zn-alert');
@@ -8953,11 +8989,18 @@ function znAlert(msg,type){
 }
 
 function znInitMap(){
-  if(znMap) return;
+  if(znMap){
+    setTimeout(function(){ znMap.invalidateSize(); }, 200);
+    return;
+  }
   znMap=L.map('zn-map',{zoomControl:true}).setView([-41.0,174.0],5);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(znMap);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(znMap);
   znDrawGroup=new L.FeatureGroup().addTo(znMap);
   setTimeout(function(){ znMap.invalidateSize(); }, 300);
+  setTimeout(function(){ znMap.invalidateSize(); }, 900);
+  window.addEventListener('resize',function(){
+    if(znMap) znMap.invalidateSize();
+  });
 }
 
 function znRingFromEl(el){
@@ -8979,25 +9022,37 @@ function znRingFromEl(el){
 }
 
 function znFetchCity(city){
-  return fetch('https://nominatim.openstreetmap.org/search?format=json&countrycodes=nz&limit=1&q='+encodeURIComponent(city+', New Zealand'),{
-    headers:{'Accept-Language':'en'}
-  }).then(function(r){return r.json();}).then(function(res){
+  var url='https://nominatim.openstreetmap.org/search?format=json&countrycodes=nz&limit=1&q='+encodeURIComponent(city+', New Zealand');
+  return fetch(url,{
+    headers:{
+      'Accept':'application/json',
+      'Accept-Language':'en',
+      'User-Agent':ZN_UA
+    }
+  }).then(znParseJson).then(function(res){
     if(!res||!res.length) throw new Error('City not found in New Zealand');
     return res[0];
   });
 }
 
 function znFetchSuburbs(bb){
-  var s=bb[0],n=bb[1],w=bb[2],e=bb[3];
+  var s=parseFloat(bb[0]),n=parseFloat(bb[1]),w=parseFloat(bb[2]),e=parseFloat(bb[3]);
   var q='[out:json][timeout:90];('+
     'relation["boundary"="administrative"]["admin_level"~"9|10"]('+w+','+s+','+e+','+n+');'+
     'way["boundary"="administrative"]["admin_level"~"9|10"]('+w+','+s+','+e+','+n+');'+
     'relation["place"="suburb"]('+w+','+s+','+e+','+n+');'+
     'way["place"="suburb"]('+w+','+s+','+e+','+n+');'+
     ');out geom;';
-  return fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q})
-    .then(function(r){return r.json();})
-    .then(function(data){ return (data&&data.elements)||[]; });
+  return fetch('https://overpass-api.de/api/interpreter',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/x-www-form-urlencoded',
+      'Accept':'application/json'
+    },
+    body:'data='+encodeURIComponent(q)
+  }).then(znParseJson).then(function(data){
+    return (data&&data.elements)||[];
+  });
 }
 
 function znDedupe(elements){
@@ -9025,12 +9080,13 @@ function znClearMapLayers(){
 
 function znDrawZone(z,selected){
   if(!z.boundary||!z.boundary.length) return null;
-  var color=ZN_COLORS[(z.zoneNumber-1)%ZN_COLORS.length];
+  var activeColor=ZN_COLORS[(z.zoneNumber-1)%ZN_COLORS.length];
+  var color=z.active?activeColor:'#94a3b8';
   var layer=L.polygon(z.boundary.map(function(p){return [p[0],p[1]];}),{
-    color:selected?color:(z.active?color:'#94a3b8'),
-    weight:selected?3:2,
-    fillColor:color,
-    fillOpacity:z.active?0.22:0.05
+    color:selected?activeColor:color,
+    weight:selected?3:(z.active?2.5:1.5),
+    fillColor:z.active?activeColor:'#cbd5e1',
+    fillOpacity:z.active?0.3:0.08
   }).addTo(znMap);
   layer.bindTooltip('#'+z.zoneNumber+' '+z.name);
   layer.on('click',function(){ znOpenEdit(z.key); });
@@ -9040,28 +9096,35 @@ function znDrawZone(z,selected){
 
 function znRenderList(){
   var list=document.getElementById('zn-list');
+  var countEl=document.getElementById('zn-count');
+  var activeN=znZones.filter(function(z){return z.active;}).length;
+  if(countEl) countEl.textContent='('+activeN+'/'+znZones.length+' active)';
   if(!znZones.length){
     list.innerHTML='<div class="zn-empty">No suburbs found. Try another city name.</div>';
     document.getElementById('zn-save-btn').disabled=true;
     return;
   }
   list.innerHTML=znZones.map(function(z){
-    return '<label class="zn-item'+(z.active?' on':'')+'" data-key="'+z.key+'">'+
+    return '<div class="zn-item'+(z.active?' active':'')+'" data-key="'+z.key+'">'+
+      '<div class="zn-item-info"><div class="zn-item-name">'+znEsc(z.name)+'</div>'+
+      '<div class="zn-item-meta">Zone #'+z.zoneNumber+' · '+z.boundary.length+' points</div></div>'+
+      '<label class="zn-switch" title="Toggle zone">'+
       '<input type="checkbox" '+(z.active?'checked':'')+' onchange="znToggle(\\''+z.key+'\\',this.checked)" />'+
-      '<div class="zn-item-body"><div class="zn-item-name">'+znEsc(z.name)+'</div>'+
-      '<div class="zn-item-num">Zone #'+z.zoneNumber+' · '+z.boundary.length+' points</div></div></label>';
+      '<span class="zn-switch-track"></span></label></div>';
   }).join('');
   document.getElementById('zn-save-btn').disabled=false;
 }
 
 function znRedrawAll(){
+  if(!znMap) return;
   znClearMapLayers();
   var bounds=[];
   znZones.forEach(function(z){
     var layer=znDrawZone(z,false);
-    if(layer && z.active) bounds.push(layer.getBounds());
+    if(layer) bounds.push(layer.getBounds());
   });
-  if(bounds.length) znMap.fitBounds(L.latLngBounds(bounds),{padding:[30,30]});
+  if(bounds.length) znMap.fitBounds(L.latLngBounds(bounds),{padding:[36,36]});
+  setTimeout(function(){ if(znMap) znMap.invalidateSize(); }, 150);
 }
 
 function znLoadSuburbs(){
@@ -9200,10 +9263,12 @@ function znLoadSaved(){
 }
 
 window._fbOnLogin=function(){
-  znInitMap();
-  znLoadSaved();
+  setTimeout(function(){ znInitMap(); znLoadSaved(); }, 400);
 };
-if(window.COMPANY_ID) znLoadSaved();
+document.addEventListener('DOMContentLoaded',function(){
+  setTimeout(function(){ znInitMap(); }, 500);
+});
+if(window.COMPANY_ID) setTimeout(znLoadSaved, 600);
 <\/script>`;
 
   return pageWrap(commonHead('Define Zones', css), body, commonScripts(js));
