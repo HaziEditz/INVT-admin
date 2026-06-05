@@ -1505,7 +1505,7 @@ function sidebarHTML() {
     <li class="current_section" title="Vendors"><a><span class="menu_icon"><i class="material-icons">&#xE8D3;</i></span><span class="menu_title">Vendors</span></a>
       <ul><li><a href="Vendors.aspx">Registration</a></li><li><a href="VendorCars.aspx">Vendors Cars</a></li></ul>
     </li>
-    <li class="current_section" title="Zones"><a href="Service Area.aspx"><span class="menu_icon"><i class="material-icons fa fa-puzzle-piece"></i></span><span class="menu_title">Zones</span></a></li>
+    <li class="current_section" title="Zones"><a href="Define Zones.aspx"><span class="menu_icon"><i class="material-icons fa fa-puzzle-piece"></i></span><span class="menu_title">Zones</span></a></li>
     <li class="current_section" title="Tariffs"><a href="Tariff Schedule.aspx"><span class="menu_icon"><i class="material-icons fa fa-text-width"></i></span><span class="menu_title">Tariffs</span></a></li>
     <li class="current_section" title="Promo Codes"><a><span class="menu_icon"><i class="material-icons fa fa-gift"></i></span><span class="menu_title">Promos</span></a>
       <ul><li><a href="Promos.aspx">Define</a></li><li><a href="SegmentedPromos.aspx">Segmented Entry</a></li></ul>
@@ -1552,12 +1552,12 @@ function sidebarHTML() {
         <li><a href="TM_Batches.aspx">Claim Batches</a></li>
       </ul>
     </li>
-    <li id="nav-accounts-section" class="current_section" title="Accounts" style="display:none"><a><span class="menu_icon"><i class="material-icons">&#xE8A1;</i></span><span class="menu_title">Accounts</span></a>
+    <li class="current_section" title="Accounts"><a><span class="menu_icon"><i class="material-icons">&#xE8A1;</i></span><span class="menu_title">Accounts</span></a>
       <ul>
-        <li id="nav-business-accounts" style="display:none"><a href="BusinessAccounts.aspx">Business Accounts</a></li>
-        <li id="nav-ba-billing" style="display:none"><a href="BusinessAccountBilling.aspx">Account Billing</a></li>
-        <li id="nav-acc-clients" style="display:none"><a href="AccClients.aspx">ACC Clients</a></li>
-        <li id="nav-acc-billing" style="display:none"><a href="AccBilling.aspx">ACC Billing</a></li>
+        <li><a href="BusinessAccounts.aspx">Business Accounts</a></li>
+        <li><a href="BusinessAccountBilling.aspx">Monthly Invoicing</a></li>
+        <li><a href="AccClients.aspx">ACC Clients</a></li>
+        <li><a href="AccBilling.aspx">ACC Billing</a></li>
       </ul>
     </li>
   </ul></div>
@@ -4152,7 +4152,9 @@ function saveVehicleType() {
     updatedAt:   Date.now()
   };
   window.adminWrite(vtPath() + '/' + key, 'PUT', data).then(function() {
-    showVtAlert((editKey ? 'Updated' : 'Added') + ': ' + name, 'ok');
+    vtData[key] = data;
+    renderVtTable();
+    showVtAlert((editKey ? 'Updated' : 'Added') + ': ' + name + ' → vehicleTypes/' + (window.COMPANY_ID || ''), 'ok');
     resetVtForm();
   }).catch(function(e) {
     showVtAlert('Save failed: ' + e.message, 'err');
@@ -9082,7 +9084,7 @@ function zonesPage() {
         <button type="button" class="md-btn" id="draw-btn" onclick="startDrawNew()" style="background:#388E3C;color:#fff;border-color:#388E3C">
           <i class="material-icons" style="vertical-align:middle;font-size:15px;margin-right:4px">&#xE254;</i>Draw New Zone
         </button>
-        <button type="button" class="md-btn md-btn-primary" onclick="openAddModal()">
+        <button type="button" class="md-btn md-btn-primary" onclick="openSuburbPicker()">
           <i class="material-icons" style="vertical-align:middle;font-size:15px;margin-right:4px">&#xE145;</i>Add Zone
         </button>
       </div>
@@ -9110,7 +9112,7 @@ function zonesPage() {
       </div>
       <div id="zt-empty" style="display:none;" class="zt-empty">
         <i class="material-icons">&#xE55B;</i>
-        No zones defined yet.<br>Click <strong>Draw New Zone</strong> or <strong>Add Zone</strong> to get started.
+        No zones defined yet.<br>Click <strong>Add Zone</strong> to activate Invercargill suburbs from the map.
       </div>
     </div>
 
@@ -9173,6 +9175,30 @@ function zonesPage() {
       </div>
 
       <div id="zones-map"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Suburb Zone Picker (Invercargill OSM) -->
+<div class="zmodal-bg" id="suburb-modal">
+  <div class="zmodal" style="width:920px;max-width:96vw">
+    <div class="zmodal-head" style="background:#1565C0">
+      <span>Invercargill Suburbs — Select Zones to Activate</span>
+      <button type="button" onclick="closeSuburbPicker()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">&times;</button>
+    </div>
+    <div style="padding:10px 16px;background:#E3F2FD;font-size:12px;color:#1565C0;border-bottom:1px solid #BBDEFB">
+      Suburb boundaries load automatically from OpenStreetMap. Tick the suburbs you want active — no manual drawing required.
+    </div>
+    <div style="display:flex;height:460px;min-height:360px">
+      <div id="suburb-list" style="width:300px;min-width:260px;overflow-y:auto;border-right:1px solid #E0E0E0;padding:10px;background:#FAFAFA">
+        <div style="text-align:center;padding:30px 12px;color:#9e9e9e;font-size:12px">Loading suburbs…</div>
+      </div>
+      <div id="suburb-map" style="flex:1;min-height:360px;background:#ECEFF1"></div>
+    </div>
+    <div class="zmodal-foot">
+      <span id="suburb-count-lbl" style="margin-right:auto;font-size:12px;color:#616161"></span>
+      <button type="button" class="md-btn md-btn-flat" onclick="closeSuburbPicker()">Cancel</button>
+      <button type="button" class="md-btn md-btn-primary" id="suburb-activate-btn" onclick="activateSelectedSuburbs()">Activate Selected</button>
     </div>
   </div>
 </div>
@@ -9261,7 +9287,7 @@ window._fbOnLogin = function(user) {
 
 /* ── MAP INIT ── */
 function initMap() {
-  zMap = L.map('zones-map').setView([-40.9, 174.9], 5);
+  zMap = L.map('zones-map').setView([-46.413, 168.353], 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors', maxZoom: 19
   }).addTo(zMap);
@@ -9754,6 +9780,170 @@ function _clearZoneModal() {
   ['z-name','z-notes','z-base','z-perkm','z-waiting','z-minfare'].forEach(function(id){
     document.getElementById(id).value = '';
   });
+}
+
+/* ── SUBURB ZONE PICKER (Invercargill / OSM) ── */
+var _suburbMap = null, _suburbItems = [], _suburbLayers = {}, _suburbLayerGroup = null;
+var INV_SUBURB_FALLBACK = ['Appleby','Ascot Park','Avenal','Clifton','Glengarry','Glendale','Grasmere','Greenhills','Georgetown','Hawthorndale','Heidelberg','Invercargill Central','Kew','Kingswell','Lucknow','Lorneville','Marama','Newfield','Otatara','Prestonville','Richmond','Rockdale','Rosedale','South Invercargill','Strathern','Tisbury','Waihopai','Waikiwi','Waverley','Windsor','Woodend'];
+
+function initSuburbMap() {
+  if (_suburbMap) return;
+  _suburbMap = L.map('suburb-map', { zoomControl: true }).setView([-46.413, 168.353], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OSM' }).addTo(_suburbMap);
+  _suburbLayerGroup = L.featureGroup().addTo(_suburbMap);
+}
+
+function _geomToCoords(el) {
+  if (!el.geometry || !el.geometry.length) return [];
+  return el.geometry.map(function(p) { return [p.lat, p.lon]; });
+}
+
+function _suburbKey(name) {
+  return 'suburb_' + String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+}
+
+function fetchInvSuburbs() {
+  var listEl = document.getElementById('suburb-list');
+  listEl.innerHTML = '<div style="text-align:center;padding:30px 12px;color:#9e9e9e;font-size:12px">Loading suburbs from OpenStreetMap…</div>';
+  var query = '[out:json][timeout:90];area["name"="Invercargill"]["admin_level"="6"]->.city;('
+    + 'relation["boundary"="administrative"]["admin_level"~"9|10"](area.city);'
+    + 'way["place"~"suburb|neighbourhood"](area.city);'
+    + 'relation["place"~"suburb|neighbourhood"](area.city);'
+    + ');out geom;';
+  return fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'data=' + encodeURIComponent(query)
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    var items = [];
+    (data.elements || []).forEach(function(el) {
+      var name = el.tags && (el.tags.name || el.tags['name:en']);
+      var coords = _geomToCoords(el);
+      if (!name || coords.length < 3) return;
+      items.push({ id: el.id, name: name, coords: coords, source: 'overpass' });
+    });
+    if (items.length < 3) return fetchInvSuburbsFallback();
+    return items;
+  }).catch(function() { return fetchInvSuburbsFallback(); });
+}
+
+function fetchInvSuburbsFallback() {
+  var items = [], idx = 0;
+  function next() {
+    if (idx >= INV_SUBURB_FALLBACK.length) return Promise.resolve(items);
+    var name = INV_SUBURB_FALLBACK[idx++];
+    var url = 'https://nominatim.openstreetmap.org/search?suburb=' + encodeURIComponent(name)
+      + '&city=Invercargill&country=New+Zealand&format=json&polygon_geojson=1&limit=1';
+    return fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'BookaWaka/1.0' } })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res && res[0] && res[0].geojson) {
+          var coords = [];
+          var g = res[0].geojson;
+          if (g.type === 'Polygon') coords = (g.coordinates[0] || []).map(function(c) { return [c[1], c[0]]; });
+          else if (g.type === 'MultiPolygon' && g.coordinates[0]) coords = (g.coordinates[0][0] || []).map(function(c) { return [c[1], c[0]]; });
+          if (coords.length >= 3) items.push({ id: 'fb_' + name, name: name, coords: coords, source: 'nominatim' });
+        }
+        return new Promise(function(resolve) { setTimeout(resolve, 1100); }).then(next);
+      }).catch(function() { return new Promise(function(resolve) { setTimeout(resolve, 1100); }).then(next); });
+  }
+  return next();
+}
+
+function renderSuburbPicker() {
+  var listEl = document.getElementById('suburb-list');
+  if (!_suburbItems.length) {
+    listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#9e9e9e">No suburbs found. Try again later.</div>';
+    return;
+  }
+  _suburbItems.sort(function(a, b) { return a.name.localeCompare(b.name); });
+  listEl.innerHTML = _suburbItems.map(function(s, i) {
+    var key = _suburbKey(s.name);
+    var exists = !!allZones[key];
+    var checked = exists ? 'checked' : '';
+    var disabled = exists ? ' disabled title="Already active"' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:13px' + (exists ? ';opacity:.55' : '') + '">'
+      + '<input type="checkbox" class="suburb-chk" data-idx="' + i + '" ' + checked + disabled + ' onchange="highlightSuburb(' + i + ',this.checked)"/>'
+      + '<span style="font-weight:500">' + escH(s.name) + '</span>'
+      + (exists ? '<span style="font-size:10px;color:#2E7D32;margin-left:auto">Active</span>' : '')
+      + '</label>';
+  }).join('');
+  document.getElementById('suburb-count-lbl').textContent = _suburbItems.length + ' suburbs loaded';
+  _suburbItems.forEach(function(s, i) {
+    var color = ZONE_COLORS[i % ZONE_COLORS.length];
+    var poly = L.polygon(s.coords, { color: color, fillColor: color, fillOpacity: 0.2, weight: 1.5 });
+    poly._suburbIdx = i;
+    poly.bindTooltip(s.name, { sticky: true });
+    poly.on('click', function() {
+      var chk = document.querySelector('.suburb-chk[data-idx="' + i + '"]');
+      if (chk && !chk.disabled) { chk.checked = !chk.checked; highlightSuburb(i, chk.checked); }
+    });
+    _suburbLayers[i] = poly;
+    _suburbLayerGroup.addLayer(poly);
+  });
+  if (_suburbLayerGroup.getLayers().length) _suburbMap.fitBounds(_suburbLayerGroup.getBounds(), { padding: [20, 20] });
+}
+
+function highlightSuburb(idx, on) {
+  var layer = _suburbLayers[idx];
+  if (!layer) return;
+  var color = ZONE_COLORS[idx % ZONE_COLORS.length];
+  layer.setStyle({ fillOpacity: on ? 0.45 : 0.2, weight: on ? 2.5 : 1.5, color: color, fillColor: color });
+}
+
+function openSuburbPicker() {
+  document.getElementById('suburb-modal').classList.add('open');
+  setTimeout(function() {
+    initSuburbMap();
+    if (_suburbMap) _suburbMap.invalidateSize();
+    _suburbItems = [];
+    Object.keys(_suburbLayers).forEach(function(k) { try { _suburbLayerGroup.removeLayer(_suburbLayers[k]); } catch(e) {} });
+    _suburbLayers = {};
+    fetchInvSuburbs().then(function(items) {
+      _suburbItems = items || [];
+      renderSuburbPicker();
+      if (_suburbMap) _suburbMap.invalidateSize();
+    });
+  }, 80);
+}
+
+function closeSuburbPicker() {
+  document.getElementById('suburb-modal').classList.remove('open');
+}
+
+function activateSelectedSuburbs() {
+  var chks = document.querySelectorAll('.suburb-chk:checked:not(:disabled)');
+  if (!chks.length) { alert('Select at least one suburb to activate.'); return; }
+  var btn = document.getElementById('suburb-activate-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  var promises = [], maxId = Object.keys(allZones).length;
+  chks.forEach(function(chk) {
+    var s = _suburbItems[parseInt(chk.getAttribute('data-idx'), 10)];
+    if (!s) return;
+    var key = _suburbKey(s.name);
+    if (allZones[key]) return;
+    maxId++;
+    var color = ZONE_COLORS[(maxId - 1) % ZONE_COLORS.length];
+    var zone = {
+      companyId: COMPANY_ID,
+      zoneName: s.name, TariffName: s.name, name: s.name,
+      color: color, coordinates: s.coords,
+      active: true, isSuburbZone: true, osmId: s.id, suburbSource: s.source,
+      createdAt: Date.now(), updatedAt: Date.now(), Id: maxId
+    };
+    promises.push(adminWrite('tariffZones/' + key, 'PUT', zone).then(function() {
+      allZones[key] = zone;
+      drawZonePoly(key, zone);
+    }));
+  });
+  Promise.all(promises).then(function() {
+    renderTable();
+    _indexQuickSlots();
+    closeSuburbPicker();
+    setMapStatus('Activated ' + promises.length + ' suburb zone(s).', 4000);
+    if (drawnLayer.getLayers().length) zMap.fitBounds(drawnLayer.getBounds(), { padding: [24, 24] });
+  }).catch(function(e) { alert('Save failed: ' + e.message); })
+    .finally(function() { btn.disabled = false; btn.textContent = 'Activate Selected'; });
 }
 
 function openAddModal() {
@@ -10397,6 +10587,52 @@ function tLoadTimeRates(t) {
   document.getElementById('t-special-dates').value = (t.specialRateDates || []).join('\\n');
   tToggleTimeRates();
 }
+function buildDriverTariffPayload(t, numericId) {
+  var waiting = parseFloat(t.waitingRate) || 0;
+  var payload = {
+    id: String(numericId),
+    name: t.name || t.TariffName || ('Tariff ' + numericId),
+    companyId: t.companyId || window.COMPANY_ID || '',
+    flagFall: parseFloat(t.baseFare) || 0,
+    flagfall: parseFloat(t.baseFare) || 0,
+    base: parseFloat(t.baseFare) || 0,
+    baseFare: parseFloat(t.baseFare) || 0,
+    ratePerKm: parseFloat(t.pricePerKm) || 0,
+    perKm: parseFloat(t.pricePerKm) || 0,
+    kmRate: parseFloat(t.pricePerKm) || 0,
+    pricePerKm: parseFloat(t.pricePerKm) || 0,
+    waitingPerMin: waiting,
+    waitPerMin: waiting,
+    waiting: waiting,
+    waitingRate: waiting,
+    minimumFare: parseFloat(t.minimumFare) || 0,
+    speedThreshold: parseInt(t.speedThreshold, 10) || 1,
+    waitingInterval: parseInt(t.waitingInterval, 10) || 60,
+    updatedAt: Date.now()
+  };
+  if (t.nightEnabled) {
+    payload.nightEnabled = true;
+    payload.nightStart = t.nightStart || '22:00';
+    payload.nightEnd = t.nightEnd || '06:00';
+    payload.nightFlagFall = parseFloat(t.nightBaseFare) || payload.flagFall;
+    payload.nightRatePerKm = parseFloat(t.nightPricePerKm) || payload.ratePerKm;
+    payload.nightWaitingPerMin = parseFloat(t.nightWaitingRate) || waiting;
+    payload.nightMinimumFare = parseFloat(t.nightMinimumFare) || payload.minimumFare;
+  }
+  if (t.weekendEnabled) {
+    payload.weekendEnabled = true;
+    payload.weekendMultiplier = parseFloat(t.weekendMultiplier) || 1.2;
+  }
+  if (t.holidayEnabled) {
+    payload.holidayEnabled = true;
+    payload.holidayMultiplier = parseFloat(t.holidayMultiplier) || 1.5;
+    payload.useNzHolidays = t.useNzHolidays !== false;
+    payload.nzPublicHolidays = t.nzPublicHolidays || NZ_PUBLIC_HOLIDAYS;
+    payload.specialRateDates = t.specialRateDates || [];
+  }
+  return payload;
+}
+
 function tReadTimeRates() {
   var special = (document.getElementById('t-special-dates').value || '').split(/[\\n,]+/).map(function(s){return s.trim();}).filter(Boolean);
   return {
@@ -10603,15 +10839,14 @@ function saveTariff() {
   Object.assign(tariff, tReadTimeRates());
 
   var key = editId || ('tariff_' + Date.now());
-  // Add driver-app-friendly field alias
   tariff.name = tariff.TariffName;
+  var driverTariff = buildDriverTariffPayload(tariff, numericId);
   adminWrite('tariffZones/' + key, 'PUT', tariff).then(function() {
     allTariffs[key] = tariff;
     renderTariffs();
     closeTariffModal();
-    // Dual-write to tariffs/{companyId}/{numericId} so driver app reads custom rates
-    adminWrite('tariffs/'+(window.COMPANY_ID)+'/' + numericId, 'PUT', tariff).catch(function(e){
-      console.warn('[Tariffs] Dual-write failed:', e.message);
+    adminWrite('tariffs/' + (window.COMPANY_ID || '') + '/' + numericId, 'PUT', driverTariff).catch(function(e){
+      console.warn('[Tariffs] Driver-app sync failed:', e.message);
     });
   }).catch(function(err) {
     errEl.textContent = 'Save failed: ' + err.message;
@@ -11066,7 +11301,9 @@ function loadVendorDropdown() {
 }
 
 function loadVehicleTypes() {
-  fbDB.ref('vehicleTypes').once('value').then(function(snap) {
+  var cid = window.COMPANY_ID || '';
+  var path = cid ? ('vehicleTypes/' + cid) : 'vehicleTypes';
+  fbDB.ref(path).once('value').then(function(snap) {
     var data = snap.val();
     if (!data) return;
     var sel = document.getElementById('vcar-type');
@@ -13942,7 +14179,7 @@ function businessAccountsPage() {
   <div class="ba-card">
     <table class="ba-tbl">
       <thead><tr>
-        <th>Account Name</th><th>Account Code</th><th>Contact</th><th>Email</th><th>Phone</th>
+        <th>Account Name</th><th>Account #</th><th>Contact</th><th>Credit Limit</th><th>Employees</th>
         <th>Payment Terms</th><th>Status</th><th>Created</th><th></th>
       </tr></thead>
       <tbody id="ba-tbody"><tr><td colspan="9" class="ba-empty">Loading&hellip;</td></tr></tbody>
@@ -13970,6 +14207,10 @@ function businessAccountsPage() {
     <div class="ba-g2">
       <div class="ba-fld"><label>Email</label><input type="email" id="ba-f-email" placeholder="billing@company.com"></div>
       <div class="ba-fld"><label>Phone</label><input type="tel" id="ba-f-phone" placeholder="+64 ..."></div>
+    </div>
+    <div class="ba-g2">
+      <div class="ba-fld"><label>Credit Limit ($)</label><input type="number" id="ba-f-credit" min="0" step="0.01" placeholder="0 = unlimited"></div>
+      <div class="ba-fld"><label>Employee List</label><textarea id="ba-f-employees" placeholder="One name per line — staff authorised to book on account" style="min-height:72px"></textarea></div>
     </div>
     <div class="ba-g2">
       <div class="ba-fld"><label>Payment Terms</label>
@@ -14022,12 +14263,14 @@ function baRender(){
     var a=_baRec[k];
     var isActive=a.active!==false&&a.status!=='inactive';
     var dt=a.createdAt?new Date(a.createdAt).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'}):'—';
+    var empCount = Array.isArray(a.employees) ? a.employees.length : (a.employees ? String(a.employees).split(/\\n/).filter(Boolean).length : 0);
+    var credit = a.creditLimit != null ? ('$'+parseFloat(a.creditLimit).toFixed(0)) : '—';
     return '<tr>'
       +'<td style="font-weight:600">'+_bX(a.name)+'</td>'
       +'<td><span class="ba-code">'+_bX(a.accountCode||'—')+'</span></td>'
       +'<td>'+_bX(a.contact||'—')+'</td>'
-      +'<td>'+_bX(a.email||'—')+'</td>'
-      +'<td>'+_bX(a.phone||'—')+'</td>'
+      +'<td>'+credit+'</td>'
+      +'<td>'+(empCount?empCount+' staff':'—')+'</td>'
       +'<td>'+_bX(a.paymentTerms||'—')+'</td>'
       +'<td><span class="ba-chip '+(isActive?'active':'inactive')+'">'+(isActive?'Active':'Inactive')+'</span></td>'
       +'<td style="color:#94a3b8;font-size:12px">'+dt+'</td>'
@@ -14061,6 +14304,8 @@ function baOpen(){
   document.getElementById('ba-f-contact').value='';
   document.getElementById('ba-f-email').value='';
   document.getElementById('ba-f-phone').value='';
+  document.getElementById('ba-f-credit').value='';
+  document.getElementById('ba-f-employees').value='';
   document.getElementById('ba-f-notes').value='';
   document.getElementById('ba-f-terms').value='20th of month following';
   document.getElementById('ba-f-status').value='active';
@@ -14075,6 +14320,8 @@ function baEdit(k){
   document.getElementById('ba-f-contact').value=a.contact||'';
   document.getElementById('ba-f-email').value=a.email||'';
   document.getElementById('ba-f-phone').value=a.phone||'';
+  document.getElementById('ba-f-credit').value=a.creditLimit!=null?a.creditLimit:'';
+  document.getElementById('ba-f-employees').value=Array.isArray(a.employees)?a.employees.join('\\n'):(a.employees||'');
   document.getElementById('ba-f-notes').value=a.notes||'';
   document.getElementById('ba-f-terms').value=a.paymentTerms||'20th of month following';
   document.getElementById('ba-f-status').value=(a.active===false||a.status==='inactive')?'inactive':'active';
@@ -14095,6 +14342,8 @@ function baSave(){
     contact:document.getElementById('ba-f-contact').value.trim(),
     email:document.getElementById('ba-f-email').value.trim(),
     phone:document.getElementById('ba-f-phone').value.trim(),
+    creditLimit:parseFloat(document.getElementById('ba-f-credit').value)||0,
+    employees:(document.getElementById('ba-f-employees').value||'').split(/\\n/).map(function(s){return s.trim();}).filter(Boolean),
     paymentTerms:document.getElementById('ba-f-terms').value,
     notes:document.getElementById('ba-f-notes').value.trim(),
     status:statusVal,
@@ -14186,6 +14435,10 @@ function accClientsPage() {
 
   const body = `
 <div class="ac-wrap">
+  <div class="ac-vendor" id="ac-vendor-bar" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding:12px 16px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;font-size:13px;color:#134e4a">
+    <span><strong>ACC Vendor ID:</strong> <code id="ac-vendor-id" style="background:#fff;padding:2px 8px;border-radius:4px;font-size:13px">Loading…</code></span>
+    <span style="font-size:12px;color:#5eead4">Used for trip authorization &amp; monthly ACC invoicing</span>
+  </div>
   <div class="ac-hdr">
     <div class="ac-title">ACC Clients</div>
     <button class="ac-btn ac-btn-primary" onclick="acOpen()">
@@ -14317,6 +14570,13 @@ function poStatus(po){
 
 function acLoad(){
   adminRead('accClients/'+_acCID).then(function(d){_acRec=d||{};acRender();}).catch(function(){acRender();});
+  adminRead('companySettings/'+_acCID+'/accVendorId').then(function(v){
+    var el=document.getElementById('ac-vendor-id');
+    if(el) el.textContent=(v!=null&&String(v).trim())?String(v).trim():'Not configured — set in Company Profile';
+  }).catch(function(){
+    var el=document.getElementById('ac-vendor-id');
+    if(el) el.textContent='Not configured — set in Company Profile';
+  });
 }
 function acRender(){
   var keys=Object.keys(_acRec).sort(function(a,b){return _aX((_acRec[a].name||'')) < _aX((_acRec[b].name||''))?-1:1;});
@@ -16145,6 +16405,15 @@ if (window.COMPANY_ID) loadBatches();
 
 function workingShiftsPage() {
   const css = `<style>
+.plan-shell{max-width:1320px;margin:0 auto;padding:12px 8px}
+.plan-shell .md-card{border-radius:10px;box-shadow:0 1px 4px rgba(15,23,42,.06);border:1px solid #e8eef2;overflow:hidden}
+.plan-shell .md-card-toolbar{background:linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%);border-bottom:1px solid #e2e8f0;padding:12px 18px}
+.plan-shell .md-card-toolbar-heading-text{font-size:15px;font-weight:700;color:#1e293b;letter-spacing:-.2px}
+.plan-shell .md-card-content{padding:20px 18px}
+.plan-shell label{font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.plan-shell input,.plan-shell select{border-radius:6px!important;border-color:#e2e8f0!important;transition:border-color .15s}
+.plan-shell input:focus,.plan-shell select:focus{border-color:#00695C!important;outline:none}
+.plan-shell .md-btn{border-radius:6px;font-weight:600}
 .shift-color-dot{width:14px;height:14px;border-radius:50%;display:inline-block;vertical-align:middle;margin-right:6px}
 .sh-badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
 .sh-active{background:#E8F5E9;color:#2E7D32}.sh-inactive{background:#FAFAFA;color:#9e9e9e;border:1px solid #e0e0e0}
@@ -16159,7 +16428,7 @@ function workingShiftsPage() {
 #sh-table tbody td:last-child{border-right:none}
 </style>`;
   const body = `
-<div class="uk-grid" data-uk-grid-margin="">
+<div class="plan-shell"><div class="uk-grid" data-uk-grid-margin="">
   <div class="uk-width-medium-2-3">
     <div class="md-card">
       <div class="md-card-toolbar">
@@ -16193,7 +16462,7 @@ function workingShiftsPage() {
       </div>
     </div>
   </div>
-</div>`;
+</div></div>`;
   const js = `<script>
 var shData={},_shRef=null;
 function ss(v,d){return(v==null||v==='')?d:(String(v).trim()||d);}
@@ -16248,6 +16517,14 @@ window._fbOnLogin=function(){if(!_shRef)_shRef=window.adminListen('workingShifts
 // ── ASSIGN SHIFTS (Plannings > Assign Shifts) ─────────────────────────────────
 function assignShiftsPage() {
   const css = `<style>
+.plan-shell{max-width:1320px;margin:0 auto;padding:12px 8px}
+.plan-shell .md-card{border-radius:10px;box-shadow:0 1px 4px rgba(15,23,42,.06);border:1px solid #e8eef2;overflow:hidden}
+.plan-shell .md-card-toolbar{background:linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%);border-bottom:1px solid #e2e8f0;padding:12px 18px}
+.plan-shell .md-card-toolbar-heading-text{font-size:15px;font-weight:700;color:#1e293b;letter-spacing:-.2px}
+.plan-shell .md-card-content{padding:20px 18px}
+.plan-shell label{font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.plan-shell input,.plan-shell select{border-radius:6px!important;border-color:#e2e8f0!important}
+.plan-shell .md-btn{border-radius:6px;font-weight:600}
 .asgn-badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;background:#E0F2F1;color:#00695C}
 .asgn-field-label{font-size:11px;color:#9e9e9e;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
 #asgn-table{width:100%;border-collapse:collapse;font-size:13px}
@@ -16260,7 +16537,7 @@ function assignShiftsPage() {
 #asgn-table tbody td:last-child{border-right:none}
 </style>`;
   const body = `
-<div class="uk-grid" data-uk-grid-margin="">
+<div class="plan-shell"><div class="uk-grid" data-uk-grid-margin="">
   <div class="uk-width-medium-2-3">
     <div class="md-card">
       <div class="md-card-toolbar">
@@ -16296,7 +16573,7 @@ function assignShiftsPage() {
       </div>
     </div>
   </div>
-</div>`;
+</div></div>`;
   const js = `<script>
 var asgnData={},asgnDrivers={},asgnShifts={},_asgnRefs={};
 function ss(v,d){return(v==null||v==='')?d:(String(v).trim()||d);}
@@ -16362,7 +16639,11 @@ window._fbOnLogin=function(){
 // ── USER SCHEDULE (Plannings > Schedules) ────────────────────────────────────
 function userSchedulePage() {
   const css = `<style>
-.sched-grid{display:grid;grid-template-columns:160px repeat(7,1fr);gap:2px;font-size:12px}
+.plan-shell{max-width:1400px;margin:0 auto;padding:12px 8px}
+.plan-shell .md-card{border-radius:10px;box-shadow:0 1px 4px rgba(15,23,42,.06);border:1px solid #e8eef2;overflow:hidden}
+.plan-shell .md-card-toolbar{background:linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%);border-bottom:1px solid #e2e8f0;padding:12px 18px}
+.plan-shell .md-card-toolbar-heading-text{font-size:15px;font-weight:700;color:#1e293b}
+.sched-grid{display:grid;grid-template-columns:160px repeat(7,1fr);gap:2px;font-size:12px;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .sched-hdr{background:#37474F;color:#fff;padding:8px 6px;text-align:center;font-weight:600;line-height:1.3}
 .sched-hdr.today-col{background:#00695C}
 .sched-hdr-day{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;opacity:.8}
@@ -16379,7 +16660,7 @@ function userSchedulePage() {
 </style>`;
 
   const body = `
-<div class="uk-grid" data-uk-grid-margin="">
+<div class="plan-shell"><div class="uk-grid" data-uk-grid-margin="">
   <div class="uk-width-1-1">
     <div class="md-card">
       <div class="md-card-toolbar">
@@ -16417,7 +16698,7 @@ function userSchedulePage() {
       </div>
     </div>
   </div>
-</div>`;
+</div></div>`;
 
   const js = `<script>
 var schedDrivers={},schedShifts={},schedAsgn={},schedDriverFull={},_schedRefs={};
@@ -16565,7 +16846,9 @@ function replayPage() {
 #rat-print:hover{background:#263238}
 /* Map — exact pixel size, Leaflet measures once and never changes */
 #rat-map-wrap{flex:1;position:relative;overflow:hidden;height:580px}
-#rat-map{position:absolute;top:0;left:0;right:0;bottom:0}
+#rat-map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:2}
+.leaflet-container{z-index:2!important}
+#rat-map-empty{display:flex;flex-direction:column;align-items:center;justify-content:center}
 #rat-map-empty{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#BDBDBD;pointer-events:none;font-size:13px;line-height:1.8;z-index:1}
 #rat-map-empty i{font-size:42px;opacity:.25;display:block}
 #rat-geocode-msg{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:5px 14px;border-radius:14px;pointer-events:none;z-index:1000;display:none;white-space:nowrap}
@@ -16636,7 +16919,8 @@ function fmtMin(v){var n=parseFloat(v);return(!isNaN(n)&&n>0)?n.toFixed(0)+' min
 
 function initMap(){
   if(_rMap)return;
-  /* No setView here — tiles only load once when renderPins calls fitBounds/setView */
+  var el=document.getElementById('rat-map');
+  if(!el||!el.offsetParent&&el.offsetWidth===0)return;
   _rMap=L.map('rat-map',{
     zoomControl:true,
     attributionControl:false,
@@ -16645,6 +16929,8 @@ function initMap(){
     markerZoomAnimation:false
   });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,keepBuffer:4}).addTo(_rMap);
+  _rMap.setView([-46.413,168.353],11);
+  _rMap.whenReady(function(){_rMap.invalidateSize({animate:false});});
 }
 
 function clearMapLayers(){_rMapLayers.forEach(function(l){try{l.remove();}catch(e){}});_rMapLayers=[];}
@@ -17155,16 +17441,9 @@ function starHtml(n){
   for(var i=1;i<=5;i++) s += (i<=v) ? '★' : '<span class="stars-empty">★</span>';
   return '<span class="stars">'+s+'</span>';
 }
-function processCustData(data){
-  var map={}, trips={};
-  if(data&&typeof data==='object'){
-    Object.keys(data).forEach(function(bid){
-      var drivers=data[bid];
-      if(!drivers||typeof drivers!=='object') return;
-      Object.keys(drivers).forEach(function(did){
-        var j=drivers[did];
+function _custIngestJob(bid,j,did,map,trips){
         if(!j||typeof j!=='object') return;
-        var rawPhone=(j.PhoneNo||j.phoneNo||j.phone||'').trim();
+        var rawPhone=(j.PhoneNo||j.phoneNo||j.phone||j.Phone||j.passengerPhone||'').trim();
         if(!rawPhone) return;
         var key = phoneDigitsOnly(rawPhone);
         if(!key) return;
@@ -17183,16 +17462,27 @@ function processCustData(data){
         if(rawPhone.length>c.phone.length) c.phone=rawPhone;
         if(!trips[key]) trips[key]=[];
         trips[key].push({
-          bid:bid, did:(j.DriverId||did),
+          bid:bid, did:(j.DriverId||j.driverId||did),
           driver:(j.DriverName||j.driverName||j.driver||did||'—'),
           vehicle:(j.VehicleId||j.vehicleId||'—'),
           pickup:(j.pickup||j.Pickup||j.pickupAddress||j.PickupAddress||j.from||'—'),
           dropoff:(j.destination||j.Destination||j.dropAddress||j.DropAddress||j.dropoff||j.to||'—'),
-          status:(j.jobstatus||'—'),
+          status:(j.jobstatus||j.status||j.BookingStatus||'—'),
           fare:fare, ts:tsNum,
           payment:(j.paymentMethod||j.PaymentMethod||j.paymentType||'—')
         });
-      });
+}
+function processCustData(data){
+  var map={}, trips={};
+  if(data&&typeof data==='object'){
+    Object.keys(data).forEach(function(bid){
+      var entry=data[bid];
+      if(!entry||typeof entry!=='object') return;
+      var vals=Object.values(entry);
+      var isFlat=!!(entry.bookingId||entry.BookingId||entry.phone||entry.PhoneNo||entry.status||entry.jobstatus)
+        ||(vals.length>0&&vals.every(function(v){return v===null||typeof v!=='object';}));
+      if(isFlat){ _custIngestJob(bid,entry,entry.driverId||entry.DriverId||'',map,trips); }
+      else { Object.keys(entry).forEach(function(did){ _custIngestJob(bid,entry[did],did,map,trips); }); }
     });
   }
   _tripsByPhone = trips;
@@ -17202,6 +17492,16 @@ function processCustData(data){
   document.getElementById('cust-stats').style.display='flex';
   loadRatings();
   filterCust();
+}
+function loadCustFromFirebase(){
+  var cid=window.COMPANY_ID||'';
+  Promise.all([
+    window.adminRead('allbookings/'+cid).catch(function(){return {};}),
+    window.adminRead('completedJobs/'+cid).catch(function(){return {};})
+  ]).then(function(res){
+    var merged=Object.assign({},res[1]||{},res[0]||{});
+    processCustData(merged);
+  });
 }
 function loadRatings(){
   var cid = window.COMPANY_ID;
@@ -17336,7 +17636,7 @@ function openProfile(key){
   document.getElementById('pp-modal').classList.add('show');
 }
 function closeProfile(){ document.getElementById('pp-modal').classList.remove('show'); }
-window._fbOnLogin=function(){if(!_custRef)_custRef=window.adminListenLast('joback',500,processCustData);};
+window._fbOnLogin=function(){loadCustFromFirebase();if(!_custRef)_custRef=window.adminListen('allbookings/'+(window.COMPANY_ID||''),function(){loadCustFromFirebase();});};
 <\/script>`;
   return pageWrap(commonHead('Passenger History', css), body, commonScripts(js));
 }
@@ -17888,7 +18188,7 @@ function poisPage() {
   const js = `
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
 <script>
-var poiData={},poiAll=[],poiMiniMap=null,poiMarker=null,_poiRef=null;
+var poiData={},poiAll=[],poiMiniMap=null,poiMarker=null,_poiRef=null,_poiSaving=false;
 function ss(v,d){return(v==null||v==='')?d:(String(v).trim()||d);}
 function poiAlert(id,msg,type){var el=document.getElementById(id);el.style.cssText='display:block;padding:10px 14px;border-radius:4px;font-size:13px;border-left:4px solid '+(type==='ok'?'#4CAF50':'#F44336')+';background:'+(type==='ok'?'#E8F5E9':'#FFEBEE')+';color:'+(type==='ok'?'#1B5E20':'#B71C1C');el.textContent=msg;if(type==='ok')setTimeout(function(){el.style.display='none';},3500);}
 function initPoiMap(){
@@ -17924,11 +18224,19 @@ function renderPoiTable(rows){
   }).join('');
 }
 function savePoi(){
+  if(_poiSaving) return;
   var name=document.getElementById('poi-name').value.trim();
   if(!name){poiAlert('poi-form-alert','Name is required.','err');return;}
   var key=document.getElementById('poi-edit-key').value||('poi_'+Date.now());
   var data={name:name,type:document.getElementById('poi-type').value,address:document.getElementById('poi-address').value.trim(),lat:parseFloat(document.getElementById('poi-lat').value)||null,lng:parseFloat(document.getElementById('poi-lng').value)||null,notes:document.getElementById('poi-notes').value.trim(),updatedAt:Date.now()};
-  window.adminWrite('pois/'+key,'PUT',data).then(function(){poiAlert('poi-form-alert','POI saved.','ok');resetPoiForm();}).catch(function(e){poiAlert('poi-form-alert','Error: '+e.message,'err');});
+  _poiSaving=true;
+  window.adminWrite('pois/'+key,'PUT',data).then(function(){
+    poiData[key]=data;
+    processPoisData(poiData);
+    poiAlert('poi-form-alert','POI saved.','ok');
+    resetPoiForm();
+  }).catch(function(e){poiAlert('poi-form-alert','Error: '+e.message,'err');})
+    .finally(function(){_poiSaving=false;});
 }
 function editPoi(btn){ var k=btn.getAttribute('data-k');
   var p=poiData[k]||{};
@@ -17948,7 +18256,7 @@ function deletePoi(btn){ var k=btn.getAttribute('data-k');
   window.adminWrite('pois/'+k,'DELETE',null).then(function(){poiAlert('poi-list-alert','Deleted.','ok');}).catch(function(e){poiAlert('poi-list-alert','Error: '+e.message,'err');});
 }
 function resetPoiForm(){['poi-edit-key','poi-name','poi-address','poi-lat','poi-lng','poi-notes'].forEach(function(id){document.getElementById(id).value='';});document.getElementById('poi-type').selectedIndex=0;document.getElementById('poi-form-title').textContent='Add POI';document.getElementById('poi-cancel').style.display='none';}
-window._fbOnLogin=function(){initPoiMap();if(!_poiRef)_poiRef=window.adminListen('pois',processPoisData);};
+window._fbOnLogin=function(){initPoiMap();if(_poiRef)return;_poiRef=window.adminListen('pois',processPoisData);};
 <\/script>`;
   return pageWrap(commonHead('Points of Interest', css), body, commonScripts(js));
 }
@@ -18026,7 +18334,7 @@ function jobsEditorPage() {
             <option value="offered">Offered</option><option value="assigned">Assigned</option>
             <option value="reached">Reached</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option>
           </select>
-          <span class="live-badge"><span class="live-dot green"></span>LIVE · last 400</span>
+          <span class="live-badge"><span class="live-dot green"></span>LIVE · all sources</span>
         </div>
       </div>
       <div style="overflow-x:auto"><table id="je-table">
@@ -18050,28 +18358,64 @@ function _detectBookingType(desc,existing){
   if(/total.?mobility|\btm\b/.test(d))return 'tm';
   return 'taxi';
 }
+function ingestJeJob(bid,j,did){
+  if(!j||typeof j!=='object') return;
+  var myCid=String(window.COMPANY_ID||'');
+  if(j.companyId&&myCid&&String(j.companyId)!==myCid) return;
+  var driverKey=String(j.DriverId||j.driverId||did||'');
+  var hasDriverList=_jeDrivers&&Object.keys(_jeDrivers).length>0;
+  if(hasDriverList&&driverKey&&!_jeDrivers[driverKey]&&!_jeDrivers[did]) return;
+  var desc=ss(j.discription||j.description||j.notes,'');
+  var bt=_detectBookingType(desc,j.bookingType||j.jobType||j.serviceType||'');
+  var status=ss(j.jobstatus||j.jobStatus||j.status||j.BookingStatus,'—');
+  jeAll.push({
+    bookingId:bid,driverId:ss(driverKey,did||'—'),vehicleId:ss(j.VehicleId||j.vehicleId,'—'),
+    phoneNo:ss(j.PhoneNo||j.phoneNo||j.phone||j.Phone,'—'),companyId:ss(j.companyId,'—'),
+    jobstatus:status,description:desc,bookingType:bt,_dkey:driverKey||did,_raw:j
+  });
+}
+function processJobsFromSource(data){
+  if(!data||typeof data!=='object') return;
+  Object.keys(data).forEach(function(bid){
+    var entry=data[bid];
+    if(!entry||typeof entry!=='object') return;
+    var vals=Object.values(entry);
+    var isFlat=!!(entry.bookingId||entry.BookingId||entry.driverId||entry.DriverId||entry.status||entry.jobstatus||entry.jobStatus)
+      ||(vals.length>0&&vals.every(function(v){return v===null||typeof v!=='object';}));
+    if(isFlat){ ingestJeJob(bid,entry,entry.driverId||entry.DriverId||''); }
+    else { Object.keys(entry).forEach(function(did){ ingestJeJob(bid,entry[did],did); }); }
+  });
+}
 function processJobsData(data){
   jeAll=[];
-  var myCid=String(window.COMPANY_ID||'');
-  if(data&&typeof data==='object'){
-    Object.keys(data).forEach(function(bid){
-      var drivers=data[bid];
-      if(!drivers||typeof drivers!=='object') return;
-      Object.keys(drivers).forEach(function(did){
-        var j=drivers[did];
-        if(!j||typeof j!=='object') return;
-        // Reject jobs explicitly belonging to another company
-        if(j.companyId&&myCid&&String(j.companyId)!==myCid) return;
-        // For jobs with no companyId, only include if the driver key is in our company's driver list
-        if(!j.companyId&&_jeDrivers&&!_jeDrivers[did]) return;
-        var desc=ss(j.discription||j.description,'');
-        var bt=_detectBookingType(desc,j.bookingType||j.jobType||'');
-        jeAll.push({bookingId:bid,driverId:ss(j.DriverId||did,did),vehicleId:ss(j.VehicleId,'—'),phoneNo:ss(j.PhoneNo,'—'),companyId:ss(j.companyId,'—'),jobstatus:ss(j.jobstatus,'—'),description:desc,bookingType:bt,_dkey:did,_raw:j});
-      });
-    });
-  }
+  processJobsFromSource(data);
   jeAll.sort(function(a,b){return Number(b.bookingId)-Number(a.bookingId);});
   filterJobs();
+}
+function loadAllJobs(){
+  var cid=window.COMPANY_ID||'';
+  Promise.all([
+    window.adminRead('joback',{limitToLast:500}).catch(function(){return {};}),
+    window.adminRead('allbookings/'+cid).catch(function(){return {};}),
+    window.adminRead('completedJobs/'+cid).catch(function(){return {};}),
+    window.adminRead('drivers/'+cid).catch(function(){return {};})
+  ]).then(function(res){
+    _jeDrivers={};
+    if(res[3]&&typeof res[3]==='object') Object.keys(res[3]).forEach(function(k){_jeDrivers[k]=true;});
+    jeAll=[];
+    processJobsFromSource(res[2]);
+    processJobsFromSource(res[1]);
+    processJobsFromSource(res[0]);
+    var seen={};
+    jeAll=jeAll.filter(function(j){
+      var k=j.bookingId+'|'+j._dkey;
+      if(seen[k]) return false;
+      seen[k]=1;
+      return true;
+    });
+    jeAll.sort(function(a,b){return Number(b.bookingId)-Number(a.bookingId);});
+    filterJobs();
+  });
 }
 function filterJobs(){
   var q=(document.getElementById('je-search').value||'').toLowerCase();
@@ -18146,14 +18490,8 @@ function saveJobStatus(){
 }
 function closeJobDetail(){document.getElementById('job-detail-panel').style.display='none';jeEditJob=null;}
 window._fbOnLogin=function(){
-  window.adminRead('drivers/'+(window.COMPANY_ID||'')).then(function(d){
-    _jeDrivers={};
-    if(d&&typeof d==='object') Object.keys(d).forEach(function(k){_jeDrivers[k]=true;});
-    if(!_jeRef) _jeRef=window.adminListenLast('joback',400,processJobsData);
-  }).catch(function(){
-    _jeDrivers={};
-    if(!_jeRef) _jeRef=window.adminListenLast('joback',400,processJobsData);
-  });
+  loadAllJobs();
+  if(!_jeRef) _jeRef=window.adminListenLast('joback',400,function(){ loadAllJobs(); });
 };
 <\/script>`;
   return pageWrap(commonHead('Jobs Editor', css), body, commonScripts(js));
