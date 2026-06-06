@@ -9734,39 +9734,31 @@ function twLoadZones() {
   }).catch(function() {});
 }
 
+function twCleanupLegacyTariffs() {
+  adminWrite('tariffZones/1', 'DELETE', null).catch(function() {});
+}
+
 function loadTariffs() {
   document.getElementById('tw-loading').style.display = 'block';
   document.getElementById('tw-cards').style.display = 'none';
   document.getElementById('tw-empty').style.display = 'none';
   var cid = window.COMPANY_ID || '';
-  var path = cid ? 'tariffs/' + cid : 'tariffZones';
-  adminRead(path).then(function(data) {
+  if (!cid) {
+    document.getElementById('tw-loading').style.display = 'none';
+    document.getElementById('tw-empty').style.display = 'block';
+    return;
+  }
+  twCleanupLegacyTariffs();
+  adminRead('tariffs/' + cid).then(function(data) {
     allTariffs = {};
     if (data) Object.keys(data).forEach(function(k) {
       var t = data[k];
       if (!t || typeof t !== 'object') return;
-      if (t.companyId && t.companyId !== cid && cid) return;
-      allTariffs[k] = twNormalizeTariff(k, t);
+      var key = String(t.Id || t.id || k);
+      allTariffs[key] = twNormalizeTariff(key, t);
     });
-    if (!Object.keys(allTariffs).length && cid) {
-      return adminRead('tariffZones').then(function(legacy) {
-        if (legacy) Object.keys(legacy).forEach(function(k) {
-          var t = legacy[k];
-          if (!t || typeof t !== 'object') return;
-          if (t.companyId && t.companyId !== cid) return;
-          allTariffs[k] = twNormalizeTariff(k, t);
-        });
-      });
-    }
-  }).catch(function() {
-    return adminRead('tariffZones').then(function(legacy) {
-      if (legacy) Object.keys(legacy).forEach(function(k) {
-        var t = legacy[k];
-        if (!t || typeof t !== 'object') return;
-        allTariffs[k] = twNormalizeTariff(k, t);
-      });
-    });
-  }).then(function() { renderTariffs(); }).catch(function(err) {
+    renderTariffs();
+  }).catch(function(err) {
     document.getElementById('tw-loading').style.display = 'none';
     document.getElementById('tw-empty').style.display = 'block';
     console.warn('Could not load tariffs:', err && err.message);
@@ -10132,13 +10124,18 @@ function saveTariff() {
   }, f);
   tariff.name = tariff.TariffName;
 
-  var key = editId || String(numericId);
   var cid = window.COMPANY_ID || '';
-  var driverPayload = buildDriverTariffPayload(tariff, numericId);
+  if (!cid) {
+    err.textContent = 'Company ID missing.';
+    err.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = twStep === 4 ? 'Save Tariff' : 'Next';
+    return;
+  }
+  var key = String(numericId);
+  var payload = Object.assign({}, buildDriverTariffPayload(tariff, numericId), tariff);
 
-  adminWrite('tariffs/' + cid + '/' + numericId, 'PUT', Object.assign({}, driverPayload, tariff)).then(function() {
-    return adminWrite('tariffZones/' + key, 'PUT', tariff);
-  }).then(function() {
+  adminWrite('tariffs/' + cid + '/' + numericId, 'PUT', payload).then(function() {
     allTariffs[key] = tariff;
     renderTariffs();
     twCloseWizard();
@@ -10163,10 +10160,9 @@ function duplicateTariff(id) {
   copy.updatedAt = Date.now();
   var key = String(copy.Id);
   var cid = window.COMPANY_ID || '';
-  var driverPayload = buildDriverTariffPayload(copy, copy.Id);
-  adminWrite('tariffs/' + cid + '/' + copy.Id, 'PUT', Object.assign({}, driverPayload, copy)).then(function() {
-    return adminWrite('tariffZones/' + key, 'PUT', copy);
-  }).then(function() {
+  if (!cid) { alert('Company ID missing.'); return; }
+  var payload = Object.assign({}, buildDriverTariffPayload(copy, copy.Id), copy);
+  adminWrite('tariffs/' + cid + '/' + copy.Id, 'PUT', payload).then(function() {
     allTariffs[key] = copy;
     renderTariffs();
   }).catch(function(e) { alert('Duplicate failed: ' + e.message); });
@@ -10176,10 +10172,9 @@ function deleteTariff(id) {
   var t = allTariffs[id];
   if (!confirm('Delete tariff "' + (t ? (t.TariffName || t.name) : id) + '"?')) return;
   var cid = window.COMPANY_ID || '';
-  var numId = t && t.Id;
-  adminWrite('tariffZones/' + id, 'DELETE', null).then(function() {
-    if (numId && cid) return adminWrite('tariffs/' + cid + '/' + numId, 'DELETE', null);
-  }).then(function() {
+  var numId = t && (t.Id || t.id || id);
+  if (!cid) { alert('Company ID missing.'); return; }
+  adminWrite('tariffs/' + cid + '/' + numId, 'DELETE', null).then(function() {
     delete allTariffs[id];
     renderTariffs();
   }).catch(function(e) { alert('Delete failed: ' + e.message); });
@@ -12582,8 +12577,8 @@ function loadReport(){
     }).catch(function(){}));
   }
 
-  // Always load tariff zones so zone IDs resolve to names wherever used
-  prereqs.push(window.adminRead('tariffZones').then(function(d){
+  // Load tariffs so tariff IDs resolve to names in reports
+  prereqs.push(window.adminRead('tariffs/' + (window.COMPANY_ID || '')).then(function(d){
     _zonesLookup={};
     if(d&&typeof d==='object'){
       Object.entries(d).forEach(function(e){
