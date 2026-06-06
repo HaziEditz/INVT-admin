@@ -9166,7 +9166,7 @@ function znRenderList(){
       '<div class="zn-item-body">'+nameHtml+
       '<div class="zn-item-num">Zone #'+z.zoneNumber+'</div></div>'+
       '<div class="zn-item-right" onclick="event.stopPropagation()">'+
-      '<button class="zn-edit-btn" title="Edit boundary" onclick="znStartEdit(\\''+z.key+'\\')">Edit</button>'+
+      '<button class="zn-edit-btn" title="Edit boundary" onclick="event.stopPropagation(); znStartEdit(\\''+z.key+'\\')">Edit</button>'+
       '<label class="zn-toggle" title="Active">'+
       '<input type="checkbox" '+(z.active!==false?'checked':'')+' onchange="znToggleActive(\\''+z.key+'\\',this.checked)" />'+
       '<span class="zn-toggle-track"></span><span class="zn-toggle-thumb"></span></label>'+
@@ -9524,590 +9524,593 @@ if(window.COMPANY_ID) setTimeout(znLoadSaved, 600);
 // ── TARIFF SCHEDULE PAGE ──────────────────────────────────────────────────────
 function tariffsPage() {
   const css = `
-.tariff-wrap{padding:20px;}
-.section-title{font-size:11px;font-weight:700;color:#00897B;letter-spacing:.8px;text-transform:uppercase;margin:16px 0 8px;padding-bottom:4px;border-bottom:2px solid #E0F2F1;}
-.tf-table{width:100%;border-collapse:collapse;font-size:13px;}
-.tf-table th{background:#F5F5F5;padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#757575;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e0e0e0;}
-.tf-table td{padding:10px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle;}
-.tf-table tr:hover td{background:#FAFAFA;}
-.field-group{margin-bottom:12px;}
-.field-group label{display:block;font-size:11px;font-weight:700;color:#616161;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;}
-.field-group input,.field-group select{width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;}
-.md-btn-small{padding:4px 10px;font-size:12px;}
-.tariff-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1050;align-items:center;justify-content:center;}
-.tariff-modal-bg.open{display:flex;}
-.tariff-modal{background:#fff;border-radius:8px;width:540px;max-width:96vw;box-shadow:0 8px 32px rgba(0,0,0,.25);}
-.tmodal-head{background:#00897B;color:#fff;padding:14px 18px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;font-weight:600;}
-.tmodal-body{padding:20px 22px;max-height:75vh;overflow-y:auto;}
-.tmodal-foot{padding:10px 22px 16px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #eee;}
-.rate-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;}
-.badge-note{display:inline-block;background:#E8F5E9;color:#2E7D32;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;}
-.badge-active{display:inline-block;background:#43A047;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;}
-.badge-inactive{display:inline-block;background:#9E9E9E;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;}
-.badge-sched{display:inline-block;background:#00897B;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;}
-.sched-section{margin-top:14px;border-top:2px solid #E0F2F1;padding-top:12px;}
-.day-chip-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;}
-.day-chip{display:inline-flex;align-items:center;gap:3px;padding:4px 9px;border:1px solid #B2DFDB;border-radius:12px;font-size:12px;cursor:pointer;background:#E0F2F1;color:#00695C;font-weight:normal;user-select:none;}
-.day-chip input{width:12px;height:12px;cursor:pointer;margin:0;}
+.tw-page{padding:20px 24px 32px;font-family:'Inter',system-ui,sans-serif;max-width:1200px;margin:0 auto}
+.tw-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.tw-title{margin:0;font-size:24px;font-weight:700;color:#0f172a;letter-spacing:-.02em}
+.tw-sub{margin:6px 0 0;font-size:14px;color:#64748b}
+.tw-add-btn{height:42px;padding:0 20px;border:none;border-radius:10px;background:#0d9488;color:#fff;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
+.tw-add-btn:hover{background:#0f766e}
+.tw-loading,.tw-empty{text-align:center;padding:56px 24px;color:#94a3b8;background:#fff;border-radius:12px;border:1px solid #e2e8f0}
+.tw-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.tw-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:12px;transition:box-shadow .15s}
+.tw-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.06)}
+.tw-card-hdr{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.tw-card-name{font-size:16px;font-weight:700;color:#0f172a;margin:0}
+.tw-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
+.tw-badge.on{background:#dcfce7;color:#166534}
+.tw-badge.off{background:#f1f5f9;color:#64748b}
+.tw-card-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;font-size:13px}
+.tw-card-grid dt{color:#94a3b8;font-weight:500;margin:0}
+.tw-card-grid dd{color:#0f172a;font-weight:600;margin:0}
+.tw-card-actions{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
+.tw-card-actions button{flex:1;min-width:70px;height:34px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;font-size:12px;font-weight:600;cursor:pointer;color:#475569}
+.tw-card-actions button:hover{background:#f8fafc}
+.tw-card-actions button.primary{background:#ecfdf5;color:#0d9488;border-color:#99f6e4}
+.tw-card-actions button.danger{color:#dc2626;border-color:#fecaca}
+.tw-card-actions button.danger:hover{background:#fef2f2}
+.tw-modal-bg{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2000;align-items:center;justify-content:center;padding:16px}
+.tw-modal-bg.open{display:flex}
+.tw-modal{background:#fff;border-radius:14px;width:560px;max-width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.2);overflow:hidden}
+.tw-modal-hdr{padding:20px 24px 0;flex-shrink:0}
+.tw-modal-hdr-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.tw-modal-title{font-size:18px;font-weight:700;color:#0f172a;margin:0}
+.tw-modal-close{background:none;border:none;font-size:24px;color:#94a3b8;cursor:pointer;line-height:1;padding:0}
+.tw-steps{display:flex;gap:6px;margin-bottom:4px}
+.tw-step{flex:1;height:4px;border-radius:2px;background:#e2e8f0;transition:background .2s}
+.tw-step.done,.tw-step.active{background:#0d9488}
+.tw-step-lbls{display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;margin-top:6px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.tw-modal-body{padding:20px 24px;overflow-y:auto;flex:1}
+.tw-modal-foot{padding:16px 24px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:10px;flex-shrink:0;background:#f8fafc}
+.tw-modal-foot button{height:40px;padding:0 18px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:1px solid #e2e8f0;background:#fff;color:#475569}
+.tw-modal-foot button.primary{background:#0d9488;color:#fff;border-color:#0d9488}
+.tw-modal-foot button:disabled{opacity:.5;cursor:not-allowed}
+.tw-field{margin-bottom:16px}
+.tw-field label{display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px}
+.tw-field input,.tw-field select,.tw-field textarea{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;box-sizing:border-box;background:#fff}
+.tw-field input:focus,.tw-field textarea:focus{outline:none;border-color:#0d9488;box-shadow:0 0 0 3px rgba(13,148,136,.1)}
+.tw-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tw-radio-group{display:flex;flex-direction:column;gap:8px}
+.tw-radio{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;color:#334155;transition:border-color .15s}
+.tw-radio:hover{border-color:#cbd5e1}
+.tw-radio input{accent-color:#0d9488;width:16px;height:16px;margin:0;flex-shrink:0}
+.tw-zone-list{max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px}
+.tw-zone-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;font-size:14px;cursor:pointer}
+.tw-zone-item:hover{background:#f8fafc}
+.tw-zone-item input{accent-color:#0d9488;width:16px;height:16px}
+.tw-note{font-size:12px;color:#94a3b8;margin-top:6px}
+.tw-err{background:#fef2f2;color:#991b1b;padding:10px 12px;border-radius:8px;font-size:13px;margin-top:12px;display:none}
+.tw-summary{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;font-size:14px;line-height:1.7;color:#334155}
+.tw-summary strong{color:#0f172a}
+.tw-date-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.tw-date-chip{background:#ecfdf5;color:#0f766e;font-size:12px;padding:4px 10px;border-radius:20px;font-weight:600}
+.tw-pane{display:none}
+.tw-pane.active{display:block}
+@media(max-width:640px){.tw-grid2{grid-template-columns:1fr}.tw-cards{grid-template-columns:1fr}}
 `;
 
   const body = `
-<div class="page-content">
-  <div class="tariff-wrap">
-
-    <!-- Standard Tariff Schedule -->
-    <div id="tariff-panel-standard">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <div>
-        <h2 style="margin:0;font-size:18px;font-weight:700;color:#212121">
-          <i class="material-icons" style="vertical-align:middle;color:#00897B;font-size:22px">&#xE262;</i>
-          Tariff Schedule
-        </h2>
-        <p style="margin:4px 0 0;font-size:12px;color:#9e9e9e">Configure fare rates for each zone — these are used by the dispatch system as the taxi meter.</p>
-      </div>
-      <button class="md-btn md-btn-primary" onclick="openTariffModal()">
-        <i class="material-icons" style="vertical-align:middle;font-size:15px">&#xE145;</i> Add Tariff Zone
-      </button>
+<div class="tw-page">
+  <div class="tw-header">
+    <div>
+      <h1 class="tw-title">Tariff Schedule</h1>
+      <p class="tw-sub">Configure fare rates, schedules, and zone coverage for your fleet.</p>
     </div>
-
-    <div id="tariff-loading" style="text-align:center;padding:40px;color:#9e9e9e">
-      <i class="material-icons" style="font-size:36px;display:block;margin-bottom:8px">&#xE262;</i>Loading tariffs…
-    </div>
-    <div id="tariff-table-wrap" style="display:none;background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.1);overflow:hidden;">
-      <table class="tf-table">
-        <thead>
-          <tr>
-            <th>Zone Name</th>
-            <th>Base Fare</th>
-            <th>Price / km</th>
-            <th>Waiting Rate</th>
-            <th>Meter Switch</th>
-            <th>Min. Fare</th>
-            <th>Schedule</th>
-            <th>Status Now</th>
-            <th style="width:90px">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="tariff-tbody"></tbody>
-      </table>
-    </div>
-    <div id="tariff-empty" style="display:none;text-align:center;padding:48px;color:#9e9e9e;background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.1);">
-      <i class="material-icons" style="font-size:48px;display:block;margin-bottom:12px;color:#e0e0e0">&#xE262;</i>
-      No tariff zones yet. Click <strong>Add Tariff Zone</strong> to create one.
-    </div>
-
-    <div style="margin-top:16px;background:#FFF8E1;border:1px solid #FFE082;border-radius:6px;padding:12px 16px;font-size:12px;color:#5D4037;">
-      <i class="material-icons" style="vertical-align:middle;font-size:15px;color:#F9A825">&#xE88E;</i>
-      <strong>Taxi Meter:</strong> Rates are saved to Firebase and read by the driver app. The GPS meter auto-switches — when the car drops below the Speed Threshold it charges waiting rate; when moving above it, it charges per km. Edit each tariff to configure the threshold and interval.
-    </div>
-    </div><!-- end tariff-panel-standard -->
-
-
+    <button class="tw-add-btn" type="button" onclick="twOpenWizard()">+ Add Tariff</button>
   </div>
+  <div id="tw-loading" class="tw-loading">Loading tariffs…</div>
+  <div id="tw-empty" class="tw-empty" style="display:none">No tariffs yet. Click <strong>Add Tariff</strong> to create your first rate.</div>
+  <div id="tw-cards" class="tw-cards" style="display:none"></div>
 </div>
 
-<!-- Add/Edit Tariff Modal -->
-<div class="tariff-modal-bg" id="tariff-modal">
-  <div class="tariff-modal">
-    <div class="tmodal-head">
-      <span id="tmodal-title">Add Tariff Zone</span>
-      <button onclick="closeTariffModal()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer">&times;</button>
+<div class="tw-modal-bg" id="tw-modal">
+  <div class="tw-modal">
+    <div class="tw-modal-hdr">
+      <div class="tw-modal-hdr-top">
+        <h2 class="tw-modal-title" id="tw-modal-title">Add Tariff</h2>
+        <button class="tw-modal-close" type="button" onclick="twCloseWizard()">&times;</button>
+      </div>
+      <div class="tw-steps" id="tw-steps">
+        <div class="tw-step active" data-s="1"></div>
+        <div class="tw-step" data-s="2"></div>
+        <div class="tw-step" data-s="3"></div>
+        <div class="tw-step" data-s="4"></div>
+      </div>
+      <div class="tw-step-lbls"><span>Rates</span><span>Schedule</span><span>Zones</span><span>Save</span></div>
     </div>
-    <div class="tmodal-body">
-      <input type="hidden" id="edit-tariff-id"/>
-      <div class="field-group"><label>Zone Name <span style="font-size:11px;color:#9e9e9e;font-weight:400">(optional)</span></label><input id="t-name" type="text" placeholder="e.g. City Centre, Airport, Suburbs"/></div>
-      <div class="section-title">Fare Rates</div>
-      <div class="rate-grid">
-        <div class="field-group">
-          <label>Base / Flag Fall ($)</label>
-          <input id="t-base" type="number" min="0" step="0.01" placeholder="0.00"/>
-        </div>
-        <div class="field-group">
-          <label>Price per km ($)</label>
-          <input id="t-perkm" type="number" min="0" step="0.01" placeholder="0.00" oninput="updateMeterSummary()"/>
-        </div>
-        <div class="field-group">
-          <label>Waiting Rate ($ / min)</label>
-          <input id="t-waiting" type="number" min="0" step="0.01" placeholder="0.00" oninput="updateMeterSummary()"/>
-        </div>
-        <div class="field-group">
-          <label>Minimum Fare ($)</label>
-          <input id="t-minfare" type="number" min="0" step="0.01" placeholder="0.00"/>
-        </div>
-      </div>
-      <div class="field-group"><label>Notes</label><input id="t-notes" type="text" placeholder="Optional — e.g. applies after 10pm"/></div>
+    <div class="tw-modal-body">
+      <input type="hidden" id="tw-edit-id"/>
 
-      <!-- Meter Behaviour Section -->
-      <div class="sched-section" style="margin-top:14px">
-        <div style="font-size:11px;font-weight:700;color:#00897B;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">
-          <i class="material-icons" style="vertical-align:middle;font-size:14px;margin-right:3px">&#xE531;</i>
-          Meter Behaviour (GPS Auto-Switch)
-        </div>
-        <div class="rate-grid">
-          <div class="field-group">
-            <label>Speed Threshold (km/h)</label>
-            <input id="t-speedthreshold" type="number" min="1" max="30" step="1" placeholder="1" value="1" oninput="updateMeterSummary()"/>
-            <small style="color:#9e9e9e;font-size:11px">Below this speed = waiting rate kicks in</small>
-          </div>
-          <div class="field-group">
-            <label>Waiting Interval (seconds)</label>
-            <input id="t-waitinterval" type="number" min="1" step="1" placeholder="60" value="60" oninput="updateMeterSummary()"/>
-            <small style="color:#9e9e9e;font-size:11px">How often waiting rate ticks (60 = per minute)</small>
-          </div>
-        </div>
-        <div id="t-meter-summary" style="margin-top:10px;padding:10px 12px;background:#E0F2F1;border-radius:5px;border-left:3px solid #00897B;font-size:12px;color:#004D40;line-height:1.6"></div>
-      </div>
-
-      <!-- Schedule Section -->
-      <div class="sched-section">
-        <div style="font-size:11px;font-weight:700;color:#00897B;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">
-          <i class="material-icons" style="vertical-align:middle;font-size:14px;margin-right:3px">&#xE916;</i>
-          Tariff Schedule
-        </div>
-        <div class="field-group" style="margin-bottom:10px">
-          <label>Schedule Type</label>
-          <div style="display:flex;gap:20px;align-items:center;margin-top:4px">
-            <label style="font-size:13px;font-weight:normal;cursor:pointer;display:flex;align-items:center;gap:5px">
-              <input type="radio" name="t-schedtype" id="t-sched-always" value="always" onchange="tToggleSchedule()" checked /> Always Active (24/7)
-            </label>
-            <label style="font-size:13px;font-weight:normal;cursor:pointer;display:flex;align-items:center;gap:5px">
-              <input type="radio" name="t-schedtype" id="t-sched-custom" value="custom" onchange="tToggleSchedule()" /> Custom Schedule
-            </label>
-          </div>
-        </div>
-        <div id="t-sched-fields" style="display:none">
-          <div class="rate-grid" style="margin-bottom:10px">
-            <div class="field-group">
-              <label>Start Date</label>
-              <input type="date" id="t-startdate"/>
-            </div>
-            <div class="field-group">
-              <label>End Date</label>
-              <input type="date" id="t-enddate"/>
-            </div>
-          </div>
-          <div class="field-group" style="margin-bottom:8px">
-            <label>Days of Week</label>
-            <div class="day-chip-row">
-              <label class="day-chip"><input type="checkbox" id="td-1" value="1" checked/> Mon</label>
-              <label class="day-chip"><input type="checkbox" id="td-2" value="2" checked/> Tue</label>
-              <label class="day-chip"><input type="checkbox" id="td-3" value="3" checked/> Wed</label>
-              <label class="day-chip"><input type="checkbox" id="td-4" value="4" checked/> Thu</label>
-              <label class="day-chip"><input type="checkbox" id="td-5" value="5" checked/> Fri</label>
-              <label class="day-chip"><input type="checkbox" id="td-6" value="6" checked/> Sat</label>
-              <label class="day-chip"><input type="checkbox" id="td-0" value="0" checked/> Sun</label>
-            </div>
-          </div>
-          <div class="field-group" style="margin-bottom:8px">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-              <input type="checkbox" id="t-allday" onchange="tToggleTime()" checked/> Run All Day (00:00 – 23:59)
-            </label>
-          </div>
-          <div id="t-time-fields" style="display:none">
-            <div class="rate-grid">
-              <div class="field-group">
-                <label>Start Time</label>
-                <input type="time" id="t-starttime" value="08:00"/>
-              </div>
-              <div class="field-group">
-                <label>End Time</label>
-                <input type="time" id="t-endtime" value="22:00"/>
-              </div>
-            </div>
-          </div>
+      <div class="tw-pane active" id="tw-pane-1">
+        <div class="tw-field"><label>Tariff Name</label><input id="tw-name" type="text" placeholder="e.g. Standard, Night Rate, Airport"/></div>
+        <div class="tw-grid2">
+          <div class="tw-field"><label>Flag Fall / Base Fare ($)</label><input id="tw-base" type="number" min="0" step="0.01" placeholder="0.00"/></div>
+          <div class="tw-field"><label>Per KM Rate ($)</label><input id="tw-perkm" type="number" min="0" step="0.01" placeholder="0.00"/></div>
+          <div class="tw-field"><label>Waiting Rate ($ / min)</label><input id="tw-waiting" type="number" min="0" step="0.01" placeholder="0.00"/></div>
+          <div class="tw-field"><label>Minimum Fare ($)</label><input id="tw-minfare" type="number" min="0" step="0.01" placeholder="0.00"/></div>
         </div>
       </div>
 
-      <!-- Time-Based Rates -->
-      <div class="sched-section">
-        <div style="font-size:11px;font-weight:700;color:#00897B;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">
-          <i class="material-icons" style="vertical-align:middle;font-size:14px;margin-right:3px">&#xE192;</i>
-          Time-Based Rates
-        </div>
-        <div class="field-group" style="margin-bottom:8px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:normal;text-transform:none;letter-spacing:0">
-            <input type="checkbox" id="t-night-en" onchange="tToggleTimeRates()"/> Night rate (default 22:00 – 06:00)
-          </label>
-        </div>
-        <div id="t-night-fields" style="display:none">
-          <div class="rate-grid">
-            <div class="field-group"><label>Night base ($)</label><input id="t-night-base" type="number" min="0" step="0.01"/></div>
-            <div class="field-group"><label>Night / km ($)</label><input id="t-night-perkm" type="number" min="0" step="0.01"/></div>
-            <div class="field-group"><label>Night waiting ($/min)</label><input id="t-night-waiting" type="number" min="0" step="0.01"/></div>
-            <div class="field-group"><label>Night min fare ($)</label><input id="t-night-minfare" type="number" min="0" step="0.01"/></div>
-            <div class="field-group"><label>Night starts</label><input id="t-night-start" type="time" value="22:00"/></div>
-            <div class="field-group"><label>Night ends</label><input id="t-night-end" type="time" value="06:00"/></div>
+      <div class="tw-pane" id="tw-pane-2">
+        <div class="tw-field"><label>When is this tariff active?</label>
+          <div class="tw-radio-group" id="tw-when-group">
+            <label class="tw-radio"><input type="radio" name="tw-when" value="always" checked onchange="twWhenChanged()"/> Always (24/7)</label>
+            <label class="tw-radio"><input type="radio" name="tw-when" value="weekdays" onchange="twWhenChanged()"/> Weekdays (Mon–Fri)</label>
+            <label class="tw-radio"><input type="radio" name="tw-when" value="weekends" onchange="twWhenChanged()"/> Weekends (Sat–Sun)</label>
+            <label class="tw-radio"><input type="radio" name="tw-when" value="nights" onchange="twWhenChanged()"/> Nights</label>
+            <label class="tw-radio"><input type="radio" name="tw-when" value="holidays" onchange="twWhenChanged()"/> Public Holidays</label>
+            <label class="tw-radio"><input type="radio" name="tw-when" value="custom" onchange="twWhenChanged()"/> Custom schedule</label>
           </div>
         </div>
-        <div class="field-group" style="margin:10px 0 8px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:normal;text-transform:none;letter-spacing:0">
-            <input type="checkbox" id="t-weekend-en" onchange="tToggleTimeRates()"/> Weekend surcharge
+        <div id="tw-time-fields" style="display:none">
+          <div class="tw-grid2">
+            <div class="tw-field"><label>Start Time</label><input id="tw-starttime" type="time" value="22:00"/></div>
+            <div class="tw-field"><label>End Time</label><input id="tw-endtime" type="time" value="06:00"/></div>
+          </div>
+        </div>
+        <div class="tw-field" style="margin-top:12px">
+          <label>Add specific dates (e.g. Christmas, New Year's Eve)</label>
+          <div style="display:flex;gap:8px">
+            <input id="tw-date-pick" type="date" style="flex:1"/>
+            <button type="button" onclick="twAddDate()" style="height:42px;padding:0 14px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;cursor:pointer">Add</button>
+          </div>
+          <div class="tw-date-chips" id="tw-date-chips"></div>
+        </div>
+        <div class="tw-field">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:500;color:#334155">
+            <input type="checkbox" id="tw-nz-holidays" checked style="width:16px;height:16px;accent-color:#0d9488"/> Include all NZ public holidays automatically
           </label>
-        </div>
-        <div id="t-weekend-fields" style="display:none;margin-bottom:8px">
-          <div class="field-group"><label>Weekend multiplier (e.g. 1.2 = +20%)</label><input id="t-weekend-mult" type="number" min="1" step="0.05" value="1.2"/></div>
-        </div>
-        <div class="field-group" style="margin-bottom:8px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:normal;text-transform:none;letter-spacing:0">
-            <input type="checkbox" id="t-holiday-en" onchange="tToggleTimeRates()"/> NZ public holiday rate
-          </label>
-        </div>
-        <div id="t-holiday-fields" style="display:none;margin-bottom:8px">
-          <div class="field-group"><label>Holiday multiplier</label><input id="t-holiday-mult" type="number" min="1" step="0.05" value="1.5"/></div>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:normal;text-transform:none;letter-spacing:0;margin-top:6px">
-            <input type="checkbox" id="t-nz-holidays" checked/> Use built-in NZ public holiday calendar
-          </label>
-        </div>
-        <div class="field-group">
-          <label>Special rate dates (YYYY-MM-DD, one per line)</label>
-          <textarea id="t-special-dates" rows="3" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box" placeholder="2026-12-31&#10;2026-01-01"></textarea>
-          <small style="color:#9e9e9e;font-size:11px">These dates use the holiday multiplier above</small>
+          <p class="tw-note">Adds official NZ public holidays to this tariff's active dates.</p>
         </div>
       </div>
 
-      <div id="tmodal-err" style="display:none;background:#FFEBEE;color:#C62828;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:8px"></div>
+      <div class="tw-pane" id="tw-pane-3">
+        <div class="tw-field">
+          <label>Apply to zones</label>
+          <select id="tw-zone-mode" onchange="twZoneModeChanged()">
+            <option value="all">All Zones</option>
+            <option value="specific">Specific zones only</option>
+          </select>
+        </div>
+        <div id="tw-zone-specific" style="display:none">
+          <div id="tw-zone-empty" class="tw-note" style="display:none;padding:16px;background:#f8fafc;border-radius:8px;text-align:center">No zones configured yet. Set up zones first under Define Zones.</div>
+          <div class="tw-zone-list" id="tw-zone-list"></div>
+        </div>
+      </div>
+
+      <div class="tw-pane" id="tw-pane-4">
+        <div class="tw-summary" id="tw-summary"></div>
+      </div>
+
+      <div class="tw-err" id="tw-err"></div>
     </div>
-    <div class="tmodal-foot">
-      <button class="md-btn md-btn-flat" onclick="closeTariffModal()">Cancel</button>
-      <button class="md-btn md-btn-primary" id="tmodal-save-btn" onclick="saveTariff()">Save Tariff</button>
+    <div class="tw-modal-foot">
+      <button type="button" id="tw-back-btn" onclick="twBack()" style="visibility:hidden">Back</button>
+      <div style="display:flex;gap:8px">
+        <button type="button" onclick="twCloseWizard()">Cancel</button>
+        <button type="button" class="primary" id="tw-next-btn" onclick="twNext()">Next</button>
+      </div>
     </div>
   </div>
 </div>`;
 
   const js = `<script>
 var allTariffs = {};
+var allZones = {};
+var twStep = 1;
+var twDates = [];
 var NZ_PUBLIC_HOLIDAYS = [
   '2025-01-01','2025-01-02','2025-02-06','2025-04-18','2025-04-21','2025-04-25','2025-06-02','2025-10-27','2025-12-25','2025-12-26',
-  '2026-01-01','2026-01-02','2026-02-06','2026-04-03','2026-04-06','2026-04-25','2026-06-01','2026-10-26','2026-12-25','2026-12-28'
+  '2026-01-01','2026-01-02','2026-02-06','2026-04-03','2026-04-06','2026-04-25','2026-06-01','2026-10-26','2026-12-25','2026-12-28',
+  '2027-01-01','2027-01-02','2027-02-06','2027-04-02','2027-04-05','2027-04-26','2027-06-07','2027-10-25','2027-12-27','2027-12-28'
 ];
 
 window._fbOnLogin = function(user) {
   document.getElementById('lblName').textContent = user.email || user.displayName || '';
   document.getElementById('header-user-email').textContent = user.email || '';
-  loadTariffs();
+  twLoadAll();
 };
 
+function twLoadAll() {
+  twLoadZones();
+  loadTariffs();
+}
+
+function twLoadZones() {
+  var cid = window.COMPANY_ID || '';
+  if (!cid) return;
+  adminRead('zones/' + cid).then(function(data) {
+    allZones = {};
+    if (data && typeof data === 'object') {
+      Object.keys(data).forEach(function(k) {
+        var z = data[k] || {};
+        if (z.active === false) return;
+        allZones[k] = {
+          id: k,
+          zoneNumber: Number(z.zoneNumber || k),
+          name: z.name || z.zoneName || ('Zone ' + k)
+        };
+      });
+    }
+  }).catch(function() {});
+}
+
 function loadTariffs() {
-  document.getElementById('tariff-loading').style.display = 'block';
-  document.getElementById('tariff-table-wrap').style.display = 'none';
-  document.getElementById('tariff-empty').style.display = 'none';
-  adminRead('tariffZones').then(function(data) {
+  document.getElementById('tw-loading').style.display = 'block';
+  document.getElementById('tw-cards').style.display = 'none';
+  document.getElementById('tw-empty').style.display = 'none';
+  var cid = window.COMPANY_ID || '';
+  var path = cid ? 'tariffs/' + cid : 'tariffZones';
+  adminRead(path).then(function(data) {
     allTariffs = {};
     if (data) Object.keys(data).forEach(function(k) {
       var t = data[k];
       if (!t || typeof t !== 'object') return;
-      // Company isolation: skip tariffs belonging to other companies.
-      // Legacy tariffs (no companyId) are only shown for super-admin.
-      if (t.companyId && t.companyId !== COMPANY_ID) return;
-      if (!t.companyId && !IS_SUPER_ADMIN) return;
-      allTariffs[k] = t;
+      if (t.companyId && t.companyId !== cid && cid) return;
+      allTariffs[k] = twNormalizeTariff(k, t);
     });
-    var maxId = 0;
-    Object.values(allTariffs).forEach(function(t){ if (t.Id && t.Id > maxId) maxId = t.Id; });
-    var backfillPromises = [];
-    Object.keys(allTariffs).forEach(function(k) {
-      var t = allTariffs[k];
-      if (!t.Id || !t.TariffName) {
-        maxId++;
-        var patch = { Id: t.Id || maxId, TariffName: t.TariffName || t.zoneName || 'Tariff ' + maxId };
-        allTariffs[k] = Object.assign({}, t, patch);
-        backfillPromises.push(adminWrite('tariffZones/' + k, 'PATCH', patch));
-      }
-    });
-    if (backfillPromises.length) {
-      Promise.all(backfillPromises).then(function(){ console.log('[Tariffs] Backfilled ' + backfillPromises.length + ' tariff(s).'); });
+    if (!Object.keys(allTariffs).length && cid) {
+      return adminRead('tariffZones').then(function(legacy) {
+        if (legacy) Object.keys(legacy).forEach(function(k) {
+          var t = legacy[k];
+          if (!t || typeof t !== 'object') return;
+          if (t.companyId && t.companyId !== cid) return;
+          allTariffs[k] = twNormalizeTariff(k, t);
+        });
+      });
     }
-    renderTariffs();
-  }).catch(function(err) {
-    document.getElementById('tariff-loading').style.display = 'none';
-    document.getElementById('tariff-empty').style.display = 'block';
-    console.warn('Could not load tariffs:', err.message);
+  }).catch(function() {
+    return adminRead('tariffZones').then(function(legacy) {
+      if (legacy) Object.keys(legacy).forEach(function(k) {
+        var t = legacy[k];
+        if (!t || typeof t !== 'object') return;
+        allTariffs[k] = twNormalizeTariff(k, t);
+      });
+    });
+  }).then(function() { renderTariffs(); }).catch(function(err) {
+    document.getElementById('tw-loading').style.display = 'none';
+    document.getElementById('tw-empty').style.display = 'block';
+    console.warn('Could not load tariffs:', err && err.message);
   });
 }
 
-/* ── Schedule helpers ── */
+function twNormalizeTariff(key, t) {
+  var id = t.Id || t.id || parseInt(String(key).replace(/\\D/g,''), 10) || key;
+  return Object.assign({}, t, {
+    Id: Number(id) || id,
+    TariffName: t.TariffName || t.name || t.zoneName || ('Tariff ' + id),
+    name: t.name || t.TariffName || t.zoneName || ('Tariff ' + id),
+    baseFare: t.baseFare != null ? t.baseFare : (t.flagFall || t.flagfall || 0),
+    pricePerKm: t.pricePerKm != null ? t.pricePerKm : (t.ratePerKm || t.perKm || 0),
+    waitingRate: t.waitingRate != null ? t.waitingRate : (t.waitingPerMin || t.waiting || 0),
+    minimumFare: t.minimumFare != null ? t.minimumFare : 0,
+    whenActive: t.whenActive || (t.scheduleType === 'always' ? 'always' : 'custom'),
+    zoneMode: t.zoneMode || 'all',
+    zoneIds: t.zoneIds || [],
+    specificDates: t.specificDates || t.specialRateDates || [],
+    useNzHolidays: t.useNzHolidays !== false,
+    speedThreshold: t.speedThreshold != null ? t.speedThreshold : 1,
+    waitingInterval: t.waitingInterval != null ? t.waitingInterval : 60
+  });
+}
+
+function twFmt(v) { return v !== undefined && v !== '' && v != null ? '$' + parseFloat(v).toFixed(2) : '—'; }
+
+function twWhenLabel(t) {
+  var w = t.whenActive || 'always';
+  var map = { always:'24/7', weekdays:'Weekdays', weekends:'Weekends', nights:'Nights', holidays:'Public Holidays', custom:'Custom' };
+  var lbl = map[w] || w;
+  if ((w === 'nights' || w === 'custom') && t.startTime) lbl += ' ' + (t.startTime || '') + '–' + (t.endTime || '');
+  if (t.useNzHolidays && w !== 'holidays') lbl += ' + NZ holidays';
+  if (t.specificDates && t.specificDates.length) lbl += ' + ' + t.specificDates.length + ' date(s)';
+  return lbl;
+}
+
+function twZonesLabel(t) {
+  if (!t.zoneMode || t.zoneMode === 'all') return 'All zones';
+  var ids = t.zoneIds || [];
+  if (!ids.length) return 'No zones selected';
+  return ids.length + ' zone(s)';
+}
+
 function isTariffActive(t) {
-  if (!t.scheduleType || t.scheduleType === 'always') return true;
+  var w = t.whenActive || (t.scheduleType === 'always' ? 'always' : 'custom');
   var now = new Date();
-  if (t.startDate) { var s = new Date(t.startDate + 'T00:00:00'); if (now < s) return false; }
-  if (t.endDate)   { var e = new Date(t.endDate   + 'T23:59:59'); if (now > e) return false; }
-  if (t.days && t.days.length > 0 && t.days.indexOf(now.getDay()) === -1) return false;
-  if (!t.allDay) {
-    var hhmm = now.getHours() * 60 + now.getMinutes();
-    var sp = (t.startTime || '00:00').split(':'), ep = (t.endTime || '23:59').split(':');
+  var hhmm = now.getHours() * 60 + now.getMinutes();
+  var today = now.toISOString().slice(0, 10);
+  var day = now.getDay();
+
+  if (w === 'holidays') {
+    var hol = (t.useNzHolidays ? NZ_PUBLIC_HOLIDAYS : []).concat(t.specificDates || []);
+    return hol.indexOf(today) !== -1;
+  }
+  if ((t.specificDates || []).indexOf(today) !== -1) return true;
+  if (t.useNzHolidays && NZ_PUBLIC_HOLIDAYS.indexOf(today) !== -1 && w !== 'weekdays' && w !== 'weekends') return true;
+
+  if (w === 'always') return true;
+  if (w === 'weekdays') return day >= 1 && day <= 5;
+  if (w === 'weekends') return day === 0 || day === 6;
+  if (w === 'nights' || w === 'custom') {
+    if (w === 'custom') {
+      var days = t.days || [0,1,2,3,4,5,6];
+      if (days.indexOf(day) === -1) return false;
+    }
+    var sp = (t.startTime || '22:00').split(':'), ep = (t.endTime || '06:00').split(':');
     var sm = parseInt(sp[0],10)*60+parseInt(sp[1],10), em = parseInt(ep[0],10)*60+parseInt(ep[1],10);
-    if (em < sm) { if (hhmm < sm && hhmm > em) return false; }
-    else { if (hhmm < sm || hhmm > em) return false; }
+    if (em < sm) return hhmm >= sm || hhmm <= em;
+    return hhmm >= sm && hhmm <= em;
   }
   return true;
 }
 
-function schedSummary(t) {
-  if (!t.scheduleType || t.scheduleType === 'always') return '<span class="badge-sched">24/7</span>';
-  var DAY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  var days = (t.days || [0,1,2,3,4,5,6]).map(function(d){ return DAY[d]; }).join(', ');
-  var time = t.allDay ? 'All day' : ((t.startTime||'00:00') + ' – ' + (t.endTime||'23:59'));
-  var dates = t.startDate ? ('<b>' + t.startDate + '</b> → <b>' + (t.endDate||'?') + '</b><br>') : '';
-  return '<span style="font-size:11px;line-height:1.6">' + dates + days + '<br>' + time + '</span>';
-}
-
-/* ── Schedule UI toggles ── */
-function tToggleSchedule() {
-  var isCustom = document.getElementById('t-sched-custom') && document.getElementById('t-sched-custom').checked;
-  document.getElementById('t-sched-fields').style.display = isCustom ? 'block' : 'none';
-  if (isCustom) {
-    var today = window._tzTodayStr ? window._tzTodayStr() : new Date().toLocaleDateString('en-CA', {timeZone: NZ_TZ});
-    var sd = document.getElementById('t-startdate'), ed = document.getElementById('t-enddate');
-    if (sd && !sd.value) sd.value = today;
-    if (ed && !ed.value) {
-      var fut = new Date(); fut.setFullYear(fut.getFullYear()+1);
-      ed.value = fut.toLocaleDateString('en-CA', {timeZone: NZ_TZ});
-    }
-  }
-}
-function tToggleTime() {
-  var allDay = document.getElementById('t-allday');
-  document.getElementById('t-time-fields').style.display = (allDay && allDay.checked) ? 'none' : 'block';
-}
-function tToggleTimeRates() {
-  document.getElementById('t-night-fields').style.display = document.getElementById('t-night-en').checked ? 'block' : 'none';
-  document.getElementById('t-weekend-fields').style.display = document.getElementById('t-weekend-en').checked ? 'block' : 'none';
-  document.getElementById('t-holiday-fields').style.display = document.getElementById('t-holiday-en').checked ? 'block' : 'none';
-}
-function tLoadTimeRates(t) {
-  document.getElementById('t-night-en').checked = !!t.nightEnabled;
-  document.getElementById('t-night-base').value = t.nightBaseFare || '';
-  document.getElementById('t-night-perkm').value = t.nightPricePerKm || '';
-  document.getElementById('t-night-waiting').value = t.nightWaitingRate || '';
-  document.getElementById('t-night-minfare').value = t.nightMinimumFare || '';
-  document.getElementById('t-night-start').value = t.nightStart || '22:00';
-  document.getElementById('t-night-end').value = t.nightEnd || '06:00';
-  document.getElementById('t-weekend-en').checked = !!t.weekendEnabled;
-  document.getElementById('t-weekend-mult').value = t.weekendMultiplier || 1.2;
-  document.getElementById('t-holiday-en').checked = !!t.holidayEnabled;
-  document.getElementById('t-holiday-mult').value = t.holidayMultiplier || 1.5;
-  document.getElementById('t-nz-holidays').checked = t.useNzHolidays !== false;
-  document.getElementById('t-special-dates').value = (t.specialRateDates || []).join('\\n');
-  tToggleTimeRates();
-}
-function buildDriverTariffPayload(t, numericId) {
-  var waiting = parseFloat(t.waitingRate) || 0;
-  var payload = {
-    id: String(numericId),
-    name: t.name || t.TariffName || ('Tariff ' + numericId),
-    companyId: t.companyId || window.COMPANY_ID || '',
-    flagFall: parseFloat(t.baseFare) || 0,
-    flagfall: parseFloat(t.baseFare) || 0,
-    base: parseFloat(t.baseFare) || 0,
-    baseFare: parseFloat(t.baseFare) || 0,
-    ratePerKm: parseFloat(t.pricePerKm) || 0,
-    perKm: parseFloat(t.pricePerKm) || 0,
-    kmRate: parseFloat(t.pricePerKm) || 0,
-    pricePerKm: parseFloat(t.pricePerKm) || 0,
-    waitingPerMin: waiting,
-    waitPerMin: waiting,
-    waiting: waiting,
-    waitingRate: waiting,
-    minimumFare: parseFloat(t.minimumFare) || 0,
-    speedThreshold: parseInt(t.speedThreshold, 10) || 1,
-    waitingInterval: parseInt(t.waitingInterval, 10) || 60,
-    updatedAt: Date.now()
-  };
-  if (t.nightEnabled) {
-    payload.nightEnabled = true;
-    payload.nightStart = t.nightStart || '22:00';
-    payload.nightEnd = t.nightEnd || '06:00';
-    payload.nightFlagFall = parseFloat(t.nightBaseFare) || payload.flagFall;
-    payload.nightRatePerKm = parseFloat(t.nightPricePerKm) || payload.ratePerKm;
-    payload.nightWaitingPerMin = parseFloat(t.nightWaitingRate) || waiting;
-    payload.nightMinimumFare = parseFloat(t.nightMinimumFare) || payload.minimumFare;
-  }
-  if (t.weekendEnabled) {
-    payload.weekendEnabled = true;
-    payload.weekendMultiplier = parseFloat(t.weekendMultiplier) || 1.2;
-  }
-  if (t.holidayEnabled) {
-    payload.holidayEnabled = true;
-    payload.holidayMultiplier = parseFloat(t.holidayMultiplier) || 1.5;
-    payload.useNzHolidays = t.useNzHolidays !== false;
-    payload.nzPublicHolidays = t.nzPublicHolidays || NZ_PUBLIC_HOLIDAYS;
-    payload.specialRateDates = t.specialRateDates || [];
-  }
-  return payload;
-}
-
-function tReadTimeRates() {
-  var special = (document.getElementById('t-special-dates').value || '').split(/[\\n,]+/).map(function(s){return s.trim();}).filter(Boolean);
-  return {
-    nightEnabled: document.getElementById('t-night-en').checked,
-    nightBaseFare: parseFloat(document.getElementById('t-night-base').value) || 0,
-    nightPricePerKm: parseFloat(document.getElementById('t-night-perkm').value) || 0,
-    nightWaitingRate: parseFloat(document.getElementById('t-night-waiting').value) || 0,
-    nightMinimumFare: parseFloat(document.getElementById('t-night-minfare').value) || 0,
-    nightStart: document.getElementById('t-night-start').value || '22:00',
-    nightEnd: document.getElementById('t-night-end').value || '06:00',
-    weekendEnabled: document.getElementById('t-weekend-en').checked,
-    weekendMultiplier: parseFloat(document.getElementById('t-weekend-mult').value) || 1.2,
-    holidayEnabled: document.getElementById('t-holiday-en').checked,
-    holidayMultiplier: parseFloat(document.getElementById('t-holiday-mult').value) || 1.5,
-    useNzHolidays: document.getElementById('t-nz-holidays').checked,
-    nzPublicHolidays: document.getElementById('t-nz-holidays').checked ? NZ_PUBLIC_HOLIDAYS : [],
-    specialRateDates: special
-  };
-}
-
-function fmt(v) { return v !== undefined && v !== '' ? '$' + parseFloat(v).toFixed(2) : '—'; }
-
 function renderTariffs() {
   var keys = Object.keys(allTariffs);
-  document.getElementById('tariff-loading').style.display = 'none';
-  if (!keys.length) { document.getElementById('tariff-empty').style.display = 'block'; return; }
-  document.getElementById('tariff-table-wrap').style.display = 'block';
-  var tbody = document.getElementById('tariff-tbody');
-  tbody.innerHTML = '';
-  keys.forEach(function(id) {
+  document.getElementById('tw-loading').style.display = 'none';
+  var cards = document.getElementById('tw-cards');
+  if (!keys.length) {
+    cards.style.display = 'none';
+    document.getElementById('tw-empty').style.display = 'block';
+    return;
+  }
+  document.getElementById('tw-empty').style.display = 'none';
+  cards.style.display = 'grid';
+  cards.innerHTML = keys.map(function(id) {
     var t = allTariffs[id];
     var active = isTariffActive(t);
-    var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td style="font-weight:600">' + (t.zoneName||'—') + (t.notes ? '<br><span style="font-size:11px;color:#9e9e9e">' + t.notes + '</span>' : '') + '</td>' +
-      '<td>' + fmt(t.baseFare) + '</td>' +
-      '<td>' + fmt(t.pricePerKm) + '</td>' +
-      '<td>' + fmt(t.waitingRate) + ' <span style="font-size:10px;color:#9e9e9e">/ ' + Math.round((t.waitingInterval||60)/60) + 'min</span></td>' +
-      '<td style="font-size:12px">' +
-        '<span style="color:#00695C;font-weight:600">&lt;' + (t.speedThreshold||1) + ' km/h</span>' +
-        '<br><span style="color:#9e9e9e;font-size:10px">→ waiting rate</span>' +
-      '</td>' +
-      '<td>' + fmt(t.minimumFare) + '</td>' +
-      '<td>' + schedSummary(t) + (t.nightEnabled||t.weekendEnabled||t.holidayEnabled ? '<br><span class="badge-sched" style="margin-top:3px">Time rates</span>' : '') + '</td>' +
-      '<td>' + (active ? '<span class="badge-active">ACTIVE</span>' : '<span class="badge-inactive">INACTIVE</span>') + '</td>' +
-      '<td>' +
-        '<button class="md-btn md-btn-small" data-key="' + id + '" onclick="openTariffModal(this.dataset.key)" style="margin-right:4px;padding:4px 8px;font-size:11px"><i class="material-icons" style="font-size:13px;vertical-align:middle">&#xE3C9;</i></button>' +
-        '<button class="md-btn md-btn-small" data-key="' + id + '" onclick="deleteTariff(this.dataset.key)" style="background:#FFEBEE;color:#C62828;border-color:#FFCDD2;padding:4px 8px;font-size:11px"><i class="material-icons" style="font-size:13px;vertical-align:middle">&#xE872;</i></button>' +
-      '</td>';
-    tbody.appendChild(tr);
-  });
+    return '<div class="tw-card">' +
+      '<div class="tw-card-hdr"><h3 class="tw-card-name">' + twEsc(t.TariffName || t.name) + '</h3>' +
+      '<span class="tw-badge ' + (active ? 'on' : 'off') + '">' + (active ? 'Active now' : 'Inactive') + '</span></div>' +
+      '<dl class="tw-card-grid">' +
+      '<dt>Flag Fall</dt><dd>' + twFmt(t.baseFare) + '</dd>' +
+      '<dt>Per KM</dt><dd>' + twFmt(t.pricePerKm) + '</dd>' +
+      '<dt>Waiting</dt><dd>' + twFmt(t.waitingRate) + '/min</dd>' +
+      '<dt>Min Fare</dt><dd>' + twFmt(t.minimumFare) + '</dd>' +
+      '<dt>When Active</dt><dd>' + twEsc(twWhenLabel(t)) + '</dd>' +
+      '<dt>Zones</dt><dd>' + twEsc(twZonesLabel(t)) + '</dd>' +
+      '</dl>' +
+      '<div class="tw-card-actions">' +
+      '<button class="primary" type="button" onclick="twOpenWizard(\\''+id+'\\')">Edit</button>' +
+      '<button type="button" onclick="duplicateTariff(\\''+id+'\\')">Duplicate</button>' +
+      '<button class="danger" type="button" onclick="deleteTariff(\\''+id+'\\')">Delete</button>' +
+      '</div></div>';
+  }).join('');
 }
 
-function openTariffModal(id) {
-  document.getElementById('tmodal-err').style.display = 'none';
-  document.getElementById('edit-tariff-id').value = id || '';
-  // Reset schedule UI
-  document.getElementById('t-sched-always').checked = true;
-  document.getElementById('t-sched-fields').style.display = 'none';
-  document.getElementById('t-allday').checked = true;
-  document.getElementById('t-time-fields').style.display = 'none';
-  [0,1,2,3,4,5,6].forEach(function(d){ var cb = document.getElementById('td-'+d); if(cb) cb.checked=true; });
-  document.getElementById('t-startdate').value = '';
-  document.getElementById('t-enddate').value = '';
-  document.getElementById('t-starttime').value = '08:00';
-  document.getElementById('t-endtime').value = '22:00';
+function twEsc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+function twOpenWizard(id) {
+  twStep = 1;
+  twDates = [];
+  document.getElementById('tw-edit-id').value = id || '';
+  document.getElementById('tw-err').style.display = 'none';
+  document.getElementById('tw-modal-title').textContent = id ? 'Edit Tariff' : 'Add Tariff';
+  document.getElementById('tw-name').value = '';
+  document.getElementById('tw-base').value = '';
+  document.getElementById('tw-perkm').value = '';
+  document.getElementById('tw-waiting').value = '';
+  document.getElementById('tw-minfare').value = '';
+  document.querySelector('input[name="tw-when"][value="always"]').checked = true;
+  document.getElementById('tw-starttime').value = '22:00';
+  document.getElementById('tw-endtime').value = '06:00';
+  document.getElementById('tw-nz-holidays').checked = true;
+  document.getElementById('tw-zone-mode').value = 'all';
+  twWhenChanged();
+  twZoneModeChanged();
+  twRenderDateChips();
 
   if (id && allTariffs[id]) {
     var t = allTariffs[id];
-    document.getElementById('tmodal-title').textContent = 'Edit Tariff Zone';
-    document.getElementById('t-name').value          = t.zoneName       || '';
-    document.getElementById('t-base').value          = t.baseFare       || '';
-    document.getElementById('t-perkm').value         = t.pricePerKm     || '';
-    document.getElementById('t-waiting').value       = t.waitingRate     || '';
-    document.getElementById('t-minfare').value       = t.minimumFare     || '';
-    document.getElementById('t-notes').value         = t.notes           || '';
-    document.getElementById('t-speedthreshold').value = t.speedThreshold !== undefined ? t.speedThreshold : 5;
-    document.getElementById('t-waitinterval').value  = t.waitingInterval !== undefined ? t.waitingInterval : 60;
-    // Restore schedule
-    if (t.scheduleType === 'custom') {
-      document.getElementById('t-sched-custom').checked = true;
-      document.getElementById('t-sched-fields').style.display = 'block';
-      document.getElementById('t-startdate').value = t.startDate || '';
-      document.getElementById('t-enddate').value   = t.endDate   || '';
-      if (!t.allDay) {
-        document.getElementById('t-allday').checked = false;
-        document.getElementById('t-time-fields').style.display = 'block';
-        document.getElementById('t-starttime').value = t.startTime || '08:00';
-        document.getElementById('t-endtime').value   = t.endTime   || '22:00';
-      }
-      var savedDays = t.days || [0,1,2,3,4,5,6];
-      [0,1,2,3,4,5,6].forEach(function(d){
-        var cb = document.getElementById('td-'+d);
-        if (cb) cb.checked = savedDays.indexOf(d) !== -1;
+    document.getElementById('tw-name').value = t.TariffName || t.name || '';
+    document.getElementById('tw-base').value = t.baseFare != null ? t.baseFare : '';
+    document.getElementById('tw-perkm').value = t.pricePerKm != null ? t.pricePerKm : '';
+    document.getElementById('tw-waiting').value = t.waitingRate != null ? t.waitingRate : '';
+    document.getElementById('tw-minfare').value = t.minimumFare != null ? t.minimumFare : '';
+    var w = t.whenActive || 'always';
+    var wr = document.querySelector('input[name="tw-when"][value="'+w+'"]');
+    if (wr) wr.checked = true;
+    document.getElementById('tw-starttime').value = t.startTime || '22:00';
+    document.getElementById('tw-endtime').value = t.endTime || '06:00';
+    document.getElementById('tw-nz-holidays').checked = t.useNzHolidays !== false;
+    twDates = (t.specificDates || []).slice();
+    document.getElementById('tw-zone-mode').value = t.zoneMode || 'all';
+    twWhenChanged();
+    twRenderDateChips();
+    twZoneModeChanged();
+    if (t.zoneMode === 'specific') {
+      (t.zoneIds || []).forEach(function(zn) {
+        var cb = document.getElementById('tw-z-'+zn);
+        if (cb) cb.checked = true;
       });
     }
-    tLoadTimeRates(t);
-  } else {
-    document.getElementById('tmodal-title').textContent = 'Add Tariff Zone';
-    ['t-name','t-base','t-perkm','t-waiting','t-minfare','t-notes'].forEach(function(x){ document.getElementById(x).value=''; });
-    document.getElementById('t-speedthreshold').value = 1;
-    document.getElementById('t-waitinterval').value = 60;
-    document.getElementById('t-night-en').checked = false;
-    document.getElementById('t-weekend-en').checked = false;
-    document.getElementById('t-holiday-en').checked = false;
-    document.getElementById('t-special-dates').value = '';
-    tToggleTimeRates();
   }
-  updateMeterSummary();
-  document.getElementById('tariff-modal').classList.add('open');
+
+  twShowStep(1);
+  document.getElementById('tw-modal').classList.add('open');
 }
 
-function closeTariffModal() { document.getElementById('tariff-modal').classList.remove('open'); }
+function twCloseWizard() { document.getElementById('tw-modal').classList.remove('open'); }
 
-function updateMeterSummary() {
-  var perkm    = parseFloat(document.getElementById('t-perkm').value) || 0;
-  var waiting  = parseFloat(document.getElementById('t-waiting').value) || 0;
-  var thresh   = parseInt(document.getElementById('t-speedthreshold').value) || 1;
-  var interval = parseInt(document.getElementById('t-waitinterval').value) || 60;
-  var perLabel = interval === 60 ? 'per minute' : interval === 30 ? 'per 30 sec' : 'every ' + interval + 's';
-  var el = document.getElementById('t-meter-summary');
-  if (!el) return;
-  el.innerHTML =
-    '<strong>&#x1F697; Car moving</strong> (speed &ge; ' + thresh + ' km/h): charge <strong>$' + perkm.toFixed(2) + ' / km</strong><br>' +
-    '<strong>&#x23F8; Car stopped</strong> (speed &lt; ' + thresh + ' km/h): charge <strong>$' + waiting.toFixed(2) + ' ' + perLabel + '</strong><br>' +
-    '<span style="color:#5C6BC0;font-size:11px">GPS auto-switches the meter automatically — no manual toggle needed.</span>';
+function twShowStep(n) {
+  twStep = n;
+  [1,2,3,4].forEach(function(s) {
+    document.getElementById('tw-pane-'+s).classList.toggle('active', s === n);
+    var el = document.querySelector('.tw-step[data-s="'+s+'"]');
+    if (el) {
+      el.classList.toggle('active', s === n);
+      el.classList.toggle('done', s < n);
+    }
+  });
+  document.getElementById('tw-back-btn').style.visibility = n > 1 ? 'visible' : 'hidden';
+  var next = document.getElementById('tw-next-btn');
+  next.textContent = n === 4 ? 'Save Tariff' : 'Next';
+  if (n === 4) twBuildSummary();
+}
+
+function twWhenChanged() {
+  var w = document.querySelector('input[name="tw-when"]:checked');
+  w = w ? w.value : 'always';
+  document.getElementById('tw-time-fields').style.display = (w === 'nights' || w === 'custom') ? 'block' : 'none';
+  document.querySelectorAll('#tw-when-group .tw-radio').forEach(function(el) {
+    var inp = el.querySelector('input');
+    el.classList.toggle('sel', inp && inp.checked);
+  });
+}
+
+function twAddDate() {
+  var inp = document.getElementById('tw-date-pick');
+  var d = inp.value;
+  if (!d) return;
+  if (twDates.indexOf(d) === -1) twDates.push(d);
+  twDates.sort();
+  twRenderDateChips();
+  inp.value = '';
+}
+
+function twRemoveDate(d) {
+  twDates = twDates.filter(function(x){ return x !== d; });
+  twRenderDateChips();
+}
+
+function twRenderDateChips() {
+  var el = document.getElementById('tw-date-chips');
+  if (!twDates.length) { el.innerHTML = ''; return; }
+  el.innerHTML = twDates.map(function(d) {
+    return '<span class="tw-date-chip">'+d+' <button type="button" onclick="twRemoveDate(\\''+d+'\\')" style="border:none;background:none;cursor:pointer;color:#0f766e;font-weight:700;margin-left:4px">&times;</button></span>';
+  }).join('');
+}
+
+function twZoneModeChanged() {
+  var mode = document.getElementById('tw-zone-mode').value;
+  document.getElementById('tw-zone-specific').style.display = mode === 'specific' ? 'block' : 'none';
+  if (mode !== 'specific') return;
+  var list = document.getElementById('tw-zone-list');
+  var empty = document.getElementById('tw-zone-empty');
+  var keys = Object.keys(allZones);
+  if (!keys.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  list.innerHTML = keys.map(function(k) {
+    var z = allZones[k];
+    return '<label class="tw-zone-item"><input type="checkbox" id="tw-z-'+z.zoneNumber+'" value="'+z.zoneNumber+'"/> '+twEsc(z.name)+' <span style="color:#94a3b8;font-size:12px">#'+z.zoneNumber+'</span></label>';
+  }).join('');
+}
+
+function twValidateStep() {
+  var err = document.getElementById('tw-err');
+  err.style.display = 'none';
+  if (twStep === 1) {
+    if (!document.getElementById('tw-name').value.trim()) {
+      err.textContent = 'Please enter a tariff name.';
+      err.style.display = 'block';
+      return false;
+    }
+  }
+  if (twStep === 3) {
+    if (document.getElementById('tw-zone-mode').value === 'specific') {
+      var any = false;
+      document.querySelectorAll('#tw-zone-list input:checked').forEach(function(){ any = true; });
+      if (Object.keys(allZones).length && !any) {
+        err.textContent = 'Select at least one zone, or choose All Zones.';
+        err.style.display = 'block';
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function twNext() {
+  if (!twValidateStep()) return;
+  if (twStep < 4) { twShowStep(twStep + 1); return; }
+  saveTariff();
+}
+
+function twBack() {
+  if (twStep > 1) twShowStep(twStep - 1);
+}
+
+function twReadForm() {
+  var wEl = document.querySelector('input[name="tw-when"]:checked');
+  var when = wEl ? wEl.value : 'always';
+  var zoneMode = document.getElementById('tw-zone-mode').value;
+  var zoneIds = [];
+  if (zoneMode === 'specific') {
+    document.querySelectorAll('#tw-zone-list input:checked').forEach(function(cb) {
+      zoneIds.push(Number(cb.value));
+    });
+  }
+  var days = [0,1,2,3,4,5,6];
+  if (when === 'weekdays') days = [1,2,3,4,5];
+  if (when === 'weekends') days = [0,6];
+  return {
+    name: document.getElementById('tw-name').value.trim(),
+    baseFare: parseFloat(document.getElementById('tw-base').value) || 0,
+    pricePerKm: parseFloat(document.getElementById('tw-perkm').value) || 0,
+    waitingRate: parseFloat(document.getElementById('tw-waiting').value) || 0,
+    minimumFare: parseFloat(document.getElementById('tw-minfare').value) || 0,
+    whenActive: when,
+    startTime: document.getElementById('tw-starttime').value || '22:00',
+    endTime: document.getElementById('tw-endtime').value || '06:00',
+    specificDates: twDates.slice(),
+    useNzHolidays: document.getElementById('tw-nz-holidays').checked,
+    zoneMode: zoneMode,
+    zoneIds: zoneIds,
+    scheduleType: when === 'always' ? 'always' : 'custom',
+    days: days,
+    allDay: when !== 'nights' && when !== 'custom',
+    holidayEnabled: when === 'holidays' || document.getElementById('tw-nz-holidays').checked,
+    nzPublicHolidays: document.getElementById('tw-nz-holidays').checked ? NZ_PUBLIC_HOLIDAYS : []
+  };
+}
+
+function twBuildSummary() {
+  var f = twReadForm();
+  var zones = f.zoneMode === 'all' ? 'All zones' : (f.zoneIds.length ? f.zoneIds.length + ' selected zone(s)' : 'No zones configured');
+  document.getElementById('tw-summary').innerHTML =
+    '<strong>' + twEsc(f.name) + '</strong><br><br>' +
+    'Flag fall: <strong>' + twFmt(f.baseFare) + '</strong> · Per km: <strong>' + twFmt(f.pricePerKm) + '</strong><br>' +
+    'Waiting: <strong>' + twFmt(f.waitingRate) + '/min</strong> · Min fare: <strong>' + twFmt(f.minimumFare) + '</strong><br><br>' +
+    'When active: <strong>' + twEsc(twWhenLabel(f)) + '</strong><br>' +
+    'Zones: <strong>' + twEsc(zones) + '</strong>';
+}
+
+function buildDriverTariffPayload(t, numericId) {
+  var waiting = parseFloat(t.waitingRate) || 0;
+  return {
+    id: String(numericId),
+    name: t.name || t.TariffName,
+    companyId: t.companyId || window.COMPANY_ID || '',
+    flagFall: parseFloat(t.baseFare) || 0,
+    flagfall: parseFloat(t.baseFare) || 0,
+    baseFare: parseFloat(t.baseFare) || 0,
+    ratePerKm: parseFloat(t.pricePerKm) || 0,
+    perKm: parseFloat(t.pricePerKm) || 0,
+    pricePerKm: parseFloat(t.pricePerKm) || 0,
+    waitingPerMin: waiting,
+    waitingRate: waiting,
+    waiting: waiting,
+    minimumFare: parseFloat(t.minimumFare) || 0,
+    speedThreshold: parseInt(t.speedThreshold, 10) || 1,
+    waitingInterval: parseInt(t.waitingInterval, 10) || 60,
+    whenActive: t.whenActive,
+    zoneMode: t.zoneMode,
+    zoneIds: t.zoneIds || [],
+    useNzHolidays: t.useNzHolidays,
+    specificDates: t.specificDates || [],
+    updatedAt: Date.now()
+  };
 }
 
 function saveTariff() {
-  var name          = document.getElementById('t-name').value.trim();
-  var base          = document.getElementById('t-base').value;
-  var perkm         = document.getElementById('t-perkm').value;
-  var waiting       = document.getElementById('t-waiting').value;
-  var minfare       = document.getElementById('t-minfare').value;
-  var notes         = document.getElementById('t-notes').value.trim();
-  var speedThresh   = document.getElementById('t-speedthreshold').value;
-  var waitInterval  = document.getElementById('t-waitinterval').value;
-  var editId        = document.getElementById('edit-tariff-id').value;
-  var errEl   = document.getElementById('tmodal-err');
-  var btn     = document.getElementById('tmodal-save-btn');
-
-  errEl.style.display = 'none';
-  btn.disabled = true; btn.textContent = 'Saving…';
-
-  // Read schedule
-  var isCustom = document.getElementById('t-sched-custom').checked;
-  var scheduleType = isCustom ? 'custom' : 'always';
-  var startDate = isCustom ? (document.getElementById('t-startdate').value || '') : '';
-  var endDate   = isCustom ? (document.getElementById('t-enddate').value   || '') : '';
-  var allDay    = !isCustom || document.getElementById('t-allday').checked;
-  var startTime = (!isCustom || allDay) ? '00:00' : (document.getElementById('t-starttime').value || '00:00');
-  var endTime   = (!isCustom || allDay) ? '23:59' : (document.getElementById('t-endtime').value   || '23:59');
-  var days = [];
-  if (isCustom) {
-    [0,1,2,3,4,5,6].forEach(function(d){ var cb = document.getElementById('td-'+d); if(cb && cb.checked) days.push(d); });
-    if (!days.length) days = [0,1,2,3,4,5,6];
-  } else {
-    days = [0,1,2,3,4,5,6];
-  }
-
-  if (isCustom && (!startDate || !endDate)) {
-    errEl.textContent = 'Please set both Start Date and End Date.';
-    errEl.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Save Tariff';
-    return;
-  }
-  if (isCustom && startDate > endDate) {
-    errEl.textContent = 'Start Date must be before End Date.';
-    errEl.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Save Tariff';
-    return;
-  }
+  var editId = document.getElementById('tw-edit-id').value;
+  var f = twReadForm();
+  var err = document.getElementById('tw-err');
+  var btn = document.getElementById('tw-next-btn');
+  err.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
 
   var numericId;
   if (editId && allTariffs[editId] && allTariffs[editId].Id) {
@@ -10118,60 +10121,74 @@ function saveTariff() {
     numericId = maxId + 1;
   }
 
-  var tariff = {
+  var tariff = Object.assign({
     companyId: COMPANY_ID,
     Id: numericId,
-    TariffName: name,
-    zoneName: name,
-    baseFare: parseFloat(base)||0,
-    pricePerKm: parseFloat(perkm)||0,
-    waitingRate: parseFloat(waiting)||0,
-    minimumFare: parseFloat(minfare)||0,
-    speedThreshold: parseInt(speedThresh)||1,
-    waitingInterval: parseInt(waitInterval)||60,
-    notes: notes,
-    scheduleType: scheduleType,
-    startDate: startDate || null,
-    endDate:   endDate   || null,
-    allDay:    allDay,
-    startTime: startTime,
-    endTime:   endTime,
-    days:      days,
+    TariffName: f.name,
+    zoneName: f.name,
+    speedThreshold: 1,
+    waitingInterval: 60,
     updatedAt: Date.now()
-  };
-  Object.assign(tariff, tReadTimeRates());
-
-  var key = editId || ('tariff_' + Date.now());
+  }, f);
   tariff.name = tariff.TariffName;
-  var driverTariff = buildDriverTariffPayload(tariff, numericId);
-  adminWrite('tariffZones/' + key, 'PUT', tariff).then(function() {
+
+  var key = editId || String(numericId);
+  var cid = window.COMPANY_ID || '';
+  var driverPayload = buildDriverTariffPayload(tariff, numericId);
+
+  adminWrite('tariffs/' + cid + '/' + numericId, 'PUT', Object.assign({}, driverPayload, tariff)).then(function() {
+    return adminWrite('tariffZones/' + key, 'PUT', tariff);
+  }).then(function() {
     allTariffs[key] = tariff;
     renderTariffs();
-    closeTariffModal();
-    adminWrite('tariffs/' + (window.COMPANY_ID || '') + '/' + numericId, 'PUT', driverTariff).catch(function(e){
-      console.warn('[Tariffs] Driver-app sync failed:', e.message);
-    });
-  }).catch(function(err) {
-    errEl.textContent = 'Save failed: ' + err.message;
-    errEl.style.display = 'block';
-  }).finally(function() { btn.disabled = false; btn.textContent = 'Save Tariff'; });
+    twCloseWizard();
+  }).catch(function(e) {
+    err.textContent = 'Save failed: ' + (e.message || e);
+    err.style.display = 'block';
+  }).finally(function() {
+    btn.disabled = false;
+    btn.textContent = twStep === 4 ? 'Save Tariff' : 'Next';
+  });
+}
+
+function duplicateTariff(id) {
+  var t = allTariffs[id];
+  if (!t) return;
+  var maxId = 0;
+  Object.values(allTariffs).forEach(function(x){ if (x.Id && x.Id > maxId) maxId = x.Id; });
+  var copy = JSON.parse(JSON.stringify(t));
+  copy.Id = maxId + 1;
+  copy.TariffName = (t.TariffName || t.name) + ' (Copy)';
+  copy.name = copy.TariffName;
+  copy.updatedAt = Date.now();
+  var key = String(copy.Id);
+  var cid = window.COMPANY_ID || '';
+  var driverPayload = buildDriverTariffPayload(copy, copy.Id);
+  adminWrite('tariffs/' + cid + '/' + copy.Id, 'PUT', Object.assign({}, driverPayload, copy)).then(function() {
+    return adminWrite('tariffZones/' + key, 'PUT', copy);
+  }).then(function() {
+    allTariffs[key] = copy;
+    renderTariffs();
+  }).catch(function(e) { alert('Duplicate failed: ' + e.message); });
 }
 
 function deleteTariff(id) {
   var t = allTariffs[id];
-  if (!confirm('Delete tariff "' + (t ? t.zoneName : id) + '"?')) return;
+  if (!confirm('Delete tariff "' + (t ? (t.TariffName || t.name) : id) + '"?')) return;
+  var cid = window.COMPANY_ID || '';
+  var numId = t && t.Id;
   adminWrite('tariffZones/' + id, 'DELETE', null).then(function() {
-    // Also remove from tariffs/{companyId}/ to keep driver app in sync
-    if (t && t.Id) adminWrite('tariffs/'+(window.COMPANY_ID)+'/' + t.Id, 'DELETE', null).catch(function(){});
+    if (numId && cid) return adminWrite('tariffs/' + cid + '/' + numId, 'DELETE', null);
+  }).then(function() {
     delete allTariffs[id];
     renderTariffs();
-  }).catch(function(err){ alert('Delete failed: ' + err.message); });
+  }).catch(function(e) { alert('Delete failed: ' + e.message); });
 }
-
 <\/script>`;
 
   return pageWrap(commonHead('Tariff Schedule', css), body, commonScripts(js));
 }
+
 
 // ── VENDORS: REGISTRATION ─────────────────────────────────────────────────────
 function vendorsPage() {
