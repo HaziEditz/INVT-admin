@@ -9536,6 +9536,7 @@ function tariffsPage() {
 .tw-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.06)}
 .tw-card-hdr{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .tw-card-name{font-size:16px;font-weight:700;color:#0f172a;margin:0}
+.tw-card-rates{font-size:13px;font-weight:600;color:#0f172a;margin:8px 0 10px;line-height:1.4}
 .tw-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
 .tw-badge.on{background:#dcfce7;color:#166534}
 .tw-badge.off{background:#f1f5f9;color:#64748b}
@@ -9624,8 +9625,8 @@ function tariffsPage() {
         <div class="tw-field"><label>Tariff Name</label><input id="tw-name" type="text" placeholder="e.g. Standard, Night Rate, Airport"/></div>
         <div class="tw-grid2">
           <div class="tw-field"><label>Flag Fall / Base Fare ($)</label><input id="tw-base" type="number" min="0" step="0.01" placeholder="0.00"/></div>
-          <div class="tw-field"><label>Per KM Rate ($)</label><input id="tw-perkm" type="number" min="0" step="0.01" placeholder="0.00"/></div>
-          <div class="tw-field"><label>Waiting Rate ($ / min)</label><input id="tw-waiting" type="number" min="0" step="0.01" placeholder="0.00"/></div>
+          <div class="tw-field"><label>Distance Rate ($ per km)</label><input id="tw-perkm" type="number" min="0" step="0.01" placeholder="0.00"/><p class="tw-note">e.g. $4.60 = $4.60 charged per 1000 metres</p></div>
+          <div class="tw-field"><label>Waiting Rate ($ per minute)</label><input id="tw-waiting" type="number" min="0" step="0.01" placeholder="0.00"/><p class="tw-note">e.g. $1.00 = $1 charged every 60 seconds when stopped</p></div>
           <div class="tw-field"><label>Minimum Fare ($)</label><input id="tw-minfare" type="number" min="0" step="0.01" placeholder="0.00"/></div>
         </div>
       </div>
@@ -9771,9 +9772,10 @@ function twNormalizeTariff(key, t) {
     Id: Number(id) || id,
     TariffName: t.TariffName || t.name || t.zoneName || ('Tariff ' + id),
     name: t.name || t.TariffName || t.zoneName || ('Tariff ' + id),
+    flagFall: t.flagFall != null ? t.flagFall : (t.baseFare || t.flagfall || 0),
     baseFare: t.baseFare != null ? t.baseFare : (t.flagFall || t.flagfall || 0),
     pricePerKm: t.pricePerKm != null ? t.pricePerKm : (t.ratePerKm || t.perKm || 0),
-    waitingRate: t.waitingRate != null ? t.waitingRate : (t.waitingPerMin || t.waiting || 0),
+    waitingRatePerMinute: t.waitingRatePerMinute != null ? t.waitingRatePerMinute : (t.waitingRate || t.waitingPerMin || t.waiting || 0),
     minimumFare: t.minimumFare != null ? t.minimumFare : 0,
     whenActive: t.whenActive || (t.scheduleType === 'always' ? 'always' : 'custom'),
     zoneMode: t.zoneMode || 'all',
@@ -9851,10 +9853,8 @@ function renderTariffs() {
     return '<div class="tw-card">' +
       '<div class="tw-card-hdr"><h3 class="tw-card-name">' + twEsc(t.TariffName || t.name) + '</h3>' +
       '<span class="tw-badge ' + (active ? 'on' : 'off') + '">' + (active ? 'Active now' : 'Inactive') + '</span></div>' +
+      '<p class="tw-card-rates">Flag Fall: ' + twFmt(t.flagFall != null ? t.flagFall : t.baseFare) + ' | ' + twFmt(t.pricePerKm) + '/km | ' + twFmt(t.waitingRatePerMinute) + '/min waiting</p>' +
       '<dl class="tw-card-grid">' +
-      '<dt>Flag Fall</dt><dd>' + twFmt(t.baseFare) + '</dd>' +
-      '<dt>Per KM</dt><dd>' + twFmt(t.pricePerKm) + '</dd>' +
-      '<dt>Waiting</dt><dd>' + twFmt(t.waitingRate) + '/min</dd>' +
       '<dt>Min Fare</dt><dd>' + twFmt(t.minimumFare) + '</dd>' +
       '<dt>When Active</dt><dd>' + twEsc(twWhenLabel(t)) + '</dd>' +
       '<dt>Zones</dt><dd>' + twEsc(twZonesLabel(t)) + '</dd>' +
@@ -9894,7 +9894,7 @@ function twOpenWizard(id) {
     document.getElementById('tw-name').value = t.TariffName || t.name || '';
     document.getElementById('tw-base').value = t.baseFare != null ? t.baseFare : '';
     document.getElementById('tw-perkm').value = t.pricePerKm != null ? t.pricePerKm : '';
-    document.getElementById('tw-waiting').value = t.waitingRate != null ? t.waitingRate : '';
+    document.getElementById('tw-waiting').value = t.waitingRatePerMinute != null ? t.waitingRatePerMinute : '';
     document.getElementById('tw-minfare').value = t.minimumFare != null ? t.minimumFare : '';
     var w = t.whenActive || 'always';
     var wr = document.querySelector('input[name="tw-when"][value="'+w+'"]');
@@ -10040,7 +10040,7 @@ function twReadForm() {
     name: document.getElementById('tw-name').value.trim(),
     baseFare: parseFloat(document.getElementById('tw-base').value) || 0,
     pricePerKm: parseFloat(document.getElementById('tw-perkm').value) || 0,
-    waitingRate: parseFloat(document.getElementById('tw-waiting').value) || 0,
+    waitingRatePerMinute: parseFloat(document.getElementById('tw-waiting').value) || 0,
     minimumFare: parseFloat(document.getElementById('tw-minfare').value) || 0,
     whenActive: when,
     startTime: document.getElementById('tw-starttime').value || '22:00',
@@ -10062,27 +10062,23 @@ function twBuildSummary() {
   var zones = f.zoneMode === 'all' ? 'All zones' : (f.zoneIds.length ? f.zoneIds.length + ' selected zone(s)' : 'No zones configured');
   document.getElementById('tw-summary').innerHTML =
     '<strong>' + twEsc(f.name) + '</strong><br><br>' +
-    'Flag fall: <strong>' + twFmt(f.baseFare) + '</strong> · Per km: <strong>' + twFmt(f.pricePerKm) + '</strong><br>' +
-    'Waiting: <strong>' + twFmt(f.waitingRate) + '/min</strong> · Min fare: <strong>' + twFmt(f.minimumFare) + '</strong><br><br>' +
+    'Flag Fall: <strong>' + twFmt(f.baseFare) + '</strong> | <strong>' + twFmt(f.pricePerKm) + '/km</strong> | <strong>' + twFmt(f.waitingRatePerMinute) + '/min waiting</strong><br>' +
+    'Min fare: <strong>' + twFmt(f.minimumFare) + '</strong><br><br>' +
     'When active: <strong>' + twEsc(twWhenLabel(f)) + '</strong><br>' +
     'Zones: <strong>' + twEsc(zones) + '</strong>';
 }
 
 function buildDriverTariffPayload(t, numericId) {
-  var waiting = parseFloat(t.waitingRate) || 0;
+  var flagFall = parseFloat(t.flagFall != null ? t.flagFall : t.baseFare) || 0;
+  var pricePerKm = parseFloat(t.pricePerKm) || 0;
+  var waitingRatePerMinute = parseFloat(t.waitingRatePerMinute) || 0;
   return {
     id: String(numericId),
     name: t.name || t.TariffName,
     companyId: t.companyId || window.COMPANY_ID || '',
-    flagFall: parseFloat(t.baseFare) || 0,
-    flagfall: parseFloat(t.baseFare) || 0,
-    baseFare: parseFloat(t.baseFare) || 0,
-    ratePerKm: parseFloat(t.pricePerKm) || 0,
-    perKm: parseFloat(t.pricePerKm) || 0,
-    pricePerKm: parseFloat(t.pricePerKm) || 0,
-    waitingPerMin: waiting,
-    waitingRate: waiting,
-    waiting: waiting,
+    flagFall: flagFall,
+    pricePerKm: pricePerKm,
+    waitingRatePerMinute: waitingRatePerMinute,
     minimumFare: parseFloat(t.minimumFare) || 0,
     speedThreshold: parseInt(t.speedThreshold, 10) || 1,
     waitingInterval: parseInt(t.waitingInterval, 10) || 60,
