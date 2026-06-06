@@ -8904,8 +8904,23 @@ function zonesPage() {
 .zn-toggle input:checked+.zn-toggle-track{background:#0d9488}
 .zn-toggle-thumb{position:absolute;top:3px;left:3px;width:16px;height:16px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s;pointer-events:none}
 .zn-toggle input:checked~.zn-toggle-thumb{transform:translateX(18px)}
-.zn-del-btn{width:32px;height:32px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;line-height:30px;text-align:center;color:#94a3b8;transition:all .15s}
+.zn-edit-btn,.zn-del-btn{height:32px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;padding:0 10px;color:#475569;transition:all .15s}
+.zn-edit-btn:hover{background:#ecfdf5;color:#0d9488;border-color:#99f6e4}
+.zn-del-btn{width:32px;padding:0;font-size:14px;line-height:30px;text-align:center;color:#94a3b8}
 .zn-del-btn:hover{background:#fef2f2;color:#dc2626;border-color:#fecaca}
+.zn-list-actions{display:flex;gap:8px;padding:12px 12px 0;flex-shrink:0}
+.zn-draw-btn{flex:1;height:36px;border:1px dashed #99f6e4;border-radius:8px;background:#f0fdfa;color:#0d9488;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.zn-draw-btn:hover{background:#ccfbf1;border-color:#0d9488}
+.zn-draw-btn.on{background:#0d9488;color:#fff;border-style:solid;border-color:#0d9488}
+.zn-edit-bar{display:none;padding:12px 14px;background:#ecfdf5;border-bottom:1px solid #99f6e4;flex-shrink:0}
+.zn-edit-bar.show{display:block}
+.zn-edit-bar-title{font-size:12px;font-weight:700;color:#0f766e;margin-bottom:8px}
+.zn-edit-btns{display:flex;gap:8px}
+.zn-edit-btns button{height:32px;padding:0 12px;border-radius:7px;border:1px solid #99f6e4;background:#fff;font-size:12px;font-weight:600;cursor:pointer;color:#0f766e}
+.zn-edit-btns button.primary{background:#0d9488;color:#fff;border-color:#0d9488}
+.zn-map-hint{position:absolute;top:16px;right:16px;z-index:600;background:#fff;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;color:#0f766e;border:1px solid #99f6e4;box-shadow:0 2px 8px rgba(0,0,0,.08);display:none}
+.zn-map-hint.show{display:block}
+.zn-vertex{background:#fff;border:2px solid #0d9488;border-radius:50%;width:12px!important;height:12px!important;margin:-6px 0 0 -6px!important;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .zn-empty{padding:40px 20px;text-align:center;color:#94a3b8;font-size:14px;line-height:1.7}
 .zn-footer{padding:14px 20px;border-top:1px solid #e2e8f0;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-shrink:0}
 .zn-footer-note{font-size:12px;color:#94a3b8}
@@ -8920,7 +8935,7 @@ function zonesPage() {
   <div class="zn-topbar">
     <div class="zn-topbar-left">
       <h2 class="zn-title">Service Zones</h2>
-      <p class="zn-sub">Load suburb zones from OpenStreetMap, toggle active zones, then save to Firebase.</p>
+      <p class="zn-sub">Load suburb zones, draw or edit boundaries, then save active zones to Firebase.</p>
     </div>
     <div class="zn-search">
       <input id="zn-city" placeholder="City e.g. Invercargill" value="Invercargill" autocomplete="off" />
@@ -8931,12 +8946,23 @@ function zonesPage() {
   <div class="zn-main">
     <div class="zn-map-col">
       <div id="zn-status" class="zn-status">New Zealand · OpenStreetMap</div>
+      <div id="zn-map-hint" class="zn-map-hint"></div>
       <div id="zn-map"></div>
     </div>
     <aside class="zn-list-col">
       <div class="zn-list-hdr">
         <span>Zones <span id="zn-count">(0)</span></span>
         <span class="zn-list-hdr-sub" id="zn-active-count">0 active</span>
+      </div>
+      <div class="zn-list-actions">
+        <button class="zn-draw-btn" type="button" id="zn-draw-btn" onclick="znStartDraw()">+ Draw Zone</button>
+      </div>
+      <div class="zn-edit-bar" id="zn-edit-bar">
+        <div class="zn-edit-bar-title">Editing: <span id="zn-edit-label">—</span></div>
+        <div class="zn-edit-btns">
+          <button type="button" class="primary" onclick="znSaveEdit()">Save</button>
+          <button type="button" onclick="znCancelEdit()">Cancel</button>
+        </div>
       </div>
       <div id="zn-list" class="zn-list"><div class="zn-empty">Enter a city and click <strong>Load Suburbs</strong> to generate zone boundaries.</div></div>
     </aside>
@@ -8953,6 +8979,9 @@ function zonesPage() {
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 <script>
 var znMap=null,znLayers={},znZones=[],znSelectedKey=null,znRenameKey=null,znFitNext=false;
+var znOverlayGroup=null,znEditKey=null,znEditBackup=null,znVertexMarkers=[];
+var znDrawMode=false,znDrawPoints=[],znDrawPreview=null,znDrawMarkers=[];
+var znCLOSE_TOL=0.00015;
 var ZN_COLORS=['#0d9488','#2563eb','#7c3aed','#dc2626','#d97706','#0891b2','#16a34a','#9333ea','#db2777','#ca8a04','#059669','#4f46e5','#ea580c','#0e7490','#65a30d','#c026d3','#b45309','#1d4ed8','#be123c','#047857'];
 
 function znAlert(msg,type){
@@ -8964,14 +8993,24 @@ function znAlert(msg,type){
 
 function znInitMap(){
   if(znMap){
+    if(!znOverlayGroup) znOverlayGroup=L.featureGroup().addTo(znMap);
     setTimeout(function(){ znMap.invalidateSize(); }, 200);
     return;
   }
   znMap=L.map('zn-map',{zoomControl:true}).setView([-41.0,174.0],5);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(znMap);
+  znOverlayGroup=L.featureGroup().addTo(znMap);
+  znMap.on('click',function(e){ znOnMapClick(e); });
   setTimeout(function(){ znMap.invalidateSize(); }, 300);
   setTimeout(function(){ znMap.invalidateSize(); }, 900);
   window.addEventListener('resize',function(){ if(znMap) znMap.invalidateSize(); });
+}
+
+function znSetMapHint(msg){
+  var el=document.getElementById('zn-map-hint');
+  if(!el) return;
+  if(msg){ el.textContent=msg; el.classList.add('show'); }
+  else{ el.textContent=''; el.classList.remove('show'); }
 }
 
 function znColorFor(z){ return ZN_COLORS[((z.zoneNumber||1)-1)%ZN_COLORS.length]; }
@@ -9086,7 +9125,9 @@ function znDrawZone(z){
   }).addTo(znMap);
   layer.bindTooltip('#'+z.zoneNumber+' '+z.name);
   layer.on('click',function(e){
+    if(znDrawMode) return;
     L.DomEvent.stopPropagation(e);
+    if(znEditKey) return;
     znSelectZone(z.key);
   });
   znLayers[z.key]=layer;
@@ -9119,12 +9160,13 @@ function znRenderList(){
     var inactive=z.active===false?' inactive':'';
     var nameHtml=znRenameKey===z.key
       ? '<input class="zn-item-rename" id="zn-rename-'+z.key+'" value="'+znEsc(z.name)+'" onblur="znFinishRename(\\''+z.key+'\\')" onkeydown="znRenameKeydown(event,\\''+z.key+'\\')" />'
-      : '<div class="zn-item-name" title="Click to rename" onclick="znStartRename(\\''+z.key+'\\')">'+znEsc(z.name)+'</div>';
+      : '<div class="zn-item-name" title="Click to rename" onclick="event.stopPropagation(); znStartRename(\\''+z.key+'\\')">'+znEsc(z.name)+'</div>';
     return '<div class="zn-item'+sel+inactive+'" data-key="'+z.key+'" onclick="znSelectZone(\\''+z.key+'\\',true)">'+
       '<div class="zn-swatch" style="background:'+col+'"></div>'+
       '<div class="zn-item-body">'+nameHtml+
       '<div class="zn-item-num">Zone #'+z.zoneNumber+'</div></div>'+
       '<div class="zn-item-right" onclick="event.stopPropagation()">'+
+      '<button class="zn-edit-btn" title="Edit boundary" onclick="znStartEdit(\\''+z.key+'\\')">Edit</button>'+
       '<label class="zn-toggle" title="Active">'+
       '<input type="checkbox" '+(z.active!==false?'checked':'')+' onchange="znToggleActive(\\''+z.key+'\\',this.checked)" />'+
       '<span class="zn-toggle-track"></span><span class="zn-toggle-thumb"></span></label>'+
@@ -9139,6 +9181,7 @@ function znRenderList(){
 }
 
 function znSelectZone(key,fromList){
+  if(znDrawMode||znEditKey) return;
   znSelectedKey=key;
   znRedrawAll();
   znRenderList();
@@ -9146,6 +9189,158 @@ function znSelectZone(key,fromList){
     var el=document.querySelector('.zn-item[data-key="'+key+'"]');
     if(el) el.scrollIntoView({block:'nearest',behavior:'smooth'});
   }
+}
+
+function znClearVertexMarkers(){
+  znVertexMarkers.forEach(function(m){ if(znOverlayGroup) znOverlayGroup.removeLayer(m); });
+  znVertexMarkers=[];
+}
+
+function znClearDrawPreview(){
+  if(znDrawPreview&&znOverlayGroup){ znOverlayGroup.removeLayer(znDrawPreview); znDrawPreview=null; }
+  znDrawMarkers.forEach(function(m){ if(znOverlayGroup) znOverlayGroup.removeLayer(m); });
+  znDrawMarkers=[];
+}
+
+function znUpdateDrawPreview(){
+  znClearDrawPreview();
+  if(!znDrawPoints.length||!znOverlayGroup) return;
+  znDrawPoints.forEach(function(p,i){
+    var m=L.circleMarker([p[0],p[1]],{radius:i===0?7:5,color:'#0d9488',fillColor:i===0?'#0d9488':'#fff',fillOpacity:1,weight:2});
+    m.addTo(znOverlayGroup);
+    znDrawMarkers.push(m);
+  });
+  if(znDrawPoints.length>=2){
+    znDrawPreview=L.polygon(znDrawPoints.map(function(p){return [p[0],p[1]];}),{color:'#0d9488',weight:2,dashArray:'6 4',fillOpacity:0.15});
+    znDrawPreview.addTo(znOverlayGroup);
+  }
+}
+
+function znNearPoint(lat,lng,p){
+  return Math.hypot(lat-p[0],lng-p[1])<znCLOSE_TOL;
+}
+
+function znStartDraw(){
+  if(znEditKey) znCancelEdit();
+  znDrawMode=true;
+  znDrawPoints=[];
+  znSelectedKey=null;
+  znRenameKey=null;
+  var btn=document.getElementById('zn-draw-btn');
+  if(btn) btn.classList.add('on');
+  znClearDrawPreview();
+  znSetMapHint('Click map to add points. Click the first point to close.');
+  znRenderList();
+  znRedrawAll();
+}
+
+function znCancelDraw(){
+  znDrawMode=false;
+  znDrawPoints=[];
+  znClearDrawPreview();
+  var btn=document.getElementById('zn-draw-btn');
+  if(btn) btn.classList.remove('on');
+  znSetMapHint('');
+  znRedrawAll();
+}
+
+function znFinishDraw(){
+  if(!znDrawPoints.length||znDrawPoints.length<3){
+    znAlert('Draw at least 3 points to create a zone.','err');
+    return;
+  }
+  var name=prompt('Zone name:','New Zone');
+  if(!name) return;
+  var n=znZones.length+1;
+  znZones.push({
+    key:'zone_'+n,
+    zoneNumber:n,
+    name:name.trim(),
+    boundary:znDrawPoints.slice(),
+    center:znCenterFromBoundary(znDrawPoints),
+    active:true,
+    osmId:null,
+    companyId:window.COMPANY_ID||''
+  });
+  znCancelDraw();
+  znRenderList();
+  znRedrawAll();
+  znAlert('Zone "'+name.trim()+'" added.','ok');
+}
+
+function znOnMapClick(e){
+  if(!znDrawMode) return;
+  var lat=e.latlng.lat,lng=e.latlng.lng;
+  if(znDrawPoints.length>=3&&znNearPoint(lat,lng,znDrawPoints[0])){
+    znFinishDraw();
+    return;
+  }
+  znDrawPoints.push([lat,lng]);
+  znUpdateDrawPreview();
+}
+
+function znBuildVertexMarkers(zoneKey){
+  znClearVertexMarkers();
+  var z=znZones.find(function(x){return x.key===zoneKey;});
+  if(!z||!z.boundary||!znOverlayGroup) return;
+  z.boundary.forEach(function(p,idx){
+    var m=L.marker([p[0],p[1]],{draggable:true,icon:L.divIcon({className:'zn-vertex',iconSize:[12,12]})});
+    m.on('drag',function(ev){
+      z.boundary[idx]=[ev.target.getLatLng().lat,ev.target.getLatLng().lng];
+      znRedrawZonesOnly();
+    });
+    m.on('dragend',function(){ znBuildVertexMarkers(zoneKey); });
+    m.addTo(znOverlayGroup);
+    znVertexMarkers.push(m);
+  });
+}
+
+function znStartEdit(key){
+  if(znDrawMode) znCancelDraw();
+  var z=znZones.find(function(x){return x.key===key;});
+  if(!z||!z.boundary||!z.boundary.length) return;
+  znEditKey=key;
+  znEditBackup=JSON.parse(JSON.stringify(z.boundary));
+  znSelectedKey=key;
+  document.getElementById('zn-edit-bar').classList.add('show');
+  document.getElementById('zn-edit-label').textContent='#'+z.zoneNumber+' '+z.name;
+  znSetMapHint('Drag handles to adjust boundary.');
+  znBuildVertexMarkers(key);
+  znRedrawAll();
+  znRenderList();
+}
+
+function znCancelEdit(){
+  if(znEditKey&&znEditBackup){
+    var z=znZones.find(function(x){return x.key===znEditKey;});
+    if(z) z.boundary=znEditBackup;
+  }
+  znEditKey=null;
+  znEditBackup=null;
+  znClearVertexMarkers();
+  document.getElementById('zn-edit-bar').classList.remove('show');
+  znSetMapHint('');
+  znRedrawAll();
+  znRenderList();
+}
+
+function znSaveEdit(){
+  if(!znEditKey) return;
+  var z=znZones.find(function(x){return x.key===znEditKey;});
+  if(z) z.center=znCenterFromBoundary(z.boundary);
+  znEditKey=null;
+  znEditBackup=null;
+  znClearVertexMarkers();
+  document.getElementById('zn-edit-bar').classList.remove('show');
+  znSetMapHint('');
+  znRedrawAll();
+  znRenderList();
+  znAlert('Boundary updated. Click Save Zones to publish.','ok');
+}
+
+function znRedrawZonesOnly(){
+  znClearMapLayers();
+  znZones.forEach(znDrawZone);
 }
 
 function znStartRename(key){
@@ -9183,6 +9378,7 @@ function znDeleteZone(key){
   var z=znZones.find(function(x){return x.key===key;});
   if(!z) return;
   if(!confirm('Delete zone "'+z.name+'"?')) return;
+  if(znEditKey===key) znCancelEdit();
   if(znSelectedKey===key) znSelectedKey=null;
   if(znRenameKey===key) znRenameKey=null;
   znZones=znZones.filter(function(x){return x.key!==key;});
@@ -9193,13 +9389,14 @@ function znDeleteZone(key){
 
 function znRedrawAll(){
   if(!znMap) return;
-  znClearMapLayers();
+  znRedrawZonesOnly();
+  if(znEditKey) znBuildVertexMarkers(znEditKey);
+  if(znDrawMode) znUpdateDrawPreview();
   var bounds=[];
-  znZones.forEach(function(z){
-    var layer=znDrawZone(z);
-    if(layer) bounds.push(layer.getBounds());
+  Object.keys(znLayers).forEach(function(k){
+    if(znLayers[k]) bounds.push(znLayers[k].getBounds());
   });
-  if(bounds.length&&znFitNext){
+  if(bounds.length&&znFitNext&&!znEditKey&&!znDrawMode){
     znMap.fitBounds(L.latLngBounds(bounds),{padding:[36,36]});
     znFitNext=false;
   }
@@ -9231,6 +9428,8 @@ function znLoadSuburbs(){
         companyId:window.COMPANY_ID||''
       };
     });
+    if(znEditKey) znCancelEdit();
+    if(znDrawMode) znCancelDraw();
     znSelectedKey=null;
     znRenameKey=null;
     znFitNext=true;
