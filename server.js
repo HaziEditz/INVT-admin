@@ -712,29 +712,56 @@ window._tzTodayStr = function(tz) {
 };
 
 // ── Driver ↔ Vehicle allocation sync (Owner Panel ↔ Driver App) ─────────────
-// Model: allocatedVehicles / allocatedDrivers = who MAY use a vehicle (multi).
+// Model: assignedVehicles (uppercase string array) = vehicles a driver may use.
 //        vehicleId + assignedDriverKey = current shift (one driver, one vehicle).
 window._bwNormTaxi = function(t) { return String(t || '').trim().toUpperCase(); };
 
-window._bwDriverAllocMap = function(d) {
-  var map = {};
-  if (!d || typeof d !== 'object') return map;
-  if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object' && !Array.isArray(d.allocatedVehicles)) {
-    Object.keys(d.allocatedVehicles).forEach(function(v) {
-      if (d.allocatedVehicles[v]) map[window._bwNormTaxi(v)] = true;
-    });
-  } else if (d.allocatedTaxi) {
-    map[window._bwNormTaxi(d.allocatedTaxi)] = true;
+window._bwDriverAssignedList = function(d) {
+  var out = [];
+  if (!d || typeof d !== 'object') return out;
+  function _add(v) {
+    v = window._bwNormTaxi(v);
+    if (v && out.indexOf(v) === -1) out.push(v);
   }
-  return map;
+  if (Array.isArray(d.assignedVehicles)) {
+    d.assignedVehicles.forEach(_add);
+  }
+  // Legacy object map from older Owner Panel records — read only, never written.
+  if (!out.length && d.allocatedVehicles && typeof d.allocatedVehicles === 'object' && !Array.isArray(d.allocatedVehicles)) {
+    Object.keys(d.allocatedVehicles).forEach(function(v) {
+      if (d.allocatedVehicles[v]) _add(v);
+    });
+  }
+  if (!out.length && d.allocatedTaxi) _add(d.allocatedTaxi);
+  return out;
 };
 
-window._bwBuildAllocObject = function(allocatedVehicles) {
-  var out = {};
-  Object.keys(allocatedVehicles || {}).forEach(function(v) {
-    if (allocatedVehicles[v]) out[window._bwNormTaxi(v)] = true;
-  });
-  return out;
+window._bwBuildAssignedArray = function(input) {
+  if (Array.isArray(input)) {
+    var arrOut = [];
+    input.forEach(function(v) {
+      v = window._bwNormTaxi(v);
+      if (v && arrOut.indexOf(v) === -1) arrOut.push(v);
+    });
+    return arrOut;
+  }
+  if (input && typeof input === 'object') {
+    var mapOut = [];
+    Object.keys(input).forEach(function(k) {
+      if (input[k]) {
+        var n = window._bwNormTaxi(k);
+        if (n && mapOut.indexOf(n) === -1) mapOut.push(n);
+      }
+    });
+    return mapOut;
+  }
+  return [];
+};
+
+window._bwDriverAllocMap = function(d) {
+  var map = {};
+  window._bwDriverAssignedList(d).forEach(function(v) { map[v] = true; });
+  return map;
 };
 
 // Resolve Firebase Auth UID — always prefer Admin SDK getUserByEmail over cached profile uid.
@@ -1111,8 +1138,9 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
     if (driverKey && window.allDrivers && window.allDrivers[driverKey]) {
       window.allDrivers[driverKey].uid = uid;
     }
-    var allocMap = window._bwBuildAllocObject(profile.allocatedVehicles || {});
-    var vehKeys = Object.keys(allocMap);
+    var vehKeys = window._bwDriverAssignedList(profile);
+    var allocMap = {};
+    vehKeys.forEach(function(v) { allocMap[v] = true; });
     var prev = window.allDrivers && window.allDrivers[driverKey];
     var prevShift = window._bwNormTaxi(prev && (prev.currentVehicleId || prev.vehicleId));
     var currentShift = (prevShift && allocMap[prevShift])
@@ -1137,8 +1165,8 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
       phone:             profile.phone || '',
       approved:          approved,
       vehicleId:         currentShift,
-      allocatedVehicles: allocMap,
       assignedVehicles:  vehKeys,
+      allocatedVehicles: null,
       allowedServices:   allowedServicesMap,
       updatedAt:         Date.now()
     };
@@ -1315,21 +1343,18 @@ window._bwAddVehicleToDriverFromVehicleTab = function(driverKey, taxiNumber, com
   var d = window.allDrivers && window.allDrivers[driverKey];
   if (!d) return Promise.resolve();
   var taxi = String(taxiNumber).trim();
-  var alloc = {};
-  if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object' && !Array.isArray(d.allocatedVehicles)) {
-    Object.keys(d.allocatedVehicles).forEach(function(v) { if (d.allocatedVehicles[v]) alloc[v] = true; });
-  } else if (d.allocatedTaxi) {
-    alloc[d.allocatedTaxi] = true;
-  }
-  alloc[taxi] = true;
+  var vehKeys = window._bwDriverAssignedList(d);
+  var normTaxi = window._bwNormTaxi(taxi);
+  if (normTaxi && vehKeys.indexOf(normTaxi) === -1) vehKeys.push(normTaxi);
   var profile = Object.assign({}, d, {
-    allocatedVehicles: alloc,
+    assignedVehicles: vehKeys,
     allocatedTaxi: d.allocatedTaxi || taxi,
     companyId: companyId || d.companyId || window.COMPANY_ID
   });
-  if (setAsCurrentShift) profile.currentVehicleId = window._bwNormTaxi(taxi);
+  if (setAsCurrentShift) profile.currentVehicleId = normTaxi;
   return window.adminWrite('drivers/' + driverKey, 'PATCH', {
-    allocatedVehicles: alloc,
+    assignedVehicles: vehKeys,
+    allocatedVehicles: null,
     allocatedTaxi: profile.allocatedTaxi,
     updatedAt: Date.now()
   }).then(function() {
@@ -7014,13 +7039,7 @@ function buildVehicleChecklist(editId) {
   Object.keys(allDrivers).forEach(function(key) {
     if (editId && key === editId) return;
     var d = allDrivers[key];
-    // Support both old allocatedTaxi (string) and new allocatedVehicles (object)
-    var vehs = [];
-    if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object') {
-      vehs = Object.keys(d.allocatedVehicles).filter(function(v){ return d.allocatedVehicles[v]; });
-    } else if (d.allocatedTaxi && d.allocatedTaxi.trim()) {
-      vehs = [d.allocatedTaxi.trim()];
-    }
+    var vehs = window._bwDriverAssignedList(d);
     vehs.forEach(function(v) {
       var vk = v.trim().toUpperCase();
       if (!sharedWith[vk]) sharedWith[vk] = [];
@@ -7031,15 +7050,9 @@ function buildVehicleChecklist(editId) {
   // Which vehicles does THIS driver already have?
   var myVehs = {};
   if (editId && allDrivers[editId]) {
-    var d = allDrivers[editId];
-    if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object') {
-      Object.keys(d.allocatedVehicles).forEach(function(v){
-        if (d.allocatedVehicles[v]) myVehs[v.trim().toUpperCase()] = v.trim();
-      });
-    } else if (d.allocatedTaxi && d.allocatedTaxi.trim()) {
-      var t = d.allocatedTaxi.trim();
-      myVehs[t.toUpperCase()] = t;
-    }
+    window._bwDriverAssignedList(allDrivers[editId]).forEach(function(v) {
+      myVehs[v] = v;
+    });
   }
 
   // Clear and rebuild
@@ -7210,12 +7223,7 @@ function loadDrivers() {
 
 /* ── Render vehicle badges for table / view ── */
 function _renderVehicleBadges(d) {
-  var vehs = [];
-  if (d.allocatedVehicles && typeof d.allocatedVehicles === 'object') {
-    vehs = Object.keys(d.allocatedVehicles).filter(function(v){ return d.allocatedVehicles[v]; });
-  } else if (d.allocatedTaxi && d.allocatedTaxi.trim()) {
-    vehs = [d.allocatedTaxi.trim()];
-  }
+  var vehs = window._bwDriverAssignedList(d);
   if (!vehs.length) return '<span style="color:#bbb">Not allocated</span>';
   return vehs.map(function(v, i) {
     return '<span style="display:inline-block;background:' + (i===0?'#E0F2F1':'#F3F3F3') + ';color:' + (i===0?'#00695C':'#555') + ';border:1px solid ' + (i===0?'#80CBC4':'#ddd') + ';padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;margin:1px 2px">' + v + '</span>';
@@ -7598,10 +7606,10 @@ function saveDriver() {
   // Services checkboxes — collect all ticked services
   var _svcKeys = ['taxi','food','freight','courier','airport','corporate','school','disability','medical','event','tm'];
   var foodDel = _svcKeys.filter(function(k){ var el = document.getElementById('d-svc-' + k); return el && el.checked; }).join(',');
-  var allocatedVehicles = _getCheckedVehicles(); // {TaxiNum: true, …}
+  var assignedVehicles = window._bwBuildAssignedArray(_getCheckedVehicles());
   var editId           = document.getElementById('edit-driver-id').value;
   // Primary taxi (first checked, or empty) — kept for driver-app backward compat
-  var taxiAlloc = Object.keys(allocatedVehicles)[0] || '';
+  var taxiAlloc = assignedVehicles[0] || '';
 
   if (!name || !phone || !license || !taxiLic || !expiry) {
     errEl.textContent = 'Please fill in all required fields (marked with *).';
@@ -7754,8 +7762,9 @@ function saveDriver() {
     carryAnimals: animals, foodDelivery: foodDel,
     status: status, dispatcherId: dispId,
     isDispatcher: isDispatcher,
-    allocatedVehicles: allocatedVehicles,  // {TaxiNum: true, …} — multi-vehicle map
+    assignedVehicles: assignedVehicles,     // uppercase array — Driver App contract
     allocatedTaxi: taxiAlloc,              // primary/first vehicle — backward compat for driver app
+    allocatedVehicles: null,                 // strip legacy object-map field
     companyId: companyId,
     updatedAt: Date.now()
   };
@@ -19293,7 +19302,7 @@ function isDriverProfileRecord(d, key) {
 
 const DRIVER_PARTIAL_WRITE_FIELDS = new Set([
   'uid', 'updatedAt', 'isDispatcher', 'licenseFileUrl',
-  'allocatedVehicles', 'allocatedTaxi', 'currentVehicleId',
+  'allocatedTaxi', 'currentVehicleId',
   'passwordHash', 'systemEmail', 'approved', 'vehicleId', 'allowedServices',
   'assignedVehicles', 'sharedWith'
 ]);
@@ -20538,8 +20547,12 @@ const server = http.createServer((req, res) => {
         }
 
         // ── Vehicle expiry check ──────────────────────────────────────────
-        const allocVehs = matchProfile.allocatedVehicles || {};
-        const allocKeys = Object.keys(allocVehs).filter(k => allocVehs[k]);
+        const allocKeys = Array.isArray(matchProfile.assignedVehicles)
+          ? matchProfile.assignedVehicles.map(v => String(v || '').trim()).filter(Boolean)
+          : (() => {
+              const legacy = matchProfile.allocatedVehicles || {};
+              return Object.keys(legacy).filter(k => legacy[k]);
+            })();
 
         function _sendLoginResponse(vehicleStatus) {
           const safeProfile = Object.assign({}, matchProfile, { key: matchKey });
