@@ -27,6 +27,50 @@ try {
 
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname);
+const OWNER_BILLING_URL = 'https://invt-admin-production.up.railway.app/taxitime.co.nz/owner/Billing.aspx';
+const DEFAULT_GRACE_PERIOD_DAYS = 7;
+
+function sendMailerSendEmail({ to, subject, html, fromName }) {
+  return new Promise((resolve, reject) => {
+    const apiKey = process.env.MAILERSEND_API_KEY;
+    if (!apiKey) return reject(new Error('MAILERSEND_API_KEY not configured'));
+    const body = JSON.stringify({
+      from: { email: process.env.MAILERSEND_FROM_EMAIL || 'noreply@bookawaka.com', name: fromName || 'BookaWaka' },
+      to: [{ email: to.email, name: to.name || to.email }],
+      subject,
+      html,
+    });
+    const req = https.request({
+      hostname: 'api.mailersend.com',
+      path: '/v1/email',
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(data);
+        else reject(new Error('MailerSend ' + res.statusCode + ': ' + data));
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function syncCompanySettingsPlanBilling(companyId, plan, billingPatch, callback) {
+  const now = Date.now();
+  proxyFirebaseWrite('PATCH', 'companySettings/' + companyId + '/plan', Object.assign({}, plan, { updatedAt: now }), (err1) => {
+    if (err1) return callback(err1);
+    if (!billingPatch) return callback(null);
+    proxyFirebaseWrite('PATCH', 'companySettings/' + companyId + '/billing', Object.assign({}, billingPatch, { updatedAt: now }), callback);
+  });
+}
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -57,6 +101,7 @@ const PAGE_META = {
   'default.aspx':                { title: 'Dashboard',               icon: '&#xE871;',  section: 'Dashboard' },
   'accounts-details.aspx':       { title: 'Bank Accounts',           icon: '&#xE870;',  section: 'Billing' },
   'subscription.aspx':           { title: 'Subscription & Billing',  icon: '&#xE870;',  section: 'Billing' },
+  'billing.aspx':                { title: 'Subscription & Billing',  icon: '&#xE870;',  section: 'Billing' },
   'dispatch.aspx':               { title: 'Dispatch Settings',       icon: '&#xE8B8;',  section: 'Settings' },
   'service area.aspx':           { title: 'Service Area',            icon: '&#xE55B;',  section: 'Settings' },
   'vehicle type.aspx':           { title: 'Vehicle Types',           icon: '&#xE531;',  section: 'Settings' },
@@ -2102,6 +2147,31 @@ function dashboardPage(companyId) {
   </div>
 </div>
 
+<!-- ── Billing status widget ── -->
+<div class="uk-grid uk-margin-top" data-uk-grid-margin="">
+  <div class="uk-width-1-1">
+    <div class="md-card" style="border-left:4px solid #0d9488">
+      <div class="md-card-toolbar">
+        <h3 class="md-card-toolbar-heading-text">
+          <i class="material-icons" style="vertical-align:middle;font-size:18px;margin-right:6px;color:#0d9488">&#xE870;</i>
+          Subscription &amp; Billing
+        </h3>
+        <div class="md-card-toolbar-actions">
+          <a href="Billing.aspx" class="md-btn md-btn-primary md-btn-small">Upgrade</a>
+        </div>
+      </div>
+      <div class="md-card-content" style="padding:16px 20px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px">
+          <div><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px">Current Plan</div><div id="dash-billing-plan" style="font-size:16px;font-weight:700;color:#0f172a">Loading…</div></div>
+          <div><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px">Days Remaining</div><div id="dash-billing-days" style="font-size:16px;font-weight:700;color:#0f172a">—</div></div>
+          <div><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px">Next Billing Date</div><div id="dash-billing-next" style="font-size:16px;font-weight:700;color:#0f172a">—</div></div>
+          <div><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px">Status</div><div id="dash-billing-status" style="font-size:16px;font-weight:700;color:#0f172a">—</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── UPCOMING BOOKINGS (today's scheduled rides) ── -->
 <div class="uk-grid uk-margin-top" data-uk-grid-margin="" id="dash-upcoming-wrap" style="display:none">
   <div class="uk-width-1-1">
@@ -2377,7 +2447,47 @@ window._fbOnLogin = function(user) {
   startListeners();
   _checkOwnerGroup();
   loadSuperBroadcast();
+  _loadBillingWidget();
 };
+
+function _loadBillingWidget() {
+  var cid = COMPANY_ID;
+  if (!cid) return;
+  Promise.all([
+    window.adminRead('companySettings/' + cid + '/plan').catch(function() { return null; }),
+    window.adminRead('companySettings/' + cid + '/billing').catch(function() { return null; }),
+    window.adminRead('bw_billing/' + cid + '/plan').catch(function() { return null; })
+  ]).then(function(r) {
+    var plan = Object.assign({}, r[2] || {}, r[0] || {});
+    var billing = r[1] || {};
+    var type = plan.type || 'per_car';
+    var typeLabel = type === 'per_car' ? 'Per Car / Month' : (type === 'flat' ? 'Flat Monthly' : (type === 'free' ? 'Free / Trial' : String(plan.name || type)));
+    var status = String(plan.status || billing.status || 'active');
+    var nextBill = plan.nextBillDate || '—';
+    var trialEnd = Number(plan.trialEnd || 0) || null;
+    var now = Date.now();
+    var graceDays = Number(billing.gracePeriodDays || billing.graceDays || 7);
+    var extDays = Number(billing.extensionDays || 0);
+    var daysLabel = '—';
+    if (trialEnd) {
+      var accessUntil = trialEnd + (graceDays + extDays) * 86400000;
+      if (now < trialEnd) daysLabel = Math.max(0, Math.ceil((trialEnd - now) / 86400000)) + ' (trial)';
+      else if (now < accessUntil) daysLabel = Math.max(0, Math.ceil((accessUntil - now) / 86400000)) + ' (grace)';
+      else daysLabel = 'Expired';
+    } else if (nextBill && nextBill !== '—') {
+      var nbMs = Date.parse(nextBill);
+      if (!isNaN(nbMs)) daysLabel = Math.max(0, Math.ceil((nbMs - now) / 86400000)) + ' until bill';
+    }
+    var pel = document.getElementById('dash-billing-plan');
+    var del = document.getElementById('dash-billing-days');
+    var nel = document.getElementById('dash-billing-next');
+    var sel = document.getElementById('dash-billing-status');
+    if (pel) pel.textContent = typeLabel;
+    if (del) del.textContent = daysLabel;
+    if (nel) nel.textContent = nextBill;
+    if (sel) sel.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+  }).catch(function() {});
+}
 
 /* ── Super Broadcast reader ── */
 function loadSuperBroadcast() {
@@ -3016,17 +3126,16 @@ function startListeners() {
       return totals;
     }).catch(function(){ return { completed:0, cancelled:0, tm:0, pasapp:0, website:0, cardpay:0 }; });
 
-    // This company's own subscription (SaaS bill to BookaWaka) — read subscriptions/{cid} directly.
-    // Returns next bill date (formatted) + plan summary for the "Your Next Bill" tile.
-    var pSubs = window.adminRead('subscriptions/' + cid).then(function(s) {
-      if (!s || typeof s !== 'object') return { nextBill:'Not Set', billPlan:'No plan configured' };
-      // subscriptions/{cid} may be a single object OR keyed by plan id — handle both
-      var rec = s;
-      if (!s.nextBillingDate && !s.planType && !s.rate) {
-        var vals = Object.values(s).filter(function(v){ return v && typeof v === 'object'; });
-        if (vals.length) rec = vals[0];
-      }
-      var dRaw = rec.nextBillingDate || rec.dueDate || rec.renewalDate || rec.expiresAt;
+    // Billing — companySettings plan (Dispatch reads this); fallback subscriptions/{cid}
+    var pSubs = Promise.all([
+      window.adminRead('companySettings/' + cid + '/plan').catch(function() { return null; }),
+      window.adminRead('companySettings/' + cid + '/billing').catch(function() { return null; }),
+      window.adminRead('bw_billing/' + cid + '/plan').catch(function() { return null; })
+    ]).then(function(r) {
+      var plan = Object.assign({}, r[2] || {}, r[0] || {});
+      var billing = r[1] || {};
+      if (!plan || typeof plan !== 'object') plan = {};
+      var dRaw = plan.nextBillDate || plan.nextBillingDate;
       var dateStr = 'Not Set';
       if (dRaw) {
         var ms = (typeof dRaw === 'number') ? (dRaw < 1e12 ? dRaw * 1000 : dRaw) : Date.parse(dRaw);
@@ -3035,17 +3144,18 @@ function startListeners() {
           try {
             dateStr = new Intl.DateTimeFormat('en-NZ', { timeZone: NZ_TZ, day:'2-digit', month:'short', year:'numeric' }).format(new Date(ms));
             var daysOut = Math.round((ms - Date.now()) / 86400000);
-            if (daysOut < 0)  dateStr += ' (' + Math.abs(daysOut) + 'd overdue)';
+            if (daysOut < 0) dateStr += ' (' + Math.abs(daysOut) + 'd overdue)';
             else if (daysOut === 0) dateStr += ' (today)';
             else dateStr += ' (in ' + daysOut + 'd)';
           } catch(e){}
         }
       }
       var planParts = [];
-      if (rec.planType === 'per_car' && rec.rate) planParts.push('$' + rec.rate + '/car');
-      else if (rec.planType === 'flat' && rec.rate) planParts.push('$' + rec.rate + '/mo');
-      else if (rec.planType === 'free') planParts.push('Free / Trial');
-      if (rec.status) planParts.push(String(rec.status));
+      if (plan.type === 'per_car' && plan.rate) planParts.push('$' + plan.rate + '/car');
+      else if (plan.type === 'flat' && plan.rate) planParts.push('$' + plan.rate + '/mo');
+      else if (plan.type === 'free') planParts.push('Free / Trial');
+      var st = plan.status || billing.status;
+      if (st) planParts.push(String(st));
       return { nextBill: dateStr, billPlan: planParts.join(' · ') || 'No plan configured' };
     }).catch(function(){ return { nextBill:'Not Set', billPlan:'No plan configured' }; });
 
@@ -5851,6 +5961,19 @@ function subscriptionPage(companyId, isSA) {
   </div>
 </div>
 
+<!-- Upgrade Plan -->
+<div class="sub-card" id="owner-upgrade-card" style="margin-bottom:18px">
+  <div class="sub-card-head">
+    <h3><i class="material-icons" style="font-size:16px;vertical-align:middle;margin-right:6px;color:#0d9488">&#xE8E8;</i>Upgrade Plan</h3>
+  </div>
+  <div class="md-card-content" style="padding:20px">
+    <p style="font-size:13px;color:#64748b;margin:0 0 14px">Request an upgrade invoice. We will email payment instructions to your company contact. Only company owners can upgrade — dispatch staff cannot.</p>
+    <div id="owner-upgrade-alert" class="sub-alert"></div>
+    <div id="owner-upgrade-bank" style="font-size:13px;color:#374151;margin-bottom:14px;display:none;background:#f8fafc;border-radius:10px;padding:14px;border:1px solid #e2e8f0"></div>
+    <button class="md-btn md-btn-primary" id="owner-upgrade-btn" onclick="requestUpgradePlan()">Upgrade Plan</button>
+  </div>
+</div>
+
 <!-- Payment History -->
 <div class="sub-card">
   <div class="sub-card-head">
@@ -6010,36 +6133,78 @@ function filterSubTable() {
 }
 
 /* ── Owner view ── */
+function paintOwnerPlan(plan, billing) {
+  plan = plan || {};
+  billing = billing || {};
+  var type    = plan.type   || 'per_car';
+  var rate    = parseFloat(plan.rate  || 0);
+  var status  = plan.status || billing.status || 'active';
+  var nextBill = plan.nextBillDate || '—';
+  var statusCls = status === 'active' ? 'plan-active' : (status === 'overdue' ? 'plan-overdue' : 'plan-suspended');
+  var typeLabel = type === 'per_car' ? 'Per Car / Month' : (type === 'flat' ? 'Flat Monthly Fee' : 'Free / Trial');
+
+  document.getElementById('opc-plan-name').textContent = typeLabel;
+  document.getElementById('opc-status-badge').textContent = String(status).toUpperCase();
+  document.getElementById('opc-status-badge').className = 'plan-badge ' + statusCls;
+  document.getElementById('opc-rate').textContent = '$' + rate.toFixed(2);
+  document.getElementById('opc-nextbill').textContent = nextBill;
+  document.getElementById('opc-notes').textContent = plan.notes || '';
+
+  adminRead('vehicles').then(function(vehs) {
+    var count = 0;
+    if (vehs) Object.keys(vehs).forEach(function(k) {
+      var v = vehs[k]; if (v && String(v.companyId||'') === COMPANY_ID) count++;
+    });
+    document.getElementById('opc-vehicles').textContent = count;
+    var monthly = type === 'per_car' ? rate * count : rate;
+    document.getElementById('opc-total').textContent = '$' + monthly.toFixed(2) + ' /mo';
+  }).catch(function() { document.getElementById('opc-vehicles').textContent = '?'; });
+}
+
 function loadOwnerPlan() {
-  adminRead('bw_billing/' + COMPANY_ID + '/plan').then(function(plan) {
-    plan = plan || {};
-    var type    = plan.type   || 'per_car';
-    var rate    = parseFloat(plan.rate  || 0);
-    var status  = plan.status || 'active';
-    var nextBill = plan.nextBillDate || '—';
-    var statusCls = status === 'active' ? 'plan-active' : (status === 'overdue' ? 'plan-overdue' : 'plan-suspended');
-    var typeLabel = type === 'per_car' ? 'Per Car / Month' : (type === 'flat' ? 'Flat Monthly Fee' : 'Free / Trial');
-
-    document.getElementById('opc-plan-name').textContent = typeLabel;
-    document.getElementById('opc-status-badge').textContent = status.toUpperCase();
-    document.getElementById('opc-status-badge').className = 'plan-badge ' + statusCls;
-    document.getElementById('opc-rate').textContent = '$' + rate.toFixed(2);
-    document.getElementById('opc-nextbill').textContent = nextBill;
-    if (plan.notes) document.getElementById('opc-notes').textContent = plan.notes;
-
-    // Get vehicle count for this company
-    adminRead('vehicles').then(function(vehs) {
-      var count = 0;
-      if (vehs) Object.keys(vehs).forEach(function(k) {
-        var v = vehs[k]; if (v && String(v.companyId||'') === COMPANY_ID) count++;
-      });
-      document.getElementById('opc-vehicles').textContent = count;
-      var monthly = type === 'per_car' ? rate * count : rate;
-      document.getElementById('opc-total').textContent = '$' + monthly.toFixed(2) + ' /mo';
-    }).catch(function() { document.getElementById('opc-vehicles').textContent = '?'; });
+  Promise.all([
+    adminRead('companySettings/' + COMPANY_ID + '/plan').catch(function() { return null; }),
+    adminRead('companySettings/' + COMPANY_ID + '/billing').catch(function() { return null; }),
+    adminRead('bw_billing/' + COMPANY_ID + '/plan').catch(function() { return null; })
+  ]).then(function(r) {
+    paintOwnerPlan(Object.assign({}, r[2] || {}, r[0] || {}), r[1] || {});
   }).catch(function() {
     document.getElementById('opc-plan-name').textContent = 'Contact BookaWaka';
   });
+}
+
+function requestUpgradePlan() {
+  var btn = document.getElementById('owner-upgrade-btn');
+  var alertEl = document.getElementById('owner-upgrade-alert');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  if (alertEl) { alertEl.style.display = 'none'; }
+  fetch('/api/billing/upgrade-request', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ companyId: COMPANY_ID })
+  }).then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+    .then(function(res) {
+      if (!res.ok) throw new Error((res.j && res.j.error) || 'Request failed');
+      if (alertEl) {
+        alertEl.className = 'sub-alert ok';
+        alertEl.style.display = 'block';
+        alertEl.textContent = res.j.message || 'Upgrade request sent. Check your email for payment instructions.';
+      }
+      var bankEl = document.getElementById('owner-upgrade-bank');
+      if (bankEl && res.j.bankHtml) {
+        bankEl.style.display = 'block';
+        bankEl.innerHTML = res.j.bankHtml;
+      }
+    }).catch(function(e) {
+      if (alertEl) {
+        alertEl.className = 'sub-alert err';
+        alertEl.style.display = 'block';
+        alertEl.textContent = e.message || String(e);
+      }
+    }).finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = 'Upgrade Plan'; }
+    });
 }
 
 function loadOwnerHistory() {
@@ -6120,7 +6285,16 @@ function savePlan() {
     updatedAt: Date.now()
   };
   btn.disabled = true; btn.textContent = 'Saving…';
-  adminWrite('bw_billing/' + cid + '/plan', 'PUT', plan).then(function() {
+  var billingPatch = {
+    status: plan.status,
+    gracePeriodDays: 7,
+    updatedAt: Date.now()
+  };
+  Promise.all([
+    adminWrite('bw_billing/' + cid + '/plan', 'PUT', plan),
+    adminWrite('companySettings/' + cid + '/plan', 'PATCH', plan),
+    adminWrite('companySettings/' + cid + '/billing', 'PATCH', billingPatch)
+  ]).then(function() {
     if (!_allBilling[cid]) _allBilling[cid] = {};
     _allBilling[cid].plan = plan;
     renderSuperTable();
@@ -20066,6 +20240,101 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── API: billing upgrade request (owner only — sends invoice email via MailerSend)
+  if (urlPath === '/api/billing/upgrade-request') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'POST required' }));
+      return;
+    }
+    if (!process.env.FIREBASE_DB_SECRET) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Server not configured' }));
+      return;
+    }
+    let rawBody = '';
+    req.on('data', (chunk) => { rawBody += chunk; });
+    req.on('end', () => {
+      let body = {};
+      try { body = rawBody ? JSON.parse(rawBody) : {}; } catch (e) { /* ignore */ }
+      const cid = String(body.companyId || getCookieCompanyId(req) || '').trim();
+      if (!cid) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'companyId required' }));
+        return;
+      }
+      proxyFirebaseRead('companySettings/' + cid, (errSettings, settings) => {
+        if (errSettings) settings = {};
+        proxyFirebaseRead('bw_billing/' + cid + '/plan', (errPlan, bwPlan) => {
+          proxyFirebaseRead('bw_billing/config/bookawaka_bank', (errBank, bank) => {
+            bank = bank || {};
+            const plan = Object.assign({}, bwPlan || {}, (settings && settings.plan) || {});
+            const contactEmail = String(
+              (settings && (settings.supportEmail || settings.email || settings.companyEmail)) || ''
+            ).trim();
+            if (!contactEmail) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'No company contact email in companySettings. Add support email in Company Profile.' }));
+              return;
+            }
+            const refCode = bank.reference || ('BW-' + cid);
+            const bankHtml = '<strong>Bank:</strong> ' + (bank.bankName || '—') +
+              '<br><strong>Account name:</strong> ' + (bank.accountName || '—') +
+              '<br><strong>Account number:</strong> ' + (bank.accountNumber || '—') +
+              '<br><strong>Reference:</strong> ' + refCode +
+              (bank.notes ? ('<br><em>' + bank.notes + '</em>') : '');
+            const rate = parseFloat(plan.rate || 0).toFixed(2);
+            const planLabel = plan.type === 'per_car' ? ('Per car @ $' + rate + '/mo') :
+              plan.type === 'flat' ? ('Flat $' + rate + '/mo') : 'Subscription upgrade';
+            const now = Date.now();
+            const reqKey = 'req_' + now;
+            const upgradeRecord = {
+              requestedAt: now,
+              companyId: cid,
+              contactEmail,
+              planType: plan.type || '',
+              rate: plan.rate || 0,
+              status: 'pending',
+            };
+            proxyFirebaseWrite('PUT', 'companySettings/' + cid + '/billing/upgradeRequests/' + reqKey, upgradeRecord, (wErr) => {
+              if (wErr) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: wErr }));
+                return;
+              }
+              const html = '<p>Hello,</p><p>Your BookaWaka subscription upgrade request for company <strong>' + cid + '</strong> has been received.</p>' +
+                '<p><strong>Plan:</strong> ' + planLabel + '</p>' +
+                '<p>Please transfer payment using the details below:</p>' +
+                '<p>' + bankHtml + '</p>' +
+                '<p>Once payment is received, your account will be activated on a paid plan.</p>' +
+                '<p>— BookaWaka Billing</p>';
+              sendMailerSendEmail({
+                to: { email: contactEmail, name: (settings && settings.name) || cid },
+                subject: 'BookaWaka subscription upgrade — Company ' + cid,
+                html,
+              }).then(() => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  ok: true,
+                  message: 'Upgrade request sent to ' + contactEmail + '. Payment instructions included.',
+                  bankHtml,
+                }));
+              }).catch((mailErr) => {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: mailErr.message || String(mailErr) }));
+              });
+            });
+          });
+        });
+      });
+    });
+    return;
+  }
+
   // ── API: admin read (bypasses Firebase security rules using DB secret)
   if (urlPath === '/api/admin-read') {
     const qs = new URLSearchParams(req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '');
@@ -20868,7 +21137,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     // Subscription & Billing
-    if (lname === 'subscription.aspx') {
+    if (lname === 'subscription.aspx' || lname === 'billing.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
       res.end(withSa(subscriptionPage(cid, isSA), isSA));
       return;
