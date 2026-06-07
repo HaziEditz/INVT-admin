@@ -19125,6 +19125,34 @@ function clearSessionCookie(name, req) {
   return cookie;
 }
 
+const OWNER_PANEL_DENIED_MSG = 'Access denied. The Owner Panel is for company owners only. Please contact your company owner.';
+
+/** True only for company owners — blocks dispatchers who share adminAccess. */
+function verifyOwnerRoleForLogin(uid, companyId, cb) {
+  const cid = String(companyId || '').trim();
+  proxyFirebaseRead('users/' + uid + '/role', (e1, userRole) => {
+    const roleUser = String(userRole || '').toLowerCase();
+    if (roleUser === 'owner') return cb(null, true);
+    if (roleUser === 'dispatcher') return cb(null, false);
+    proxyFirebaseRead('drivers/' + cid + '/' + uid + '/role', (e2, driverRole) => {
+      const roleDriver = String(driverRole || '').toLowerCase();
+      if (roleDriver === 'owner') return cb(null, true);
+      if (roleDriver === 'dispatcher') return cb(null, false);
+      proxyFirebaseRead('companySettings/' + cid + '/staff/' + uid + '/role', (e3, staffRole) => {
+        const roleStaff = String(staffRole || '').toLowerCase();
+        if (roleStaff === 'owner') return cb(null, true);
+        if (roleStaff === 'dispatcher') return cb(null, false);
+        proxyFirebaseRead('superClients/' + cid + '/ownerUid', (e4, ownerUid) => {
+          if (ownerUid && String(ownerUid) === String(uid)) return cb(null, true);
+          proxyFirebaseRead('dispatchers/' + cid + '/' + uid, (e5, dspIdx) => {
+            cb(null, !dspIdx);
+          });
+        });
+      });
+    });
+  });
+}
+
 function envCompanyIdFallback() {
   const envCid = String(process.env.COMPANY_ID || '').trim();
   return /^\d+$/.test(envCid) ? envCid : null;
@@ -21067,18 +21095,25 @@ const server = http.createServer((req, res) => {
           );
 
           if (matchedCompany) {
-            // Check if this user is also listed as a super-admin
-            proxyFirebaseRead('superAdmins/' + uid, (saErr, saVal) => {
-              const isSuperAdmin = (saVal === true);
-              console.log('[verify-admin] Granted —', email, 'uid:', uid, 'company:', matchedCompany, isSuperAdmin ? '| SUPER-ADMIN' : '', '| secure:', isRequestSecure(req));
-              res.writeHead(200, {
-                'Content-Type': 'application/json',
-                'Set-Cookie': [
-                  buildSessionCookie('bw_cid', matchedCompany, req),
-                  buildSessionCookie('bw_sa', isSuperAdmin ? '1' : '0', req)
-                ]
+            verifyOwnerRoleForLogin(uid, matchedCompany, (roleErr, isOwner) => {
+              if (roleErr || !isOwner) {
+                console.warn('[verify-admin] Denied (not owner) —', email, uid);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, code: 'NOT_OWNER', error: OWNER_PANEL_DENIED_MSG }));
+                return;
+              }
+              proxyFirebaseRead('superAdmins/' + uid, (saErr, saVal) => {
+                const isSuperAdmin = (saVal === true);
+                console.log('[verify-admin] Granted —', email, 'uid:', uid, 'company:', matchedCompany, isSuperAdmin ? '| SUPER-ADMIN' : '', '| secure:', isRequestSecure(req));
+                res.writeHead(200, {
+                  'Content-Type': 'application/json',
+                  'Set-Cookie': [
+                    buildSessionCookie('bw_cid', matchedCompany, req),
+                    buildSessionCookie('bw_sa', isSuperAdmin ? '1' : '0', req)
+                  ]
+                });
+                res.end(JSON.stringify({ ok: true, companyId: matchedCompany, isSuperAdmin: isSuperAdmin }));
               });
-              res.end(JSON.stringify({ ok: true, companyId: matchedCompany, isSuperAdmin: isSuperAdmin }));
             });
           } else {
             console.warn('[verify-admin] Denied (not in any company access list) —', email, uid);
