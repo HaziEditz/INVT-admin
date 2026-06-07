@@ -2456,14 +2456,21 @@ function _loadBillingWidget() {
   Promise.all([
     window.adminRead('companySettings/' + cid + '/plan').catch(function() { return null; }),
     window.adminRead('companySettings/' + cid + '/billing').catch(function() { return null; }),
-    window.adminRead('bw_billing/' + cid + '/plan').catch(function() { return null; })
+    window.adminRead('superPackages').catch(function() { return null; })
   ]).then(function(r) {
-    var plan = Object.assign({}, r[2] || {}, r[0] || {});
+    var plan = r[0] || {};
     var billing = r[1] || {};
-    var type = plan.type || 'per_car';
-    var typeLabel = type === 'per_car' ? 'Per Car / Month' : (type === 'flat' ? 'Flat Monthly' : (type === 'free' ? 'Free / Trial' : String(plan.name || type)));
+    var packages = r[2] || {};
+    var pkgId = billing.packageId || plan.packageId || null;
+    var pkg = pkgId && packages[pkgId] ? packages[pkgId] : null;
+    var typeLabel = (plan.name || (pkg && pkg.name)) ||
+      (plan.type === 'per_car' ? 'Per Car / Month' : (plan.type === 'flat' ? 'Flat Monthly' : (plan.type === 'free' ? 'Free / Trial' : String(plan.type || '—'))));
     var status = String(plan.status || billing.status || 'active');
-    var nextBill = plan.nextBillDate || '—';
+    var nextBillRaw = billing.nextDueDate || plan.nextDueDate || plan.nextBillDate || '';
+    var nextBill = nextBillRaw ? (function(d) {
+      try { return new Date(d).toLocaleDateString('en-NZ', { day:'2-digit', month:'short', year:'numeric' }); }
+      catch(e) { return d; }
+    })(nextBillRaw) : '—';
     var trialEnd = Number(plan.trialEnd || 0) || null;
     var now = Date.now();
     var graceDays = Number(billing.gracePeriodDays || billing.graceDays || 7);
@@ -2474,8 +2481,8 @@ function _loadBillingWidget() {
       if (now < trialEnd) daysLabel = Math.max(0, Math.ceil((trialEnd - now) / 86400000)) + ' (trial)';
       else if (now < accessUntil) daysLabel = Math.max(0, Math.ceil((accessUntil - now) / 86400000)) + ' (grace)';
       else daysLabel = 'Expired';
-    } else if (nextBill && nextBill !== '—') {
-      var nbMs = Date.parse(nextBill);
+    } else if (nextBillRaw) {
+      var nbMs = Date.parse(nextBillRaw);
       if (!isNaN(nbMs)) daysLabel = Math.max(0, Math.ceil((nbMs - now) / 86400000)) + ' until bill';
     }
     var pel = document.getElementById('dash-billing-plan');
@@ -3129,13 +3136,12 @@ function startListeners() {
     // Billing — companySettings plan (Dispatch reads this); fallback subscriptions/{cid}
     var pSubs = Promise.all([
       window.adminRead('companySettings/' + cid + '/plan').catch(function() { return null; }),
-      window.adminRead('companySettings/' + cid + '/billing').catch(function() { return null; }),
-      window.adminRead('bw_billing/' + cid + '/plan').catch(function() { return null; })
+      window.adminRead('companySettings/' + cid + '/billing').catch(function() { return null; })
     ]).then(function(r) {
-      var plan = Object.assign({}, r[2] || {}, r[0] || {});
+      var plan = r[0] || {};
       var billing = r[1] || {};
       if (!plan || typeof plan !== 'object') plan = {};
-      var dRaw = plan.nextBillDate || plan.nextBillingDate;
+      var dRaw = billing.nextDueDate || plan.nextDueDate || plan.nextBillDate || plan.nextBillingDate;
       var dateStr = 'Not Set';
       if (dRaw) {
         var ms = (typeof dRaw === 'number') ? (dRaw < 1e12 ? dRaw * 1000 : dRaw) : Date.parse(dRaw);
@@ -6016,7 +6022,7 @@ function loadSubscriptionPage() {
 
 /* ── BookaWaka bank details (shown to owners) ── */
 function loadBwBankDetails() {
-  adminRead('bw_billing/config/bookawaka_bank').then(function(d) {
+  adminRead('platformSettings/bookawakaBankDetails').then(function(d) {
     d = d || {};
     if (IS_SUPER) {
       document.getElementById('bbd-bank').textContent   = d.bankName   || '—';
@@ -6133,22 +6139,40 @@ function filterSubTable() {
 }
 
 /* ── Owner view ── */
-function paintOwnerPlan(plan, billing) {
+function formatBillDate(d) {
+  if (!d || d === '—') return '—';
+  try { return new Date(d).toLocaleDateString('en-NZ', { day:'2-digit', month:'short', year:'numeric', timeZone: NZ_TZ }); }
+  catch(e) { return String(d); }
+}
+
+function paintOwnerPlan(plan, billing, pkg) {
   plan = plan || {};
   billing = billing || {};
-  var type    = plan.type   || 'per_car';
-  var rate    = parseFloat(plan.rate  || 0);
-  var status  = plan.status || billing.status || 'active';
-  var nextBill = plan.nextBillDate || '—';
+  pkg = pkg || {};
+  var rate = parseFloat(
+    billing.monthlyRate != null ? billing.monthlyRate :
+    (plan.rate != null ? plan.rate : (pkg.pricePerCar || pkg.monthlyPrice || 0))
+  );
+  var status = plan.status || billing.status || 'active';
+  var nextBill = formatBillDate(billing.nextDueDate || plan.nextDueDate || plan.nextBillDate);
   var statusCls = status === 'active' ? 'plan-active' : (status === 'overdue' ? 'plan-overdue' : 'plan-suspended');
-  var typeLabel = type === 'per_car' ? 'Per Car / Month' : (type === 'flat' ? 'Flat Monthly Fee' : 'Free / Trial');
+  var planName = plan.name || pkg.name || 'Contact BookaWaka';
+  var billingType = pkg.billingType || plan.type || 'per_car_monthly';
+  var typeLabel = billingType === 'flat_annual' ? 'Annual Plan' :
+    billingType === 'flat_monthly' ? 'Flat Monthly' :
+    (billingType === 'per_car_monthly' || plan.type === 'per_car') ? 'Per Car / Month' :
+    planName;
 
-  document.getElementById('opc-plan-name').textContent = typeLabel;
+  document.getElementById('opc-plan-name').textContent = planName !== 'Contact BookaWaka' ? planName : typeLabel;
   document.getElementById('opc-status-badge').textContent = String(status).toUpperCase();
   document.getElementById('opc-status-badge').className = 'plan-badge ' + statusCls;
-  document.getElementById('opc-rate').textContent = '$' + rate.toFixed(2);
+  document.getElementById('opc-rate').textContent = '$' + (isNaN(rate) ? '0.00' : rate.toFixed(2));
   document.getElementById('opc-nextbill').textContent = nextBill;
-  document.getElementById('opc-notes').textContent = plan.notes || '';
+  var notes = [];
+  if (billing.billingStartDate) notes.push('Billing since ' + formatBillDate(billing.billingStartDate));
+  if (billing.packageId) notes.push('Package ID: ' + billing.packageId);
+  if (plan.notes) notes.push(plan.notes);
+  document.getElementById('opc-notes').textContent = notes.join(' · ');
 
   adminRead('vehicles').then(function(vehs) {
     var count = 0;
@@ -6156,8 +6180,9 @@ function paintOwnerPlan(plan, billing) {
       var v = vehs[k]; if (v && String(v.companyId||'') === COMPANY_ID) count++;
     });
     document.getElementById('opc-vehicles').textContent = count;
-    var monthly = type === 'per_car' ? rate * count : rate;
-    document.getElementById('opc-total').textContent = '$' + monthly.toFixed(2) + ' /mo';
+    var isPerCar = billingType === 'per_car_monthly' || plan.type === 'per_car';
+    var monthly = isPerCar ? rate * count : rate;
+    document.getElementById('opc-total').textContent = '$' + (isNaN(monthly) ? '0.00' : monthly.toFixed(2)) + ' /mo';
   }).catch(function() { document.getElementById('opc-vehicles').textContent = '?'; });
 }
 
@@ -6165,9 +6190,14 @@ function loadOwnerPlan() {
   Promise.all([
     adminRead('companySettings/' + COMPANY_ID + '/plan').catch(function() { return null; }),
     adminRead('companySettings/' + COMPANY_ID + '/billing').catch(function() { return null; }),
-    adminRead('bw_billing/' + COMPANY_ID + '/plan').catch(function() { return null; })
+    adminRead('superPackages').catch(function() { return null; })
   ]).then(function(r) {
-    paintOwnerPlan(Object.assign({}, r[2] || {}, r[0] || {}), r[1] || {});
+    var plan = r[0] || {};
+    var billing = r[1] || {};
+    var packages = r[2] || {};
+    var pkgId = billing.packageId || plan.packageId || null;
+    var pkg = pkgId && packages[pkgId] ? packages[pkgId] : null;
+    paintOwnerPlan(plan, billing, pkg);
   }).catch(function() {
     document.getElementById('opc-plan-name').textContent = 'Contact BookaWaka';
   });
@@ -6388,7 +6418,7 @@ function saveBwBank() {
     updatedAt:     Date.now()
   };
   btn.disabled = true; btn.textContent = 'Saving…';
-  adminWrite('bw_billing/config/bookawaka_bank', 'PUT', data).then(function() {
+  adminWrite('platformSettings/bookawakaBankDetails', 'PUT', data).then(function() {
     document.getElementById('bbd-bank').textContent   = data.bankName   || '—';
     document.getElementById('bbd-name').textContent   = data.accountName || '—';
     document.getElementById('bbd-number').textContent = data.accountNumber || '—';
@@ -20298,7 +20328,7 @@ const server = http.createServer((req, res) => {
       proxyFirebaseRead('companySettings/' + cid, (errSettings, settings) => {
         if (errSettings) settings = {};
         proxyFirebaseRead('bw_billing/' + cid + '/plan', (errPlan, bwPlan) => {
-          proxyFirebaseRead('bw_billing/config/bookawaka_bank', (errBank, bank) => {
+          proxyFirebaseRead('platformSettings/bookawakaBankDetails', (errBank, bank) => {
             bank = bank || {};
             const plan = Object.assign({}, bwPlan || {}, (settings && settings.plan) || {});
             const contactEmail = String(
