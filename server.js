@@ -72,6 +72,30 @@ function syncCompanySettingsPlanBilling(companyId, plan, billingPatch, callback)
   });
 }
 
+function normTaxiVehicleId(v) {
+  return String(v || '').trim().toUpperCase();
+}
+
+/** Canonical vehicle list from driver profile — assignedVehicles array first, legacy object-map read-only. */
+function driverAssignedVehicleList(profile) {
+  const out = [];
+  if (!profile || typeof profile !== 'object') return out;
+  const add = (v) => {
+    const n = normTaxiVehicleId(v);
+    if (n && !out.includes(n)) out.push(n);
+  };
+  if (Array.isArray(profile.assignedVehicles)) {
+    profile.assignedVehicles.forEach(add);
+  }
+  const legacy = profile.allocatedVehicles;
+  if (!out.length && legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+    Object.keys(legacy).forEach(k => { if (legacy[k]) add(k); });
+  }
+  if (!out.length && profile.allocatedTaxi) add(profile.allocatedTaxi);
+  if (!out.length && profile.vehicleId) add(profile.vehicleId);
+  return out;
+}
+
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.aspx': 'text/html; charset=utf-8',
@@ -764,6 +788,22 @@ window._bwDriverAllocMap = function(d) {
   return map;
 };
 
+// PATCH fragment: write assignedVehicles array and strip legacy allocatedVehicles object-map.
+window._bwDriverVehicleFirebasePatch = function(vehKeys, currentShift) {
+  var keys = Array.isArray(vehKeys) ? vehKeys : [];
+  var shift = window._bwNormTaxi(currentShift || keys[0] || '');
+  return {
+    vehicleId: shift,
+    assignedVehicles: keys,
+    allocatedVehicles: null
+  };
+};
+
+// PATCH fragment — clears legacy allocatedVehicles object-map on re-save (Driver App uses assignedVehicles).
+window._bwStripLegacyAllocatedVehicles = function() {
+  return { allocatedVehicles: null };
+};
+
 // Resolve Firebase Auth UID — always prefer Admin SDK getUserByEmail over cached profile uid.
 window._bwResolveDriverUid = function(profile, driverKey) {
   profile = profile || {};
@@ -1155,7 +1195,7 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
     };
     var drvId = String(profile.dispatcherId || profile.id || '').trim();
     var approved = profile.approved === false ? false : (profile.status === 'pending' ? false : true);
-    var companyPatch = {
+    var companyPatch = Object.assign({
       email:             profile.email || '',
       companyId:         cId,
       uid:               uid,
@@ -1164,12 +1204,9 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
       name:              profile.name || '',
       phone:             profile.phone || '',
       approved:          approved,
-      vehicleId:         currentShift,
-      assignedVehicles:  vehKeys,
-      allocatedVehicles: null,
       allowedServices:   allowedServicesMap,
       updatedAt:         Date.now()
-    };
+    }, window._bwDriverVehicleFirebasePatch(vehKeys, currentShift));
     if (driverKey) companyPatch.fleetKey = driverKey;
     function _logWrite(path, method, ok, err) {
       if (ok) console.log('[bwSyncDriverCompanyAlloc] Firebase write OK —', method, path);
@@ -1352,12 +1389,10 @@ window._bwAddVehicleToDriverFromVehicleTab = function(driverKey, taxiNumber, com
     companyId: companyId || d.companyId || window.COMPANY_ID
   });
   if (setAsCurrentShift) profile.currentVehicleId = normTaxi;
-  return window.adminWrite('drivers/' + driverKey, 'PATCH', {
-    assignedVehicles: vehKeys,
-    allocatedVehicles: null,
+  return window.adminWrite('drivers/' + driverKey, 'PATCH', Object.assign({
     allocatedTaxi: profile.allocatedTaxi,
     updatedAt: Date.now()
-  }).then(function() {
+  }, window._bwDriverVehicleFirebasePatch(vehKeys, setAsCurrentShift ? normTaxi : ''))).then(function() {
     window.allDrivers[driverKey] = Object.assign(window.allDrivers[driverKey] || {}, profile);
     return window._bwSyncDriverCompanyAlloc(driverKey, profile);
   });
@@ -7764,7 +7799,8 @@ function saveDriver() {
     isDispatcher: isDispatcher,
     assignedVehicles: assignedVehicles,     // uppercase array — Driver App contract
     allocatedTaxi: taxiAlloc,              // primary/first vehicle — backward compat for driver app
-    allocatedVehicles: null,                 // strip legacy object-map field
+    vehicleId: window._bwNormTaxi(taxiAlloc || assignedVehicles[0] || ''),
+    allocatedVehicles: null,                 // strip legacy object-map field on save
     companyId: companyId,
     updatedAt: Date.now()
   };
@@ -19322,6 +19358,10 @@ function validateDriverAdminWrite(nodePath, data, method) {
   if (!data || typeof data !== 'object') return null;
   const keys = Object.keys(data);
 
+  if (data.allocatedVehicles != null && typeof data.allocatedVehicles === 'object' && !Array.isArray(data.allocatedVehicles)) {
+    return 'Use assignedVehicles (uppercase string array) instead of allocatedVehicles object map (path: ' + nodePath + ')';
+  }
+
   // drivers/{firebaseUid} — UID lookup node for Driver App login routing
   if (parts.length === 2 && looksLikeFirebaseUid(parts[1])) {
     const lookupFields = new Set(['_lookup', '_nodeType', 'companyId', 'uid', 'email', 'name', 'phone', 'updatedAt']);
@@ -19625,7 +19665,8 @@ function _resolveDriverState(cid, driverId, cb){
   const out = { driverId: String(driverId), status:'unknown', currentJob:null, currentVehicle:null, lastSeen:null, isStale:false };
   proxyFirebaseRead('drivers/' + cid + '/' + driverId, (e1, drv) => {
     if (drv && typeof drv === 'object') {
-      out.currentVehicle = drv.vehicleId || drv.VehicleId || null;
+      const assigned = driverAssignedVehicleList(drv);
+      out.currentVehicle = normTaxiVehicleId(drv.vehicleId || drv.VehicleId || assigned[0] || '') || null;
       out.status = String(drv.status || drv.Status || 'offline').toLowerCase();
     }
     const vid = out.currentVehicle;
@@ -20547,12 +20588,7 @@ const server = http.createServer((req, res) => {
         }
 
         // ── Vehicle expiry check ──────────────────────────────────────────
-        const allocKeys = Array.isArray(matchProfile.assignedVehicles)
-          ? matchProfile.assignedVehicles.map(v => String(v || '').trim()).filter(Boolean)
-          : (() => {
-              const legacy = matchProfile.allocatedVehicles || {};
-              return Object.keys(legacy).filter(k => legacy[k]);
-            })();
+        const allocKeys = driverAssignedVehicleList(matchProfile);
 
         function _sendLoginResponse(vehicleStatus) {
           const safeProfile = Object.assign({}, matchProfile, { key: matchKey });
