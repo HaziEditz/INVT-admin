@@ -25,6 +25,73 @@ try {
   console.warn('[Admin SDK] Init failed:', e.message);
 }
 
+/** Create or update a persistent email+password Firebase Auth user for driver/dispatcher login. */
+async function ensureDriverAuthAccount(opts) {
+  opts = opts || {};
+  const personalEmail = String(opts.email || '').trim();
+  const companyId = String(opts.companyId || '').trim();
+  const password = String(opts.password || '');
+  const uidHint = String(opts.uid || '').trim();
+
+  if (!personalEmail.includes('@')) {
+    return { ok: false, authSynced: false, error: 'Valid personal email is required for driver login' };
+  }
+  if (!firebaseAdmin) {
+    return {
+      ok: false,
+      authSynced: false,
+      error: 'FIREBASE_SERVICE_ACCOUNT not configured — cannot create Firebase Auth users',
+    };
+  }
+  if (!uidHint && password.length < 6) {
+    return { ok: false, authSynced: false, error: 'Password must be at least 6 characters for new accounts' };
+  }
+
+  let user = null;
+  if (uidHint) {
+    try { user = await firebaseAdmin.auth().getUser(uidHint); } catch (e) {
+      if (e.code !== 'auth/user-not-found') throw e;
+    }
+  }
+  if (!user) {
+    const variants = [personalEmail, personalEmail.toLowerCase()];
+    const seen = new Set();
+    for (const em of variants) {
+      const norm = em.toLowerCase();
+      if (!em || seen.has(norm)) continue;
+      seen.add(norm);
+      try {
+        user = await firebaseAdmin.auth().getUserByEmail(em);
+        if (user) break;
+      } catch (e) {
+        if (e.code !== 'auth/user-not-found' && e.code !== 'auth/invalid-email') throw e;
+      }
+    }
+  }
+
+  const displayName = companyId || undefined;
+  if (user) {
+    const update = { email: personalEmail, emailVerified: false };
+    if (displayName) update.displayName = displayName;
+    if (password.length >= 6) update.password = password;
+    await firebaseAdmin.auth().updateUser(user.uid, update);
+    console.log(`[ensure-driver-auth] updated Auth user ${user.uid} → ${personalEmail}`);
+    return { ok: true, uid: user.uid, authSynced: true, created: false, email: personalEmail };
+  }
+
+  const createPayload = {
+    email: personalEmail,
+    password,
+    displayName,
+    emailVerified: false,
+  };
+  // Re-bind Auth to an existing RTDB uid when the Auth row was deleted but profile.uid remains.
+  if (uidHint) createPayload.uid = uidHint;
+  const created = await firebaseAdmin.auth().createUser(createPayload);
+  console.log(`[ensure-driver-auth] created Auth user ${created.uid} → ${personalEmail}`);
+  return { ok: true, uid: created.uid, authSynced: true, created: true, email: personalEmail };
+}
+
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname);
 const OWNER_BILLING_URL = 'https://invt-admin-production.up.railway.app/taxitime.co.nz/owner/Billing.aspx';
@@ -900,6 +967,21 @@ window._bwSyncAuthPassword = function(uid, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ uid: uid, password: password })
   }).catch(function() {});
+};
+
+/** Server-side Admin SDK — persistent email+password Auth (personal email, not systemEmail). */
+window._bwEnsureDriverAuthAccount = function(opts) {
+  opts = opts || {};
+  return fetch('/api/ensure-driver-auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: opts.email,
+      password: opts.password,
+      companyId: opts.companyId,
+      uid: opts.uid,
+    }),
+  }).then(function(r) { return r.json(); });
 };
 
 window._bwEnsureSecondaryFbApp = function() {
@@ -7946,37 +8028,18 @@ function saveDriver() {
       }).catch(function(){});
       // ──────────────────────────────────────────────────────────────────
 
-      // If editing and a new password was provided, sync to Firebase Auth too
-      if (editId && password) {
-        var uid = (allDrivers[key] && allDrivers[key].uid) || profile.uid;
-        if (uid) {
-          fetch('/api/reset-driver-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: uid, password: password })
-          }).then(function(r){ return r.json(); }).then(function(data) {
-            if (data.authSynced) {
-              showToast('Password updated — Firebase Auth synced.', 'success');
-            } else if (data.note) {
-              showToast('Password saved to database. Firebase Auth not synced (service account not configured).', 'info');
-            } else {
-              showToast('Password saved to database.', 'success');
-            }
-          }).catch(function() {
-            showToast('Password saved to database (Auth sync call failed).', 'info');
-          });
-        } else {
-          showToast('Driver saved. Password updated in database.', 'success');
+      // ──────────────────────────────────────────────────────────────────
+
+      if (authOk) {
+        if (!editId) {
+          _showDriverCredentials(name, dispId, password, email);
+          if (window._writeNotif) _writeNotif('success', 'New driver added', name + ' has been added with Driver ID ' + dispId + '.');
         }
-      } else if (!editId && !authOk) {
+        showToast('Driver saved — Firebase Auth synced (' + (email || 'login email') + ').', 'success');
+      } else if (!editId) {
         showToast('Driver saved. Note: login account creation failed — check email/password.', 'info');
         _showDriverCredentials(name, dispId, password, email);
         if (window._writeNotif) _writeNotif('warning', 'Driver added (auth issue)', name + ' (' + dispId + ') saved but login account creation failed.');
-      } else if (!editId) {
-        // Brand new driver — show credentials card
-        _showDriverCredentials(name, dispId, password, email);
-        showToast('Driver created! Credentials card shown below — share with driver.', 'success');
-        if (window._writeNotif) _writeNotif('success', 'New driver added', name + ' has been added with Driver ID ' + dispId + '.');
       } else {
         showToast('Driver saved successfully!', 'success');
       }
@@ -8007,61 +8070,67 @@ function saveDriver() {
     return fbDB.ref('drivers').push().key;
   }
 
+  function _syncPersonalAuthThenFinish(key, requirePassword) {
+    if (!email || email.indexOf('@') === -1) {
+      errEl.textContent = 'A valid personal email is required — drivers log in with this email in the driver app.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = editId ? 'Save Changes' : 'Save Driver';
+      return;
+    }
+    if (requirePassword && (!password || password.length < 6)) {
+      errEl.textContent = 'Password must be at least 6 characters for new drivers.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Save Driver';
+      return;
+    }
+    var existingUid = (editId && allDrivers[editId] && allDrivers[editId].uid) || profile.uid || '';
+    var authPayload = { email: email, companyId: companyId };
+    if (existingUid) authPayload.uid = existingUid;
+    if (password) authPayload.password = password;
+    btn.textContent = 'Syncing login account…';
+    window._bwEnsureDriverAuthAccount(authPayload).then(function(authRes) {
+      if (!authRes || !authRes.ok || authRes.authSynced === false) {
+        var msg = (authRes && (authRes.error || authRes.note)) || 'Firebase Auth sync failed';
+        if (requirePassword || password) {
+          errEl.textContent = msg;
+          errEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = editId ? 'Save Changes' : 'Save Driver';
+          return;
+        }
+        console.warn('[saveDriver] Auth sync warning (continuing save):', msg);
+      }
+      if (authRes && authRes.uid) profile.uid = authRes.uid;
+      finish(key, !!(authRes && authRes.authSynced));
+    }).catch(function(e) {
+      var msg = (e && e.message) || 'Firebase Auth sync request failed';
+      if (requirePassword) {
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Save Driver';
+        return;
+      }
+      console.warn('[saveDriver] Auth sync network error (continuing save):', msg);
+      finish(key, false);
+    });
+  }
+
   if (editId) {
     // Edit existing — update real email if changed, systemEmail stays fixed
     if (!profile.systemEmail && allDrivers[editId] && allDrivers[editId].systemEmail) {
       profile.systemEmail = allDrivers[editId].systemEmail;
     }
-    finish(editId, true);
+    _syncPersonalAuthThenFinish(editId, false);
   } else {
-    // New driver — generate system email and create Firebase Auth account
+    // New driver — systemEmail is internal only; Auth account uses personal email
     profile.createdAt = Date.now();
     var dispNum = dispId.replace(/^[Dd]/, '');
     var cid = (profile.companyId || COMPANY_ID || 'bw').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
-    var systemEmail = 'd' + dispNum + '.' + cid + '@drv.bookawaka.app';
-    profile.systemEmail = systemEmail;
-    var companyId = profile.companyId || COMPANY_ID;
-    var emailsToCheck = [systemEmail];
-    if (email && email.indexOf('@') !== -1) emailsToCheck.unshift(email);
-
-    window._bwLookupAuthUidByEmails(emailsToCheck).then(function(existing) {
-      if (existing && existing.uid) {
-        console.log('[saveDriver] Reusing existing Firebase Auth account:', existing.email, existing.uid);
-        profile.uid = existing.uid;
-        return window._bwSyncAuthPassword(existing.uid, password).then(function() {
-          finish(_keyForSaveDriver(), true);
-        });
-      }
-      try {
-        window._bwEnsureSecondaryFbApp();
-        return secondaryFbApp.auth().createUserWithEmailAndPassword(systemEmail, password).then(function(cred) {
-          profile.uid = cred.user.uid;
-          return cred.user.updateProfile({ displayName: String(companyId) }).then(function() {
-            return secondaryFbApp.auth().signOut();
-          });
-        }).then(function() {
-          finish(_keyForSaveDriver(), true);
-        }).catch(function(err) {
-          if (err && err.code === 'auth/email-already-in-use') {
-            return window._bwLookupAuthUidByEmails(emailsToCheck).then(function(retry) {
-              if (retry && retry.uid) {
-                profile.uid = retry.uid;
-                return window._bwSyncAuthPassword(retry.uid, password).then(function() {
-                  finish(_keyForSaveDriver(), true);
-                });
-              }
-              throw err;
-            });
-          }
-          throw err;
-        });
-      } catch(e) {
-        finish(_keyForSaveDriver(), false);
-      }
-    }).catch(function(err) {
-      console.warn('[Drivers] Auth lookup/create failed:', err && err.message);
-      finish(_keyForSaveDriver(), false);
-    });
+    profile.systemEmail = 'd' + dispNum + '.' + cid + '@drv.bookawaka.app';
+    _syncPersonalAuthThenFinish(_keyForSaveDriver(), true);
   }
   } // end _doSaveDriver
 } // end saveDriver
@@ -20696,6 +20765,36 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── API: ensure persistent email+password Firebase Auth for driver login ─────
+  if (urlPath === '/api/ensure-driver-auth') {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type' });
+      res.end(); return;
+    }
+    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        const result = await ensureDriverAuthAccount({
+          email: parsed.email,
+          password: parsed.password,
+          companyId: parsed.companyId,
+          uid: parsed.uid,
+        });
+        const code = result.ok ? 200 : (result.authSynced === false ? 503 : 400);
+        res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        console.warn('[ensure-driver-auth] failed:', e.code || '', e.message);
+        res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ ok: false, authSynced: false, error: e.message, code: e.code || null }));
+      }
+    });
+    return;
+  }
+
   // ── API: reset driver/dispatcher Firebase Auth password (and optionally email)
   // Accepts: { uid, password?, email? }
   //   - password (optional, but at least one of password/email required): >= 6 chars
@@ -20713,7 +20812,8 @@ const server = http.createServer((req, res) => {
     req.on('data', c => body += c);
     req.on('end', async () => {
       try {
-        const { uid, password, email } = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        const { uid, password, email, companyId } = parsed;
         if (!uid || (!password && !email)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'uid plus at least one of password/email is required' })); return;
@@ -20731,7 +20831,22 @@ const server = http.createServer((req, res) => {
         const update = {};
         if (password) update.password = password;
         if (email)    update.email    = email;
-        await firebaseAdmin.auth().updateUser(uid, update);
+        try {
+          await firebaseAdmin.auth().updateUser(uid, update);
+        } catch (updateErr) {
+          if (updateErr.code === 'auth/user-not-found' && email && password) {
+            const created = await ensureDriverAuthAccount({
+              email,
+              password,
+              companyId,
+              uid,
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(created));
+            return;
+          }
+          throw updateErr;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, authSynced: true, updated: Object.keys(update) }));
       } catch(e) {
