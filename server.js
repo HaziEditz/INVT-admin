@@ -1277,13 +1277,17 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
     };
     var drvId = String(profile.dispatcherId || profile.id || '').trim();
     var approved = profile.approved === false ? false : (profile.status === 'pending' ? false : true);
+    var displayName = String(profile.name || '').trim();
+    if (!displayName) {
+      displayName = String(profile.dispatcherId || profile.email || profile.phone || ('Driver ' + (driverKey || uid).slice(-6))).trim();
+    }
     var companyPatch = Object.assign({
       email:             profile.email || '',
       companyId:         cId,
       uid:               uid,
       id:                drvId,
       driverId:          drvId,
-      name:              profile.name || '',
+      name:              displayName,
       phone:             profile.phone || '',
       approved:          approved,
       allowedServices:   allowedServicesMap,
@@ -1317,7 +1321,7 @@ window._bwSyncDriverCompanyAlloc = function(driverKey, profile) {
       companyId: cId,
       uid:       uid,
       email:     profile.email || '',
-      name:      profile.name || '',
+      name:      displayName,
       phone:     profile.phone || '',
       fleetKey:  driverKey || ''
     }).then(function(res) {
@@ -1471,11 +1475,17 @@ window._bwAddVehicleToDriverFromVehicleTab = function(driverKey, taxiNumber, com
     companyId: companyId || d.companyId || window.COMPANY_ID
   });
   if (setAsCurrentShift) profile.currentVehicleId = normTaxi;
-  return window.adminWrite('drivers/' + driverKey, 'PATCH', Object.assign({
+  var partialPatch = Object.assign({
     allocatedTaxi: profile.allocatedTaxi,
-    updatedAt: Date.now()
-  }, window._bwDriverVehicleFirebasePatch(vehKeys, setAsCurrentShift ? normTaxi : ''))).then(function() {
+    updatedAt: Date.now(),
+    fleetKey: driverKey
+  }, window._bwDriverVehicleFirebasePatch(vehKeys, setAsCurrentShift ? normTaxi : ''), window._bwStripLegacyAllocatedVehicles());
+  if (setAsCurrentShift) partialPatch.currentVehicleId = normTaxi;
+  return window.adminWrite('drivers/' + driverKey, 'PATCH', partialPatch).then(function() {
     window.allDrivers[driverKey] = Object.assign(window.allDrivers[driverKey] || {}, profile);
+    if (!String(profile.name || '').trim()) {
+      profile.name = String(d.name || d.dispatcherId || d.email || ('Driver ' + driverKey.slice(-6))).trim();
+    }
     return window._bwSyncDriverCompanyAlloc(driverKey, profile);
   });
 };
@@ -8857,7 +8867,7 @@ function vehiclesPage(companyId, isSA) {
 
       <div class="section-title">Registration</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
-        <div class="field-group"><label>Registration Plate *</label><input id="v-rego" type="text" placeholder="ABC123"/></div>
+        <div class="field-group"><label>Registration Plate *</label><input id="v-rego" type="text" placeholder="ABC123" style="text-transform:uppercase"/><small style="color:#9e9e9e;font-size:11px">Must be unique — duplicates are blocked at save.</small></div>
         <div class="field-group"><label>Rego Expiry Date</label><input id="v-rego-expiry" type="date"/></div>
       </div>
 
@@ -8999,8 +9009,49 @@ function _currentShiftLabel(vehRecord) {
   return (d && d.name) || vehRecord.assignedDriver || '';
 }
 
+function _bwNormRego(s) {
+  return String(s || '').replace(/\s+/g, '').toUpperCase();
+}
+
+function _vehicleDuplicateMap() {
+  var byRego = {};
+  var byTaxi = {};
+  var dup = {};
+  Object.keys(allVehicles).forEach(function(k) {
+    var v = allVehicles[k];
+    if (!v) return;
+    var rego = _bwNormRego(v.registration);
+    var taxi = window._bwNormTaxi(v.taxiNumber);
+    if (rego) {
+      if (byRego[rego]) { dup[k] = true; dup[byRego[rego]] = true; }
+      else byRego[rego] = k;
+    }
+    if (taxi) {
+      if (byTaxi[taxi]) { dup[k] = true; dup[byTaxi[taxi]] = true; }
+      else byTaxi[taxi] = k;
+    }
+  });
+  return dup;
+}
+
+function _findVehicleConflicts(taxiNo, rego, editId) {
+  var taxiUp = window._bwNormTaxi(taxiNo);
+  var regoNorm = _bwNormRego(rego);
+  var dupTaxi = null;
+  var dupRego = null;
+  Object.keys(allVehicles).forEach(function(k) {
+    if (editId && k === editId) return;
+    var v = allVehicles[k];
+    if (!v) return;
+    if (taxiUp && window._bwNormTaxi(v.taxiNumber) === taxiUp) dupTaxi = v;
+    if (regoNorm && _bwNormRego(v.registration) === regoNorm) dupRego = v;
+  });
+  return { dupTaxi: dupTaxi, dupRego: dupRego };
+}
+
 function renderVehiclesTable() {
   var keys = Object.keys(allVehicles);
+  var dupMap = _vehicleDuplicateMap();
   document.getElementById('veh-count').textContent = keys.length + ' vehicle(s)';
   document.getElementById('veh-loading').style.display = 'none';
   if (!keys.length) { document.getElementById('veh-empty').style.display='block'; return; }
@@ -9024,9 +9075,12 @@ function renderVehiclesTable() {
       }).join('<span style="color:#9e9e9e;font-size:11px">/ </span>');
     }
     var tr = document.createElement('tr');
+    if (dupMap[id]) tr.style.backgroundColor = '#FFF8E1';
     tr.innerHTML =
       '<td>' + (i+1) + '</td>' +
-      '<td><strong style="color:#00897B">' + (v.taxiNumber||'—') + '</strong></td>' +
+      '<td><strong style="color:#00897B">' + (v.taxiNumber||'—') + '</strong>' +
+        (dupMap[id] ? ' <span title="Duplicate taxi number or registration plate" style="color:#E65100;font-size:11px">⚠ duplicate</span>' : '') +
+      '</td>' +
       '<td>' + (v.make||'') + ' ' + (v.model||'') + (v.vehicleType ? ' <small style="color:#9e9e9e">(' + v.vehicleType + ')</small>' : '') + '</td>' +
       '<td>' + (v.year||'—') + '</td>' +
       '<td><code style="background:#F5F5F5;padding:2px 6px;border-radius:3px">' + (v.registration||'—') + '</code></td>' +
@@ -9100,6 +9154,18 @@ function saveVehicle() {
     errEl.textContent = 'Taxi Number, Registration, Brand and Model are required.';
     errEl.style.display = 'block'; return;
   }
+  var editId = document.getElementById('edit-veh-id').value;
+  var conflicts = _findVehicleConflicts(taxiNo, rego, editId);
+  if (conflicts.dupRego) {
+    errEl.textContent = 'Registration plate "' + rego + '" is already used by taxi ' +
+      (conflicts.dupRego.taxiNumber || '?') + '. Edit that vehicle instead of creating a duplicate.';
+    errEl.style.display = 'block'; return;
+  }
+  if (conflicts.dupTaxi) {
+    errEl.textContent = 'Taxi number "' + taxiNo + '" already exists (rego ' +
+      (conflicts.dupTaxi.registration || '?') + '). Edit the existing vehicle instead.';
+    errEl.style.display = 'block'; return;
+  }
   btn.disabled = true; btn.textContent = 'Saving…';
   var driverSel = document.getElementById('v-driver');
   var selectedDriverKey  = driverSel.value || '';
@@ -9127,7 +9193,6 @@ function saveVehicle() {
     assignedDriverKey: selectedDriverKey,
     updatedAt:       Date.now()
   };
-  var editId = document.getElementById('edit-veh-id').value;
   var key = editId || fbDB.ref('vehicles').push().key;
   if (!editId) vehicle.createdAt = Date.now();
   var oldTaxiNo = (editId && allVehicles[editId]) ? window._bwNormTaxi(allVehicles[editId].taxiNumber) : '';
@@ -9152,11 +9217,21 @@ function saveVehicle() {
         window._bwRebuildVehicleAllocatedDrivers(key, taxiNo, savedCid, { setCurrentShiftDriverKey: '' })
       );
     }
-    return Promise.all(syncTasks);
-  }).then(function() {
+    return Promise.all(syncTasks.map(function(task) {
+      return task.catch(function(syncErr) {
+        console.warn('[veh] post-save sync failed:', syncErr);
+        return { syncErr: syncErr };
+      });
+    }));
+  }).then(function(syncResults) {
     renderVehiclesTable();
     closeVehicleModal();
-    showToast('Vehicle saved!', 'success');
+    var failed = (syncResults || []).find(function(r) { return r && r.syncErr; });
+    if (failed && failed.syncErr) {
+      showToast('Vehicle saved, but driver assignment sync failed: ' + failed.syncErr.message, 'error');
+    } else {
+      showToast('Vehicle saved!', 'success');
+    }
   }).catch(function(err) {
     errEl.textContent = 'Save failed: ' + err.message;
     errEl.style.display = 'block';
@@ -19409,7 +19484,9 @@ const DRIVER_PARTIAL_WRITE_FIELDS = new Set([
   'uid', 'updatedAt', 'isDispatcher', 'licenseFileUrl',
   'allocatedTaxi', 'currentVehicleId',
   'passwordHash', 'systemEmail', 'approved', 'vehicleId', 'allowedServices',
-  'assignedVehicles', 'sharedWith'
+  'assignedVehicles', 'sharedWith',
+  // Legacy strip + vehicle-tab assignment patches (must not require full profile name).
+  'allocatedVehicles', 'fleetKey',
 ]);
 
 function validateDriverAdminWrite(nodePath, data, method) {
