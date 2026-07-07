@@ -6419,6 +6419,56 @@ function fmtDate(d) {
   catch(e) { return d; }
 }
 
+/** Normalize next-bill input to YYYY-MM-DD for Firebase billing.nextDueDate. */
+function normalizeNextDueDateInput(raw) {
+  var s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;
+  var ms = Date.parse(s);
+  if (!isNaN(ms) && ms > 0) {
+    try {
+      return new Date(ms).toLocaleDateString('en-CA', { timeZone: NZ_TZ });
+    } catch (e) {
+      return new Date(ms).toISOString().slice(0, 10);
+    }
+  }
+  return s;
+}
+
+/** One billing period after payment date (calendar month). */
+function computeNextDueDateFromPayment(paymentDateStr) {
+  var raw = String(paymentDateStr || '').trim();
+  if (!raw) {
+    raw = window._tzTodayStr ? window._tzTodayStr() : new Date().toLocaleDateString('en-CA', { timeZone: NZ_TZ });
+  }
+  var norm = normalizeNextDueDateInput(raw);
+  if (!norm || !/^\\d{4}-\\d{2}-\\d{2}$/.test(norm)) return norm;
+  var p = norm.split('-');
+  var y = parseInt(p[0], 10);
+  var m = parseInt(p[1], 10) - 1;
+  var d = parseInt(p[2], 10);
+  var next = new Date(Date.UTC(y, m + 1, d));
+  return next.toISOString().slice(0, 10);
+}
+
+/** Keep dispatch login gate in sync — companySettings is authoritative for access. */
+function syncCompanySettingsBillingActive(cid, nextDueDate) {
+  var due = normalizeNextDueDateInput(nextDueDate);
+  var now = Date.now();
+  var billingPatch = { status: 'active', gracePeriodDays: 7, updatedAt: now };
+  var planPatch = { status: 'active', updatedAt: now };
+  if (due) {
+    billingPatch.nextDueDate = due;
+    planPatch.nextDueDate = due;
+    planPatch.nextBillDate = due;
+  }
+  return Promise.all([
+    adminWrite('companySettings/' + cid, 'PATCH', { active: true, updatedAt: now }),
+    adminWrite('companySettings/' + cid + '/plan', 'PATCH', planPatch),
+    adminWrite('companySettings/' + cid + '/billing', 'PATCH', billingPatch)
+  ]);
+}
+
 function closeSubModal(id) {
   document.getElementById(id).classList.remove('open');
 }
@@ -6467,16 +6517,25 @@ function savePlan() {
     updatedAt: Date.now()
   };
   btn.disabled = true; btn.textContent = 'Saving…';
+  var nextDue = normalizeNextDueDateInput(plan.nextBillDate);
+  if (nextDue) {
+    plan.nextDueDate = nextDue;
+  }
   var billingPatch = {
     status: plan.status,
     gracePeriodDays: 7,
     updatedAt: Date.now()
   };
-  Promise.all([
+  if (nextDue) billingPatch.nextDueDate = nextDue;
+  var writes = [
     adminWrite('bw_billing/' + cid + '/plan', 'PUT', plan),
     adminWrite('companySettings/' + cid + '/plan', 'PATCH', plan),
     adminWrite('companySettings/' + cid + '/billing', 'PATCH', billingPatch)
-  ]).then(function() {
+  ];
+  if (plan.status === 'active') {
+    writes.push(adminWrite('companySettings/' + cid, 'PATCH', { active: true, updatedAt: Date.now() }));
+  }
+  Promise.all(writes).then(function() {
     if (!_allBilling[cid]) _allBilling[cid] = {};
     _allBilling[cid].plan = plan;
     renderSuperTable();
@@ -6512,11 +6571,26 @@ function savePayment() {
     recordedAt: Date.now()
   };
   var key = 'pay_' + Date.now();
+  var payDate = document.getElementById('spaym-date').value;
+  var nextDue = computeNextDueDateFromPayment(payDate);
   btn.disabled = true; btn.textContent = 'Saving…';
   adminWrite('bw_billing/' + cid + '/payments/' + key, 'PUT', payment).then(function() {
+    return syncCompanySettingsBillingActive(cid, nextDue);
+  }).then(function() {
+    return adminWrite('bw_billing/' + cid + '/plan', 'PATCH', {
+      status: 'active',
+      nextBillDate: nextDue,
+      nextDueDate: nextDue,
+      updatedAt: Date.now()
+    }).catch(function() { return null; });
+  }).then(function() {
     if (!_allBilling[cid]) _allBilling[cid] = {};
     if (!_allBilling[cid].payments) _allBilling[cid].payments = {};
     _allBilling[cid].payments[key] = payment;
+    if (!_allBilling[cid].plan) _allBilling[cid].plan = {};
+    _allBilling[cid].plan.status = 'active';
+    _allBilling[cid].plan.nextBillDate = nextDue;
+    _allBilling[cid].plan.nextDueDate = nextDue;
     renderSuperTable();
     closeSubModal('sub-pay-modal');
     showSubAlert('sub-main-alert', 'Payment of $' + amount.toFixed(2) + ' recorded for company ' + cid, 'ok');
