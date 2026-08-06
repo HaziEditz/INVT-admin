@@ -231,7 +231,7 @@ const PAGE_META = {
   'pois.aspx':                   { title: 'Points of Interest',      icon: '&#xE55F;',  section: 'POIs' },
   'jobs editor.aspx':            { title: 'Jobs Editor',             icon: '&#xE8D5;',  section: 'Jobs' },
   'jobs rating.aspx':            { title: 'Job Ratings',             icon: '&#xE838;',  section: 'Jobs' },
-  'tm_tariffs.aspx':             { title: 'TM Tariffs',              icon: '&#xE8E5;',  section: 'Total Mobility' },
+  // tm_tariffs.aspx removed from nav — legacy unused (route kept as notice page)
   'tm_councils.aspx':            { title: 'TM Council Access',       icon: '&#xE8E5;',  section: 'Total Mobility' },
   'tm_trips.aspx':               { title: 'TM Trip History',         icon: '&#xE8E5;',  section: 'Total Mobility' },
   'tm_batches.aspx':             { title: 'TM Claim Batches',        icon: '&#xE8E5;',  section: 'Total Mobility' },
@@ -1743,7 +1743,6 @@ function sidebarHTML() {
     </li>
     <li class="current_section" title="Total Mobility"><a><span class="menu_icon"><i class="material-icons">&#xE8E5;</i></span><span class="menu_title">Total Mobility</span></a>
       <ul>
-        <li><a href="TM_Tariffs.aspx">Tariffs</a></li>
         <li><a href="TM_Councils.aspx">Council Access</a></li>
         <li><a href="TM_Trips.aspx">Trip History</a></li>
         <li><a href="TM_Batches.aspx">Claim Batches</a></li>
@@ -15374,147 +15373,37 @@ window._fbOnLogin = function() {
 // ─── TOTAL MOBILITY PAGES ─────────────────────────────────────────────────────
 
 function tmTariffsPage(companyId) {
+  // Phase 1 — legacy page. Live TM metering uses normal company tariffs; subsidy from council sync.
   const css = `<style>
-.tm-wrap{padding:24px;max-width:960px;margin:0 auto;}
+.tm-wrap{padding:24px;max-width:720px;margin:0 auto;}
 .tm-page-title{font-size:20px;font-weight:700;color:#1e293b;margin:0 0 4px;display:flex;align-items:center;gap:10px;}
-.tm-page-sub{font-size:13px;color:#94a3b8;margin:0 0 24px;}
-.tm-card{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.10);padding:22px 24px;margin-bottom:20px;}
-.tm-card-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:12px;border-bottom:2px solid #E0F2F1;}
-.tm-card-icon{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;}
-.tm-car-icon{background:#0284c7;}
-.tm-van-icon{background:#7c3aed;}
-.tm-card-title{font-size:15px;font-weight:700;color:#1e293b;}
-.tm-card-sub{font-size:12px;color:#94a3b8;margin-top:2px;}
-.tm-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;}
-.tm-field label{display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;}
-.tm-field input{width:100%;padding:9px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box;transition:border .15s;}
-.tm-field input:focus{outline:none;border-color:#0d9488;box-shadow:0 0 0 2px rgba(13,148,136,.15);}
-.tm-field .prefix{position:relative;}
-.tm-field .prefix span{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:14px;}
-.tm-field .prefix input{padding-left:22px;}
-.tm-footer{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:16px;border-top:1px solid #f1f5f9;}
-.tm-save-btn{background:#0d9488;color:#fff;border:none;padding:9px 22px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;transition:background .15s;}
-.tm-save-btn:hover{background:#0f766e;}
-.tm-save-btn:disabled{background:#94a3b8;cursor:not-allowed;}
-.tm-updated{font-size:12px;color:#94a3b8;}
-.tm-alert{padding:8px 14px;border-radius:6px;font-size:12px;font-weight:600;display:none;}
-.tm-alert-ok{background:#F0FDF4;color:#16a34a;border:1px solid #bbf7d0;display:block;}
-.tm-alert-err{background:#FEF2F2;color:#dc2626;border:1px solid #fecaca;display:block;}
+.tm-card{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.10);padding:22px 24px;margin-top:16px;line-height:1.55;color:#334155;font-size:14px;}
+.tm-badge{display:inline-block;background:#FEF3C7;color:#92400E;border:1px solid #FCD34D;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;margin-bottom:12px;}
+code{font-size:12px;background:#F1F5F9;padding:1px 5px;border-radius:4px;}
+a.tm-link{color:#0d9488;font-weight:600;}
 </style>`;
-
   const body = `<div class="page-content"><div class="tm-wrap">
-  <div>
-    <div class="tm-page-title"><i class="material-icons" style="color:#0d9488;font-size:24px">&#xE8E5;</i>TM Tariff Rates</div>
-    <div class="tm-page-sub">Set your company's Total Mobility fare rates. These are used for billing and council claims.</div>
-  </div>
-
-  <div id="tm-main-alert" class="tm-alert" style="margin-bottom:16px;"></div>
-
-  <!-- Car Card -->
+  <div class="tm-page-title"><i class="material-icons" style="color:#94a3b8;font-size:24px">&#xE8E5;</i>TM Tariff Rates</div>
   <div class="tm-card">
-    <div class="tm-card-head">
-      <div class="tm-card-icon tm-car-icon"><i class="material-icons" style="font-size:20px">&#xE531;</i></div>
-      <div>
-        <div class="tm-card-title">Standard Car</div>
-        <div class="tm-card-sub">Rates applied to standard sedan TM trips</div>
-      </div>
-    </div>
-    <div class="tm-fields">
-      <div class="tm-field"><label>Base Fare</label><div class="prefix"><span>$</span><input type="number" id="car-base" min="0" step="0.01" placeholder="0.00"></div></div>
-      <div class="tm-field"><label>Per Kilometre</label><div class="prefix"><span>$</span><input type="number" id="car-perkm" min="0" step="0.01" placeholder="0.00"></div></div>
-      <div class="tm-field"><label>Per Minute</label><div class="prefix"><span>$</span><input type="number" id="car-permin" min="0" step="0.01" placeholder="0.00"></div></div>
-      <div class="tm-field"><label>Stop / Waiting Fee</label><div class="prefix"><span>$</span><input type="number" id="car-stopfee" min="0" step="0.01" placeholder="0.00"></div></div>
-    </div>
-  </div>
-
-  <!-- Van Card -->
-  <div class="tm-card">
-    <div class="tm-card-head">
-      <div class="tm-card-icon tm-van-icon"><i class="material-icons" style="font-size:20px">&#xE1D3;</i></div>
-      <div>
-        <div class="tm-card-title">Wheelchair Van</div>
-        <div class="tm-card-sub">Rates applied to wheelchair-accessible vehicle TM trips</div>
-      </div>
-    </div>
-    <div class="tm-fields">
-      <div class="tm-field"><label>Base Fare</label><div class="prefix"><span>$</span><input type="number" id="van-base" min="0" step="0.01" placeholder="0.00"></div></div>
-      <div class="tm-field"><label>Per Kilometre</label><div class="prefix"><span>$</span><input type="number" id="van-perkm" min="0" step="0.01" placeholder="0.00"></div></div>
-      <div class="tm-field"><label>Per Minute</label><div class="prefix"><span>$</span><input type="number" id="van-permin" min="0" step="0.01" placeholder="0.00"></div></div>
-      <div class="tm-field"><label>Stop / Waiting Fee</label><div class="prefix"><span>$</span><input type="number" id="van-stopfee" min="0" step="0.01" placeholder="0.00"></div></div>
-    </div>
-  </div>
-
-  <div class="tm-footer">
-    <button class="tm-save-btn" id="tm-save-btn" onclick="saveTmTariffs()">
-      <i class="material-icons" style="font-size:16px">&#xE161;</i> Save Rates
-    </button>
-    <div id="tm-updated-label" class="tm-updated"></div>
+    <div class="tm-badge">LEGACY — NOT USED</div>
+    <p style="margin:0 0 12px"><strong>This page no longer configures live TM fares.</strong></p>
+    <p style="margin:0 0 10px">
+      TM trips are metered with your company&#8217;s <em>normal</em> tariffs (day / night / vehicle type)
+      under Tariff settings. Choosing TM as the payment type applies the council subsidy split to that fare —
+      there is no separate TM price table in the live path.
+    </p>
+    <p style="margin:0 0 10px">
+      The old <code>tmTariffs/</code> Firebase node is kept for history only and is not read by dispatch or the driver app.
+    </p>
+    <p style="margin:0;color:#64748b;font-size:13px">
+      Manage council access and claim workflows from
+      <a class="tm-link" href="TM_Councils.aspx">Council Access</a>,
+      <a class="tm-link" href="TM_Trips.aspx">Trip History</a>, and
+      <a class="tm-link" href="TM_Batches.aspx">Claim Batches</a>.
+    </p>
   </div>
 </div></div>`;
-
-  const js = `<script>
-function loadTmTariffs() {
-  var cid = window.COMPANY_ID;
-  if (!cid) { setTimeout(loadTmTariffs, 400); return; }
-  window.adminRead('tmTariffs/' + cid).then(function(d) {
-    d = d || {};
-    var c = d.car || {}; var v = d.van || {};
-    document.getElementById('car-base').value    = c.base    !== undefined ? c.base    : '';
-    document.getElementById('car-perkm').value   = c.perKm   !== undefined ? c.perKm   : '';
-    document.getElementById('car-permin').value  = c.perMin  !== undefined ? c.perMin  : '';
-    document.getElementById('car-stopfee').value = c.stopFee !== undefined ? c.stopFee : '';
-    document.getElementById('van-base').value    = v.base    !== undefined ? v.base    : '';
-    document.getElementById('van-perkm').value   = v.perKm   !== undefined ? v.perKm   : '';
-    document.getElementById('van-permin').value  = v.perMin  !== undefined ? v.perMin  : '';
-    document.getElementById('van-stopfee').value = v.stopFee !== undefined ? v.stopFee : '';
-    if (d.updatedAt) {
-      document.getElementById('tm-updated-label').textContent = 'Last saved: ' + new Date(d.updatedAt).toLocaleString();
-    }
-  }).catch(function(e) {
-    showTmAlert('tm-main-alert', 'Failed to load tariffs: ' + e.message, 'err');
-  });
-}
-function saveTmTariffs() {
-  var cid = window.COMPANY_ID;
-  if (!cid) { alert('Company ID not set'); return; }
-  var btn = document.getElementById('tm-save-btn');
-  btn.disabled = true; btn.innerHTML = '<i class=\\'material-icons\\' style=\\'font-size:16px\\'>&#xE627;</i> Saving…';
-  var payload = {
-    car: {
-      base:    parseFloat(document.getElementById('car-base').value)    || 0,
-      perKm:   parseFloat(document.getElementById('car-perkm').value)   || 0,
-      perMin:  parseFloat(document.getElementById('car-permin').value)  || 0,
-      stopFee: parseFloat(document.getElementById('car-stopfee').value) || 0
-    },
-    van: {
-      base:    parseFloat(document.getElementById('van-base').value)    || 0,
-      perKm:   parseFloat(document.getElementById('van-perkm').value)   || 0,
-      perMin:  parseFloat(document.getElementById('van-permin').value)  || 0,
-      stopFee: parseFloat(document.getElementById('van-stopfee').value) || 0
-    },
-    updatedAt: Date.now()
-  };
-  window.adminWrite('tmTariffs/' + cid, 'PUT', payload).then(function() {
-    btn.disabled = false; btn.innerHTML = '<i class=\\'material-icons\\' style=\\'font-size:16px\\'>&#xE161;</i> Save Rates';
-    document.getElementById('tm-updated-label').textContent = 'Last saved: ' + new Date().toLocaleString();
-    showTmAlert('tm-main-alert', 'Tariff rates saved successfully.', 'ok');
-  }).catch(function(e) {
-    btn.disabled = false; btn.innerHTML = '<i class=\\'material-icons\\' style=\\'font-size:16px\\'>&#xE161;</i> Save Rates';
-    showTmAlert('tm-main-alert', 'Save failed: ' + e.message, 'err');
-  });
-}
-function showTmAlert(id, msg, type) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = msg;
-  el.className = 'tm-alert tm-alert-' + type;
-  clearTimeout(el._t);
-  el._t = setTimeout(function(){ el.className = 'tm-alert'; }, 5000);
-}
-window._fbOnLogin = function() { loadTmTariffs(); };
-if (window.COMPANY_ID) loadTmTariffs();
-<\/script>`;
-  return pageWrap(commonHead('TM Tariffs', css), body, commonScripts(js));
+  return pageWrap(commonHead('TM Tariffs (Legacy)', css), body, commonScripts(''));
 }
 
 function tmCouncilsPage(companyId) {
