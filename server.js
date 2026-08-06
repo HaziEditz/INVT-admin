@@ -15715,7 +15715,7 @@ function renderTrips(trips) {
   tbody.innerHTML = trips.map(function(t) {
     var ms = _tmTs(t);
     var fare = parseFloat(t.totalFare || t.fare || 0);
-    var tmAmt = parseFloat(t.tmSubsidy || t.tmAmount || t.totalMobilityAmount || 0);
+    var tmAmt = parseFloat(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount || 0);
     var paxPays = parseFloat(t.tmPassengerPays || t.passengerPays || t.patientPays || 0);
     totalFare += fare; totalTm += tmAmt;
     var st = getTripStatus(t);
@@ -15725,7 +15725,7 @@ function renderTrips(trips) {
     var vehicle = t.vehicleId || t.vehiclePlate || t.vehicle || '—';
     var km = t.distanceKm ? Number(t.distanceKm).toFixed(2) + ' km' : '—';
     var wait = (t.waitingCost || t.WaitingCost) ? fmtMoney(t.waitingCost || t.WaitingCost) : '—';
-    var voucher = t.tmVoucherNo || t.voucherNumber || '—';
+    var voucher = t.tmCardNumber || t.tmVoucherNo || t.voucherNumber || '—';
     var approveBtn = (st === 'pending')
       ? '<button class="tm-approve-btn" id="ab-' + t._key + '" onclick="event.stopPropagation();approveTrip(\\'' + t._key + '\\')" title="Mark as Company Approved">Approve</button>'
       : '';
@@ -15791,7 +15791,7 @@ function openTripDetail(key) {
         row('Date', fmtDate(ms)) +
         row('Time', fmtTime(ms)) +
         row('Passenger', t.tmPassengerName || t.passengerName || t.customerName) +
-        row('Voucher No.', t.tmVoucherNo || t.voucherNumber) +
+        row('Voucher No.', t.tmCardNumber || t.tmVoucherNo || t.voucherNumber) +
         row('Trip Category', t.tmTripCategory || t.tripCategory) +
         row('Driver', t.driverName || t.driver) +
         row('Vehicle / AB No.', t.vehicleId || t.vehiclePlate || t.vehicle) +
@@ -15815,7 +15815,7 @@ function openTripDetail(key) {
         row('Distance Cost', fmtMoney(t.distanceCost)) +
         row('Waiting Cost', fmtMoney(t.waitingCost || t.WaitingCost)) +
         row('Meter Fare (total)', fmtMoney(t.totalFare || t.fare)) +
-        row('TM Subsidy (75%)', '<strong style="color:#0d9488">' + fmtMoney(t.tmSubsidy || t.tmAmount || t.totalMobilityAmount) + '</strong>') +
+        row('TM Subsidy (75%)', '<strong style="color:#0d9488">' + fmtMoney(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount) + '</strong>') +
         row('Passenger Pays', fmtMoney(t.tmPassengerPays || t.passengerPays || t.patientPays)) +
         row('Payment Type', t.paymentType || t.payment_type) +
       '</div>' +
@@ -15844,7 +15844,7 @@ function exportCsv() {
       esc(fmtDate(ms)),
       esc(fmtTime(ms)),
       esc(t.tmPassengerName || t.passengerName || t.customerName),
-      esc(t.tmVoucherNo || t.voucherNumber),
+      esc(t.tmCardNumber || t.tmVoucherNo || t.voucherNumber),
       esc(t.driverName || t.driver),
       esc(t.vehicleId || t.vehiclePlate || t.vehicle),
       esc(t.tariffName || t.vehicleType || t.carType),
@@ -15856,7 +15856,7 @@ function exportCsv() {
       esc(parseFloat(t.distanceCost || 0).toFixed(2)),
       esc(parseFloat(t.waitingCost || t.WaitingCost || 0).toFixed(2)),
       esc(parseFloat(t.totalFare || t.fare || 0).toFixed(2)),
-      esc(parseFloat(t.tmSubsidy || t.tmAmount || t.totalMobilityAmount || 0).toFixed(2)),
+      esc(parseFloat(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount || 0).toFixed(2)),
       esc(parseFloat(t.tmPassengerPays || t.passengerPays || t.patientPays || 0).toFixed(2)),
       esc(st)
     ].join(','));
@@ -15869,16 +15869,26 @@ function exportCsv() {
   a.download = 'TM-Trips-' + (window.COMPANY_ID || 'export') + '-' + monthLabel + '.csv';
   a.click();
 }
+function isOwnerTmCompletedJob(j) {
+  if (!j || typeof j !== 'object') return false;
+  if (j.isTotalMobility === true || j.tmUsed === true) return true;
+  var pt = (j.paymentType || j.payment_type || j.PaymentType || j.paymentMethod || '')
+    .toLowerCase().replace(/[_\s-]/g, '');
+  if (pt === 'totalmobility' || pt === 'tm') return true;
+  if (j.tmPaymentType === 'total_mobility' || j.paymentCategory === 'total_mobility') return true;
+  if (j.tmCouncilPays != null || j.councilPays != null || j.tmSubsidyFare != null || j.tmSubsidy != null) return true;
+  if (j.tmCardNumber || j.tmVoucherNo) return true;
+  if (Array.isArray(j.tmHoists) && j.tmHoists.length > 0) return true;
+  return false;
+}
 function extractTmTrips(jobsData) {
   var trips = [];
   Object.keys(jobsData).forEach(function(k) {
     var j = jobsData[k];
     if (!j) return;
-    var pt = (j.paymentType || j.payment_type || j.PaymentType || '').toLowerCase().replace(/[_\\s-]/g,'');
-    if (pt === 'totalmobility' || pt === 'tm' || pt === 'total_mobility') {
-      j._key = k;
-      trips.push(j);
-    }
+    if (!isOwnerTmCompletedJob(j)) return;
+    j._key = k;
+    trips.push(j);
   });
   return trips;
 }
