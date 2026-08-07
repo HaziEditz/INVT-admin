@@ -15901,8 +15901,22 @@ function openTripDetail(key) {
   var ms = _tmTs(t);
   var cardholder = t.tmCardName || (Array.isArray(t.tmPassengers) && t.tmPassengers[0] && t.tmPassengers[0].cardholderName) || t.tmPassengerName || t.passengerName || t.customerName || '';
   var revNote = (_tripStatuses[t._key] || {}).revisionNote || (_tripStatuses[t._key] || {}).revisionNotes || t.revisionNote || '';
+  var stMeta = _tripStatuses[t._key] || {};
+  var flagReasons = Array.isArray(stMeta.flagReasons) ? stMeta.flagReasons : (Array.isArray(t.flagReasons) ? t.flagReasons : []);
+  var anomalyDetail = stMeta.anomalyDetail || t.anomalyDetail || '';
+  var flagWarnHtml = '';
+  if (st === 'revision_needed' && flagReasons.length) {
+    flagWarnHtml =
+      '<div style="margin-bottom:12px;padding:12px 14px;background:#FFEBEE;border-left:4px solid #C62828;border-radius:6px;font-size:13px">' +
+      '<strong style="color:#B71C1C">Council flagged — fix before resubmit</strong>' +
+      '<div style="margin-top:6px;color:#5d4037">' + escAttr(flagReasons.join(', ')) + '</div>' +
+      (anomalyDetail ? '<div style="margin-top:6px;font-size:12px;color:#6d4c41">' + escAttr(anomalyDetail) + '</div>' : '') +
+      (revNote ? '<div style="margin-top:8px"><strong>Council note:</strong> ' + escAttr(revNote) + '</div>' : '') +
+      '</div>';
+  }
   var html =
-    (st === 'revision_needed' && revNote ? '<div style="margin-bottom:12px;padding:10px 12px;background:#FFF8E1;border-left:4px solid #E65100;border-radius:6px;font-size:13px"><strong>Council returned for edit:</strong> ' + escAttr(revNote) + '</div>' : '') +
+    flagWarnHtml +
+    (st === 'revision_needed' && revNote && !flagReasons.length ? '<div style="margin-bottom:12px;padding:10px 12px;background:#FFF8E1;border-left:4px solid #E65100;border-radius:6px;font-size:13px"><strong>Council returned for edit:</strong> ' + escAttr(revNote) + '</div>' : '') +
     '<div class="tmd-section">' +
       '<div class="tmd-section-title">Trip Info</div>' +
       '<div class="tmd-grid">' +
