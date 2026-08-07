@@ -15678,6 +15678,18 @@ function tmTripsPage(companyId) {
     <select id="tm-month-filter" class="tm-select" onchange="filterTrips()">
       <option value="">All Months</option>
     </select>
+    <select id="tm-status-filter" class="tm-select" onchange="filterTrips()">
+      <option value="">All Statuses</option>
+      <option value="pending">Pending</option>
+      <option value="revision_needed">Needs Revision</option>
+      <option value="submitted">Submitted</option>
+      <option value="flagged">Flagged</option>
+      <option value="approved">Approved</option>
+      <option value="rejected">Rejected</option>
+      <option value="paid">Paid</option>
+      <option value="archived">Archived</option>
+    </select>
+    <input type="text" id="tm-search" class="tm-select" placeholder="Search job / passenger / driver / card…" oninput="filterTrips()" style="min-width:220px"/>
     <span id="tm-count-label" style="font-size:13px;color:#94a3b8;"></span>
     <div style="flex:1"></div>
     <button class="tm-csv-btn" onclick="exportCsv()">
@@ -15775,13 +15787,90 @@ function statusBadge(st) {
   var labels = {
     pending:'Pending', company_approved:'Co. Approved', submitted:'Submitted',
     approved:'Approved', paid:'Paid', revision_needed:'Needs Revision',
-    rejected:'Rejected', flagged:'Flagged'
+    rejected:'Rejected', flagged:'Flagged', archived:'Archived'
   };
   var cls = 'st-' + (st || 'default').replace(/[^a-z_]/g,'');
   return '<span class="st-badge ' + cls + '">' + (labels[st] || st || 'Unknown') + '</span>';
 }
 function getTripStatus(t) {
   return (_tripStatuses[t._key] || {}).status || t.tmStatus || 'pending';
+}
+function ownerTripMatchesSearch(t, q) {
+  q = String(q || '').trim().toLowerCase();
+  if (!q) return true;
+  var qCompact = q.replace(/\\s+/g, '');
+  var ids = [t._key, t.bookingId, t.id, t.jobId].map(function(v){ return String(v||'').toLowerCase(); });
+  var passengers = [t.tmCardName, t.tmPassengerName, t.passengerName, t.customerName].map(function(v){ return String(v||'').toLowerCase(); });
+  var drivers = [t.driverName, t.driver].map(function(v){ return String(v||'').toLowerCase(); });
+  var cards = [t.tmCardNumber, t.tmVoucherNo, t.voucherNumber, t.cardNumber].map(function(v){ return String(v||'').toLowerCase().replace(/\\s+/g,''); });
+  var hay = ids.concat(passengers, drivers, cards).join(' ');
+  return hay.indexOf(q) !== -1 || (qCompact && hay.replace(/\\s+/g,'').indexOf(qCompact) !== -1);
+}
+function normalizeOwnerTripEvents(st) {
+  st = st || {};
+  var listed = [];
+  if (st.events && typeof st.events === 'object') {
+    Object.keys(st.events).forEach(function(k) {
+      var e = st.events[k];
+      if (!e || typeof e !== 'object') return;
+      listed.push({
+        at: Number(e.at) || 0,
+        type: e.type || 'event',
+        by: e.by || null,
+        note: e.note || null,
+        reasons: Array.isArray(e.reasons) ? e.reasons : null,
+        fromStatus: e.fromStatus || null,
+        toStatus: e.toStatus || null
+      });
+    });
+  }
+  if (listed.length) {
+    listed.sort(function(a,b){ return a.at - b.at; });
+    return listed;
+  }
+  var synth = [];
+  function push(type, at, extra) {
+    var n = Number(at); if (!n) return;
+    synth.push(Object.assign({ at: n, type: type, by: null, note: null, reasons: null }, extra || {}));
+  }
+  push('submitted', st.submittedAt, { by: st.submittedBy || null });
+  push('flagged', st.flaggedAt, { reasons: st.flagReasons || null, note: st.anomalyDetail || null });
+  push('returned', st.sentBackAt, { by: st.sentBackBy || null, note: st.revisionNote || st.revisionNotes || null });
+  push('resubmitted', st.resubmittedAt, { by: st.resubmittedBy || null });
+  push('approved', st.approvedAt, { by: st.approvedBy || null });
+  push('rejected', st.rejectedAt, { by: st.rejectedBy || null, note: st.rejectNote || null });
+  push('archived', st.archivedAt, { by: st.archivedBy || null, fromStatus: st.archivedFromStatus || null, note: st.archiveNote || null });
+  synth.sort(function(a,b){ return a.at - b.at; });
+  return synth;
+}
+function formatOwnerEventLabel(e) {
+  var labels = {
+    submitted:'Submitted to council', flagged:'Flagged', returned:'Returned to company',
+    owner_edited:'Edited by owner', resubmitted:'Resubmitted', approved:'Approved',
+    rejected:'Rejected', archived:'Archived', restored:'Restored', council_edited:'Edited by council'
+  };
+  var line = labels[e.type] || e.type || 'Event';
+  if (e.reasons && e.reasons.length) line += ' (' + e.reasons.join(', ') + ')';
+  if (e.note) line += ' — ' + e.note;
+  return line;
+}
+function ownerTripHistoryHtml(st) {
+  function escAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  }
+  var events = normalizeOwnerTripEvents(st);
+  if (!events.length) return '';
+  var rows = events.map(function(e) {
+    var when = e.at ? new Date(e.at).toLocaleString('en-NZ') : '—';
+    return '<div style="padding:8px 0 8px 12px;border-left:3px solid #0d9488;margin:0 0 6px 4px">' +
+      '<div style="font-size:11px;color:#64748b">' + when + (e.by ? ' · ' + escAttr(String(e.by)) : '') + '</div>' +
+      '<div style="font-size:13px;font-weight:500;margin-top:2px">' + escAttr(formatOwnerEventLabel(e)) + '</div></div>';
+  }).join('');
+  return '<div class="tmd-section"><div class="tmd-section-title">Trip history</div>' + rows + '</div>';
+}
+function appendOwnerTripEvent(cid, key, eventObj) {
+  var ek = '-e' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  return window.adminWrite('tmTripStatus/' + cid + '/' + key + '/events/' + ek, 'PUT', eventObj);
 }
 function _tmMonthKey(ms) {
   // Returns "YYYY-MM" for the given UTC timestamp, in the company timezone.
@@ -15806,10 +15895,18 @@ function populateMonthFilter(trips) {
 }
 function filterTrips() {
   var monthKey = document.getElementById('tm-month-filter').value;
+  var statusKey = (document.getElementById('tm-status-filter') && document.getElementById('tm-status-filter').value) || '';
+  var q = (document.getElementById('tm-search') && document.getElementById('tm-search').value) || '';
   _filteredTrips = _allTrips.filter(function(t) {
-    if (!monthKey) return true;
-    var ms = _tmTs(t); if (!ms) return false;
-    return _tmMonthKey(ms) === monthKey;
+    if (monthKey) {
+      var ms = _tmTs(t); if (!ms) return false;
+      if (_tmMonthKey(ms) !== monthKey) return false;
+    }
+    if (statusKey) {
+      if (getTripStatus(t) !== statusKey) return false;
+    }
+    if (!ownerTripMatchesSearch(t, q)) return false;
+    return true;
   });
   renderTrips(_filteredTrips);
 }
@@ -15977,8 +16074,11 @@ function openTripDetail(key) {
       '<p style="font-size:12px;color:#666;margin:10px 0 0">Save updates the completed job. Resubmit sets status back to <strong>submitted</strong> for council review.</p>' +
       '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="md-btn md-btn-primary" onclick="saveTripEdits(false)">Save only</button>' +
+      '<button type="button" class="md-btn" style="background:#546E7A;color:#fff" onclick="archiveOwnerTrip()">Archive trip</button>' +
       '</div></div>';
   }
+
+  html += ownerTripHistoryHtml(stMeta);
 
   body.innerHTML = html;
   var stRow = document.getElementById('tmd-status-row');
@@ -16026,22 +16126,35 @@ function saveTripEdits(resubmit) {
   };
   window.adminWrite('completedJobs/' + cid + '/' + key, 'PATCH', patch).then(function() {
     Object.keys(patch).forEach(function(k) { t[k] = patch[k]; });
+    var editEv = { at: Date.now(), type: 'owner_edited', by: cid, byRole: 'owner', toStatus: getTripStatus(t) };
+    var afterEdit = appendOwnerTripEvent(cid, key, editEv).catch(function(){});
     if (!resubmit) {
-      alert('Trip fields saved.');
-      openTripDetail(key);
-      return;
+      return afterEdit.then(function() {
+        if (!_tripStatuses[key]) _tripStatuses[key] = {};
+        if (!_tripStatuses[key].events) _tripStatuses[key].events = {};
+        _tripStatuses[key].events['local_' + editEv.at] = editEv;
+        alert('Trip fields saved.');
+        openTripDetail(key);
+      });
     }
-    return window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', {
-      status: 'submitted',
-      submittedAt: Date.now(),
-      resubmittedAt: Date.now(),
-      resubmittedBy: cid
+    return afterEdit.then(function() {
+      return window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', {
+        status: 'submitted',
+        submittedAt: Date.now(),
+        resubmittedAt: Date.now(),
+        resubmittedBy: cid
+      });
     }).then(function() {
       if (!_tripStatuses[key]) _tripStatuses[key] = {};
       _tripStatuses[key].status = 'submitted';
-      alert('Saved and resubmitted to council.');
-      openTripDetail(key);
-      filterTrips();
+      var resubEv = { at: Date.now(), type: 'resubmitted', by: cid, byRole: 'owner', toStatus: 'submitted' };
+      return appendOwnerTripEvent(cid, key, resubEv).then(function() {
+        if (!_tripStatuses[key].events) _tripStatuses[key].events = {};
+        _tripStatuses[key].events['local_' + resubEv.at] = resubEv;
+        alert('Saved and resubmitted to council.');
+        openTripDetail(key);
+        filterTrips();
+      });
     });
   }).catch(function(e) {
     alert('Save failed: ' + (e && e.message ? e.message : e));
@@ -16049,6 +16162,44 @@ function saveTripEdits(resubmit) {
 }
 function resubmitTripFromModal() {
   saveTripEdits(true);
+}
+function archiveOwnerTrip() {
+  if (!_currentDetailKey) return;
+  var t = _tripsByKey[_currentDetailKey];
+  if (!t) return;
+  var st = getTripStatus(t);
+  if (st !== 'revision_needed') {
+    alert('Only trips returned for revision can be archived by the company.');
+    return;
+  }
+  if (!confirm('Archive this trip? Only the council or BookaWaka admin can restore it later.')) return;
+  var cid = window.COMPANY_ID;
+  var key = t._key;
+  var note = prompt('Optional archive note:', '') || '';
+  var patch = {
+    status: 'archived',
+    archivedAt: Date.now(),
+    archivedBy: cid,
+    archivedFromStatus: 'revision_needed',
+    archiveNote: String(note).trim() || null
+  };
+  window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', patch).then(function() {
+    if (!_tripStatuses[key]) _tripStatuses[key] = {};
+    Object.keys(patch).forEach(function(k) { _tripStatuses[key][k] = patch[k]; });
+    var ev = {
+      at: Date.now(), type: 'archived', by: cid, byRole: 'owner',
+      fromStatus: 'revision_needed', toStatus: 'archived', note: patch.archiveNote
+    };
+    return appendOwnerTripEvent(cid, key, ev).then(function() {
+      if (!_tripStatuses[key].events) _tripStatuses[key].events = {};
+      _tripStatuses[key].events['local_' + ev.at] = ev;
+      alert('Trip archived. Contact council or BookaWaka admin if you need it restored.');
+      openTripDetail(key);
+      filterTrips();
+    });
+  }).catch(function(e) {
+    alert('Archive failed: ' + (e && e.message ? e.message : e));
+  });
 }
 function closeTripDetail() {
   document.getElementById('tmd-overlay').classList.remove('open');
