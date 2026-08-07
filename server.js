@@ -15732,6 +15732,9 @@ function tmTripsPage(companyId) {
         <button id="tmd-approve-btn" class="tmd-approve-big" style="display:none" onclick="approveTripFromModal()">
           <i class="material-icons" style="font-size:16px">&#xE5CA;</i> Company Approve
         </button>
+        <button id="tmd-resubmit-btn" class="tmd-approve-big" style="display:none;background:#0d9488" onclick="resubmitTripFromModal()">
+          <i class="material-icons" style="font-size:16px">&#xE163;</i> Save &amp; Resubmit
+        </button>
         <button class="md-btn" onclick="closeTripDetail()">Close</button>
       </div>
     </div>
@@ -15769,7 +15772,11 @@ function fmtMoney(v) {
   return '$' + n.toFixed(2);
 }
 function statusBadge(st) {
-  var labels = { pending:'Pending', company_approved:'Co. Approved', submitted:'Submitted', approved:'Approved', paid:'Paid' };
+  var labels = {
+    pending:'Pending', company_approved:'Co. Approved', submitted:'Submitted',
+    approved:'Approved', paid:'Paid', revision_needed:'Needs Revision',
+    rejected:'Rejected', flagged:'Flagged'
+  };
   var cls = 'st-' + (st || 'default').replace(/[^a-z_]/g,'');
   return '<span class="st-badge ' + cls + '">' + (labels[st] || st || 'Unknown') + '</span>';
 }
@@ -15888,14 +15895,20 @@ function openTripDetail(key) {
   function row(label, val) {
     return '<div class="tmd-field"><label>' + label + '</label><span>' + (val || '—') + '</span></div>';
   }
+  function escAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  }
   var ms = _tmTs(t);
-  body.innerHTML =
+  var cardholder = t.tmCardName || (Array.isArray(t.tmPassengers) && t.tmPassengers[0] && t.tmPassengers[0].cardholderName) || t.tmPassengerName || t.passengerName || t.customerName || '';
+  var revNote = (_tripStatuses[t._key] || {}).revisionNote || (_tripStatuses[t._key] || {}).revisionNotes || t.revisionNote || '';
+  var html =
+    (st === 'revision_needed' && revNote ? '<div style="margin-bottom:12px;padding:10px 12px;background:#FFF8E1;border-left:4px solid #E65100;border-radius:6px;font-size:13px"><strong>Council returned for edit:</strong> ' + escAttr(revNote) + '</div>' : '') +
     '<div class="tmd-section">' +
       '<div class="tmd-section-title">Trip Info</div>' +
       '<div class="tmd-grid">' +
         row('Date', fmtDate(ms)) +
         row('Time', fmtTime(ms)) +
-        row('Passenger', t.tmPassengerName || t.passengerName || t.customerName) +
+        row('Passenger (cardholder)', cardholder) +
         row('Voucher No.', t.tmCardNumber || t.tmVoucherNo || t.voucherNumber) +
         row('Trip Category', t.tmTripCategory || t.tripCategory) +
         row('Driver', t.driverName || t.driver) +
@@ -15919,18 +15932,109 @@ function openTripDetail(key) {
         row('Flag Fall', fmtMoney(t.flagFallAmount || t.flagFall)) +
         row('Distance Cost', fmtMoney(t.distanceCost)) +
         row('Waiting Cost', fmtMoney(t.waitingCost || t.WaitingCost)) +
-        row('Meter Fare (total)', fmtMoney(t.totalFare || t.fare)) +
-        row('TM Subsidy (75%)', '<strong style="color:#0d9488">' + fmtMoney(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount) + '</strong>') +
+        row('Meter Fare (total)', fmtMoney(t.totalFare || t.fare || t.tmMeterFare)) +
+        row('TM Subsidy', '<strong style="color:#0d9488">' + fmtMoney(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount) + '</strong>') +
         row('Passenger Pays', fmtMoney(t.tmPassengerPays || t.passengerPays || t.patientPays)) +
         row('Payment Type', t.paymentType || t.payment_type) +
       '</div>' +
     '</div>';
+
+  if (st === 'revision_needed') {
+    html += '<div class="tmd-section" style="border:1px solid #FFE082;background:#FFFDE7;border-radius:8px;padding:12px">' +
+      '<div class="tmd-section-title" style="color:#E65100">Edit all fields (admin correction)</div>' +
+      '<div class="tmd-grid" id="tmd-edit-grid">' +
+      '<div class="tmd-field"><label>Passenger / cardholder</label><input id="te-tmCardName" value="' + escAttr(cardholder) + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Voucher / card no</label><input id="te-tmVoucherNo" value="' + escAttr(t.tmCardNumber || t.tmVoucherNo || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field" style="grid-column:1/-1"><label>Pickup</label><input id="te-pickupAddress" value="' + escAttr(t.pickupAddress || t.from || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field" style="grid-column:1/-1"><label>Dropoff</label><input id="te-dropAddress" value="' + escAttr(t.dropAddress || t.dropoffAddress || t.to || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Meter fare</label><input id="te-fare" type="number" step="0.01" value="' + escAttr(t.tmMeterFare || t.fare || t.totalFare || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Waiting</label><input id="te-waitingCost" type="number" step="0.01" value="' + escAttr(t.waitingCost || t.WaitingCost || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Meter subsidy</label><input id="te-tmSubsidyFare" type="number" step="0.01" value="' + escAttr(t.tmSubsidyFare || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Hoist (council)</label><input id="te-tmSubsidyHoist" type="number" step="0.01" value="' + escAttr(t.tmSubsidyHoist || t.hoistTotal || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Total council</label><input id="te-tmCouncilPays" type="number" step="0.01" value="' + escAttr(t.tmCouncilPays || t.tmSubsidy || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Passenger pays</label><input id="te-tmPassengerPays" type="number" step="0.01" value="' + escAttr(t.tmPassengerPays || t.passengerPays || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Distance km</label><input id="te-distanceKm" type="number" step="0.01" value="' + escAttr(t.distanceKm || t.distance || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Duration</label><input id="te-durationLabel" value="' + escAttr(t.durationLabel || t.duration || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Payment method</label><input id="te-paymentMethod" value="' + escAttr(t.paymentType || t.paymentMethod || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Trip category</label><input id="te-tmTripCategory" value="' + escAttr(t.tmTripCategory || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Driver</label><input id="te-driverName" value="' + escAttr(t.driverName || t.driver || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Vehicle / cab</label><input id="te-vehicleId" value="' + escAttr(t.vehicleId || t.vehicle || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '</div>' +
+      '<p style="font-size:12px;color:#666;margin:10px 0 0">Save updates the completed job. Resubmit sets status back to <strong>submitted</strong> for council review.</p>' +
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button type="button" class="md-btn md-btn-primary" onclick="saveTripEdits(false)">Save only</button>' +
+      '</div></div>';
+  }
+
+  body.innerHTML = html;
   var stRow = document.getElementById('tmd-status-row');
   stRow.innerHTML = '<span style="font-size:12px;color:#64748b;margin-right:6px">Status:</span>' + statusBadge(st);
   var appBtn = document.getElementById('tmd-approve-btn');
   appBtn.style.display = (st === 'pending') ? 'flex' : 'none';
   appBtn.disabled = false;
+  var resubBtn = document.getElementById('tmd-resubmit-btn');
+  if (resubBtn) resubBtn.style.display = (st === 'revision_needed') ? 'flex' : 'none';
   document.getElementById('tmd-overlay').classList.add('open');
+}
+function saveTripEdits(resubmit) {
+  if (!_currentDetailKey) return;
+  var t = _tripsByKey[_currentDetailKey];
+  if (!t) return;
+  var cid = window.COMPANY_ID;
+  var key = t._key;
+  function val(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : '';
+  }
+  var patch = {
+    tmCardName: val('te-tmCardName'),
+    tmPassengerName: val('te-tmCardName'),
+    tmVoucherNo: val('te-tmVoucherNo'),
+    tmCardNumber: val('te-tmVoucherNo'),
+    pickupAddress: val('te-pickupAddress'),
+    dropAddress: val('te-dropAddress'),
+    fare: parseFloat(val('te-fare')) || 0,
+    tmMeterFare: parseFloat(val('te-fare')) || 0,
+    waitingCost: parseFloat(val('te-waitingCost')) || 0,
+    tmSubsidyFare: parseFloat(val('te-tmSubsidyFare')) || 0,
+    tmSubsidyHoist: parseFloat(val('te-tmSubsidyHoist')) || 0,
+    tmCouncilPays: parseFloat(val('te-tmCouncilPays')) || 0,
+    tmSubsidy: parseFloat(val('te-tmCouncilPays')) || 0,
+    tmPassengerPays: parseFloat(val('te-tmPassengerPays')) || 0,
+    distanceKm: parseFloat(val('te-distanceKm')) || 0,
+    durationLabel: val('te-durationLabel'),
+    paymentType: val('te-paymentMethod'),
+    paymentMethod: val('te-paymentMethod'),
+    tmTripCategory: val('te-tmTripCategory'),
+    driverName: val('te-driverName'),
+    vehicleId: val('te-vehicleId'),
+    updatedAt: Date.now()
+  };
+  window.adminWrite('completedJobs/' + cid + '/' + key, 'PATCH', patch).then(function() {
+    Object.keys(patch).forEach(function(k) { t[k] = patch[k]; });
+    if (!resubmit) {
+      alert('Trip fields saved.');
+      openTripDetail(key);
+      return;
+    }
+    return window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', {
+      status: 'submitted',
+      submittedAt: Date.now(),
+      resubmittedAt: Date.now(),
+      resubmittedBy: cid
+    }).then(function() {
+      if (!_tripStatuses[key]) _tripStatuses[key] = {};
+      _tripStatuses[key].status = 'submitted';
+      alert('Saved and resubmitted to council.');
+      openTripDetail(key);
+      filterTrips();
+    });
+  }).catch(function(e) {
+    alert('Save failed: ' + (e && e.message ? e.message : e));
+  });
+}
+function resubmitTripFromModal() {
+  saveTripEdits(true);
 }
 function closeTripDetail() {
   document.getElementById('tmd-overlay').classList.remove('open');
@@ -15948,7 +16052,7 @@ function exportCsv() {
     rows.push([
       esc(fmtDate(ms)),
       esc(fmtTime(ms)),
-      esc(t.tmPassengerName || t.passengerName || t.customerName),
+      esc(t.tmCardName || t.tmPassengerName || t.passengerName || t.customerName),
       esc(t.tmCardNumber || t.tmVoucherNo || t.voucherNumber),
       esc(t.driverName || t.driver),
       esc(t.vehicleId || t.vehiclePlate || t.vehicle),
