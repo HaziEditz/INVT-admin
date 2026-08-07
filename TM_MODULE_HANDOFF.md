@@ -2,6 +2,8 @@
 
 Paste this entire document to your Replit AI agent. It contains everything needed to rebuild the TM module.
 
+> **Owner panel clarity / redesign:** See [`OWNER_PANEL_CLARITY.md`](./OWNER_PANEL_CLARITY.md) — includes clear, consistent **payment-type trip visibility** (Account / ACC / Card / TM) as part of the same TM admin simplification effort.
+
 ---
 
 ## 1. What This Module Is

@@ -3272,8 +3272,20 @@ function startListeners() {
           var status = String(j.status || j.Status || 'completed').toLowerCase();
           if (status.indexOf('cancel') !== -1) { totals.cancelled++; return; }
           totals.completed++;
-          var bt = String(j.bookingType || j.jobType || j.JobType || 'taxi').toLowerCase();
-          if (bt.indexOf('tm') !== -1 || bt.indexOf('mobility') !== -1) totals.tm++;
+          // Align with TM Trip History / council: economics markers, not bookingType alone.
+          if ((function(job){
+            if (!job || typeof job !== 'object') return false;
+            if (job.isTotalMobility === true || job.tmUsed === true) return true;
+            var pt = String(job.paymentType || job.payment_type || job.PaymentType || job.paymentMethod || '')
+              .toLowerCase().replace(/[_\s-]/g, '');
+            if (pt === 'totalmobility' || pt === 'tm') return true;
+            if (job.tmPaymentType === 'total_mobility' || job.paymentCategory === 'total_mobility') return true;
+            if (job.tmCouncilPays != null || job.councilPays != null || job.tmSubsidyFare != null || job.tmSubsidy != null) return true;
+            if (job.tmCardNumber || job.tmVoucherNo) return true;
+            if (Array.isArray(job.tmHoists) && job.tmHoists.length > 0) return true;
+            var bt = String(job.bookingType || job.jobType || job.JobType || '').toLowerCase();
+            return bt.indexOf('tm') !== -1 || bt.indexOf('mobility') !== -1;
+          })(j)) totals.tm++;
           var src = String(j.source || j.bookingSource || j.BookingSource || j.via || j.Via || '').toLowerCase();
           if (src.indexOf('passenger') !== -1 || src.indexOf('app') !== -1) totals.pasapp++;
           if (src.indexOf('web') !== -1 || src === 'website' || src.indexOf('website') !== -1) totals.website++;
@@ -12454,7 +12466,7 @@ function flattenJoback(data){
                 ||j.fareAmount||j.RideCost||j.rideCost||j.Amount||j.amount||j.totalFare
                 ||j.DriverCost||j.driverCost||j.price||j.Price||null;
       var fareNum=parseFloat(fareRaw)||0;
-      var payMethod=ss(j.paymentMethod||j.PaymentMethod||j.payment||j.Payment||j.payType,'—');
+      var payMethod=ss(j.paymentMethod||j.PaymentMethod||j.payment||j.Payment||j.payType||j.paymentType||j.PaymentType,'—');
       var distRaw=j.distanceKm||j.DistanceKm||j.distance||j.Distance||j.km||j.kilometres||j.kilometers||j.totalDistance||j.meterDistance||null;
       var distStr=distRaw?(parseFloat(distRaw).toFixed(1)+' km'):'—';
       var durRaw=j.durationMin||j.DurationMin||j.durationLabel||j.DurationLabel||j.duration||j.Duration||j.minutes||null;
@@ -13184,15 +13196,22 @@ function loadReport(){
           });
         } else if(RTYPE==='accreport'){
           flat=flat.filter(function(r){
-            var pm=(r.paymentMethod||r.payMethod||'').toLowerCase().replace(/[_\\s-]/g,'');
+            var pm=(r.paymentMethod||r.payMethod||r.paymentType||'').toLowerCase().replace(/[_\\s-]/g,'');
             return pm==='account'||pm.indexOf('account')!==-1;
           });
         } else if(RTYPE==='totalmobility'){
           flat=flat.filter(function(r){
+            // Same detection as TM Trip History (Cash/Card remainder still counts).
+            if (!r || typeof r !== 'object') return false;
+            if (r.isTotalMobility === true || r.tmUsed === true) return true;
             var pm=(r.paymentMethod||r.payMethod||r.paymentType||'').toLowerCase().replace(/[_\\s-]/g,'');
+            if (pm==='totalmobility'||pm==='tm') return true;
+            if (r.tmPaymentType === 'total_mobility' || r.paymentCategory === 'total_mobility') return true;
+            if (r.tmCouncilPays != null || r.councilPays != null || r.tmSubsidyFare != null || r.tmSubsidy != null) return true;
+            if (r.tmCardNumber || r.tmVoucherNo) return true;
+            if (Array.isArray(r.tmHoists) && r.tmHoists.length > 0) return true;
             var bt=(r.bookingType||r.serviceType||r.jobType||'').toLowerCase();
-            return pm==='totalmobility'||pm==='tm'||pm==='total_mobility'
-              ||bt.indexOf('tm')!==-1||bt.indexOf('mobility')!==-1;
+            return bt.indexOf('tm')!==-1||bt.indexOf('mobility')!==-1;
           });
         }
         if(RTYPE==='carreports'){
@@ -13350,11 +13369,15 @@ var _rptLastAt=0;
 function _rptTick(){var s=Math.round((Date.now()-_rptLastAt)/1000);var el=document.getElementById('rpt-since');if(el)el.textContent=s<5?'just now':s<60?s+'s ago':Math.floor(s/60)+'m ago';}
 window._fbOnLogin = function(){
   if(RTYPE==='accreport'){
+    // Default to current calendar month (not today-only) so Account trips are findable.
     var _tz=window.COMPANY_TZ||'Pacific/Auckland';
-    var _td=new Date().toLocaleDateString('en-CA',{timeZone:_tz});
+    var _ds=new Date().toLocaleDateString('en-CA',{timeZone:_tz});
+    var _p=_ds.split('-');var _y=parseInt(_p[0],10),_m=parseInt(_p[1],10);
+    var _mStr=String(_m).padStart(2,'0');
+    var _last=new Date(_y,_m,0).getDate();
     var ef=document.getElementById('rpt-from');var et=document.getElementById('rpt-to');
-    if(ef&&!ef.value)ef.value=_td;
-    if(et&&!et.value)et.value=_td;
+    if(ef&&!ef.value)ef.value=_y+'-'+_mStr+'-01';
+    if(et&&!et.value)et.value=_y+'-'+_mStr+'-'+String(_last).padStart(2,'0');
   }
   loadReport();
   setInterval(_rptTick,1000);
@@ -14986,7 +15009,8 @@ function babLoad(){
   Promise.all([
     adminRead('businessAccounts/'+_babCID),
     adminRead('completedJobs/'+_babCID),
-    adminRead('allbookings/'+_babCID)
+    adminRead('allbookings/'+_babCID),
+    adminRead('closedJobs/'+_babCID)
   ]).then(function(results){
     var accts=results[0]||{};
     _babAccts=accts;
@@ -15004,14 +15028,22 @@ function babLoad(){
     var jobs=[];
 
     function isAccountJob(j){
-      var pm=(j.paymentMethod||j.PaymentMethod||j.payment||j.payType||j.paymentType||'').toLowerCase().replace(/[_\\s-]/g,'');
+      var pm=(j.paymentMethod||j.PaymentMethod||j.payment||j.payType||j.paymentType||j.PaymentType||'').toLowerCase().replace(/[_\\s-]/g,'');
       return pm==='account'||pm.indexOf('account')!==-1;
     }
 
     function resolveAcct(j){
-      if(j.businessAccountId&&accts[j.businessAccountId]) return j.businessAccountId;
+      var idCandidates=[j.businessAccountId,j.accountId,j.Account_id,j.AccountId,j.jobAccountId];
+      for(var i=0;i<idCandidates.length;i++){
+        var id=idCandidates[i];
+        if(id!=null&&id!==''&&accts[id]) return String(id);
+      }
       if(j.accountCode&&keyByCode[String(j.accountCode).toUpperCase()]) return keyByCode[String(j.accountCode).toUpperCase()];
-      if(j.accountNumber&&keyByNum[String(j.accountNumber)]) return keyByNum[String(j.accountNumber)];
+      var numCandidates=[j.accountNumber,j.Account_Number,j.AccountNumber,j.accountId,j.Account_id,j.AccountId,j.jobAccountId];
+      for(var n=0;n<numCandidates.length;n++){
+        var num=numCandidates[n];
+        if(num!=null&&num!==''&&keyByNum[String(num)]) return keyByNum[String(num)];
+      }
       return '__unmatched__';
     }
 
@@ -15051,6 +15083,17 @@ function babLoad(){
       var isFlat=vals.length>0&&vals.every(function(v){return v===null||typeof v!=='object';});
       if(isFlat){ pushJob(id,entry,'allbookings'); }
       else { Object.values(entry).forEach(function(j){ if(j&&typeof j==='object') pushJob(id,j,'allbookings'); }); }
+    });
+
+    // Source 3: closedJobs (driver primary write; skip duplicates)
+    var closed=results[3]||{};
+    Object.keys(closed).forEach(function(id){
+      if(seenIds[id]) return;
+      var j=closed[id];
+      if(!j||typeof j!=='object') return;
+      var bid=String(j.bookingId||j.jobId||j.BookingId||id);
+      if(seenIds[bid]) return;
+      pushJob(bid,j,'closedJobs');
     });
 
     if(!jobs.length){
@@ -15881,13 +15924,61 @@ function isOwnerTmCompletedJob(j) {
   if (Array.isArray(j.tmHoists) && j.tmHoists.length > 0) return true;
   return false;
 }
+function _tmJobRecordId(k, j) {
+  return String((j && (j.bookingId || j.jobId || j.BookingId)) || k);
+}
+function mergeOwnerTmJobMap(completedJobs, closedJobs, statusData) {
+  var map = {};
+  function absorb(data) {
+    if (!data || typeof data !== 'object') return;
+    Object.keys(data).forEach(function(k) {
+      var j = data[k];
+      if (!j || typeof j !== 'object') return;
+      var vals = Object.values(j);
+      var looksNested = vals.length > 0 && vals.every(function(v) {
+        return v !== null && typeof v === 'object' && !Array.isArray(v);
+      });
+      if (looksNested && !(j.paymentType || j.paymentMethod || j.isTotalMobility || j.tmUsed || j.fare != null || j.totalFare != null)) {
+        Object.keys(j).forEach(function(dk) {
+          var inner = j[dk];
+          if (!inner || typeof inner !== 'object') return;
+          var id = _tmJobRecordId(k, inner);
+          if (!map[id]) map[id] = { _key: id };
+          Object.assign(map[id], inner);
+          map[id]._key = id;
+        });
+        return;
+      }
+      var id = _tmJobRecordId(k, j);
+      if (!map[id]) map[id] = { _key: id };
+      Object.assign(map[id], j);
+      map[id]._key = id;
+    });
+  }
+  absorb(completedJobs);
+  absorb(closedJobs);
+  Object.keys(statusData || {}).forEach(function(k) {
+    var st = statusData[k];
+    if (!st || typeof st !== 'object') return;
+    if (!map[k]) map[k] = { _key: k };
+    if (st.status) map[k].tmStatus = st.status;
+    if (st.councilId && !map[k].councilId) map[k].councilId = st.councilId;
+    if (st.isTotalMobility) map[k].isTotalMobility = true;
+    if (st.tmCouncilPays != null && map[k].tmCouncilPays == null) map[k].tmCouncilPays = st.tmCouncilPays;
+    if (st.tmPassengerPays != null && map[k].tmPassengerPays == null) map[k].tmPassengerPays = st.tmPassengerPays;
+    if (st.tmCardNumber && !map[k].tmCardNumber) map[k].tmCardNumber = st.tmCardNumber;
+    if (st.submittedAt && map[k].completedAt == null) map[k].completedAt = st.submittedAt;
+    map[k]._key = k;
+  });
+  return map;
+}
 function extractTmTrips(jobsData) {
   var trips = [];
-  Object.keys(jobsData).forEach(function(k) {
+  Object.keys(jobsData || {}).forEach(function(k) {
     var j = jobsData[k];
     if (!j) return;
     if (!isOwnerTmCompletedJob(j)) return;
-    j._key = k;
+    j._key = j._key || k;
     trips.push(j);
   });
   return trips;
@@ -15898,17 +15989,20 @@ function loadTrips() {
   var loadEl = document.getElementById('tm-trips-loading');
   Promise.all([
     window.adminRead('completedJobs/' + cid),
+    window.adminRead('closedJobs/' + cid).catch(function(){ return {}; }),
     window.adminRead('tmTripStatus/' + cid)
   ]).then(function(results) {
     var jobsData = results[0] || {};
-    var statusData = results[1] || {};
+    var closedData = results[1] || {};
+    var statusData = results[2] || {};
     _tripStatuses = statusData;
-    var trips = extractTmTrips(jobsData);
-    // If completedJobs is empty, try joback as a fallback
-    if (!trips.length && !Object.keys(jobsData).length) {
+    var merged = mergeOwnerTmJobMap(jobsData, closedData, statusData);
+    var trips = extractTmTrips(merged);
+    // If still empty and completedJobs root empty, try joback as a fallback
+    if (!trips.length && !Object.keys(jobsData).length && !Object.keys(closedData).length) {
       return window.adminRead('joback',{limitToLast:500}).then(function(allJobs) {
         allJobs = allJobs || {};
-        var fallbackTrips = extractTmTrips(allJobs);
+        var fallbackTrips = extractTmTrips(mergeOwnerTmJobMap(allJobs, {}, statusData));
         if (fallbackTrips.length) {
           var note = document.getElementById('tm-source-note');
           note.textContent = 'ℹ Data loaded from legacy joback path — no completedJobs/' + cid + ' data found yet.';
