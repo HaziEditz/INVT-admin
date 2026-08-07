@@ -174,5 +174,19 @@ test('owner clarity review tracks payment-type visibility', () => {
   assert.match(doc, /Account/);
   assert.match(doc, /ACC/);
   assert.match(doc, /TM/);
+  assert.match(doc, /Card/);
+  assert.match(doc, /EFTPOS/);
   assert.match(doc, /TM admin redesign/i);
+});
+
+test('dashboard Card Payments tile is not a dead CardCommission link', () => {
+  const src = readFileSync(join(root, 'server.js'), 'utf8');
+  assert.match(src, /ClosedJobsReports\.aspx\?pay=card/);
+  assert.doesNotMatch(
+    src,
+    /key:'cardpay'[\s\S]{0,80}href:'CardCommission\.aspx'/,
+  );
+  assert.match(src, /var _rptPayQ=/);
+  assert.match(src, /Dashboard Card Payments tile deep-link/);
+  assert.match(src, /window\.isCardPaymentMethod/);
 });

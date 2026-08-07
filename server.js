@@ -3225,7 +3225,8 @@ function startListeners() {
     var fleetDefs = [
       { key:'drivers',    label:'Drivers (Roster)',    href:'Drivers.aspx' },
       { key:'vehicles',   label:'Total Vehicles',      href:'Cars.aspx' },
-      { key:'cardpay',    label:'Card Payments',       href:'CardCommission.aspx' },
+      // Temporary: no Card summary page yet — Closed Jobs with ?pay=card until redesign.
+      { key:'cardpay',    label:'Card Payments',       href:'ClosedJobsReports.aspx?pay=card' },
       { key:'zones',      label:'Zones',               href:'Zones.aspx' }
     ];
 
@@ -12896,6 +12897,8 @@ function showStats(rows){
   wrap.style.display='';
 }
 
+var _rptPayQ='';
+try{ _rptPayQ=String((new URLSearchParams(window.location.search||'')).get('pay')||'').trim().toLowerCase(); }catch(e){}
 function getFilteredRows(){
   var q=ss((document.getElementById('rpt-search')||{}).value,'').toLowerCase();
   var st=((document.getElementById('rpt-status')||{}).value||'').toLowerCase();
@@ -12912,6 +12915,19 @@ function getFilteredRows(){
   if(vehFilter) rows=rows.filter(function(r){return (r.vehicleId||r.taxi||r.vehicle||'')=== vehFilter;});
   if(fromTs) rows=rows.filter(function(r){return r._ts&&r._ts>=fromTs;});
   if(toTs) rows=rows.filter(function(r){return r._ts&&r._ts<=toTs;});
+  // Dashboard Card Payments tile deep-link: ClosedJobsReports.aspx?pay=card
+  if(_rptPayQ){
+    rows=rows.filter(function(r){
+      var pm=r.paymentMethod||r.payMethod||r.paymentType||'';
+      if(_rptPayQ==='card'||_rptPayQ==='eftpos'){
+        return typeof window.isCardPaymentMethod==='function'
+          ? window.isCardPaymentMethod(pm)
+          : /card|eftpos|stripe|visa|master|amex|debit|credit/i.test(String(pm));
+      }
+      var needle=_rptPayQ.replace(/[_\s-]/g,'');
+      return String(pm).toLowerCase().replace(/[_\s-]/g,'').indexOf(needle)!==-1;
+    });
+  }
   return rows;
 }
 
