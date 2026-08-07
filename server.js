@@ -15996,74 +15996,22 @@ function extractTmTrips(jobsData) {
   return trips;
 }
 var NZ_TZ = window.COMPANY_TZ || window.NZ_TZ || 'Pacific/Auckland';
-function _tmDebugShow(obj) {
-  try {
-    var el = document.getElementById('tm-live-debug');
-    if (!el) {
-      el = document.createElement('pre');
-      el.id = 'tm-live-debug';
-      el.style.cssText = 'margin:12px 0;padding:12px;background:#0f172a;color:#e2e8f0;font-size:11px;border-radius:8px;max-height:280px;overflow:auto;white-space:pre-wrap';
-      var host = document.querySelector('.tm-wrap') || document.body;
-      host.insertBefore(el, host.firstChild.nextSibling);
-    }
-    el.textContent = '[TM DEBUG] ' + JSON.stringify(obj, null, 2);
-  } catch (e) {}
-  try { console.log('[TM DEBUG]', obj); } catch (e2) {}
-  try {
-    if (window.adminWrite) {
-      window.adminWrite('tmpDebug/ownerTmMerge/' + (window.COMPANY_ID || 'unknown'), 'PUT', Object.assign({ at: Date.now() }, obj)).catch(function(){});
-    }
-  } catch (e3) {}
-}
 function loadTrips() {
   var cid = window.COMPANY_ID;
   if (!cid) { setTimeout(loadTrips, 400); return; }
   NZ_TZ = window.COMPANY_TZ || window.NZ_TZ || NZ_TZ || 'Pacific/Auckland';
   var loadEl = document.getElementById('tm-trips-loading');
-  _tmDebugShow({ phase: 'load-start', cid: cid, nzTz: String(NZ_TZ), hasAdminRead: typeof window.adminRead === 'function' });
   Promise.all([
     window.adminRead('completedJobs/' + cid),
-    window.adminRead('closedJobs/' + cid).catch(function(err){ return { __readError: String(err && err.message || err) }; }),
+    window.adminRead('closedJobs/' + cid).catch(function(){ return {}; }),
     window.adminRead('tmTripStatus/' + cid)
   ]).then(function(results) {
     var jobsData = results[0] || {};
     var closedData = results[1] || {};
     var statusData = results[2] || {};
-    var closedErr = closedData && closedData.__readError ? closedData.__readError : null;
-    if (closedErr) closedData = {};
     _tripStatuses = statusData;
     var merged = mergeOwnerTmJobMap(jobsData, closedData, statusData);
     var trips = extractTmTrips(merged);
-    var tmish = [];
-    Object.keys(jobsData).forEach(function(k){
-      var j = jobsData[k];
-      if (j && (j.isTotalMobility || j.tmUsed || j.tmCouncilPays != null || String(j.paymentType||'').toLowerCase()==='tm')) tmish.push(k);
-    });
-    _tmDebugShow({
-      phase: 'merge-result',
-      cid: cid,
-      counts: {
-        completedJobs: Object.keys(jobsData).length,
-        closedJobs: Object.keys(closedData).length,
-        tmTripStatus: Object.keys(statusData || {}).length,
-        merged: Object.keys(merged).length,
-        extracted: trips.length,
-        completedTmishKeys: tmish.length
-      },
-      closedErr: closedErr,
-      statusKeys: Object.keys(statusData || {}),
-      completedTmishSample: tmish.slice(0, 8),
-      extractedKeys: trips.map(function(t){ return t._key; }).slice(0, 12),
-      sampleMergedHas8074: !!(merged['8692608074']),
-      job8074: jobsData['8692608074'] ? {
-        paymentType: jobsData['8692608074'].paymentType,
-        isTotalMobility: jobsData['8692608074'].isTotalMobility,
-        tmUsed: jobsData['8692608074'].tmUsed,
-        tmCouncilPays: jobsData['8692608074'].tmCouncilPays,
-        completedAt: jobsData['8692608074'].completedAt
-      } : null,
-      isOwner8074: jobsData['8692608074'] ? isOwnerTmCompletedJob(jobsData['8692608074']) : null
-    });
     // If still empty and completedJobs root empty, try joback as a fallback
     if (!trips.length && !Object.keys(jobsData).length && !Object.keys(closedData).length) {
       return window.adminRead('joback',{limitToLast:500}).then(function(allJobs) {
@@ -16086,15 +16034,7 @@ function loadTrips() {
     loadEl.style.display = 'none';
     populateMonthFilter(trips);
     filterTrips();
-    _tmDebugShow({
-      phase: 'render-done',
-      allTrips: trips.length,
-      filtered: (_filteredTrips || []).length,
-      monthFilter: (document.getElementById('tm-month-filter') || {}).value || '',
-      nzTz: String(NZ_TZ)
-    });
   }).catch(function(e) {
-    _tmDebugShow({ phase: 'error', message: String(e && e.message || e), stack: String(e && e.stack || '').slice(0, 500) });
     loadEl.innerHTML = '<span style="color:#dc2626">Failed to load trips: ' + e.message + '</span>';
   });
 }
