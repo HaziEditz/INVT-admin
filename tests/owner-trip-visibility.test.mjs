@@ -187,6 +187,30 @@ test('dashboard Card Payments tile is not a dead CardCommission link', () => {
     /key:'cardpay'[\s\S]{0,80}href:'CardCommission\.aspx'/,
   );
   assert.match(src, /var _rptPayQ=/);
-  assert.match(src, /Dashboard Card Payments tile deep-link/);
-  assert.match(src, /window\.isCardPaymentMethod/);
+  assert.match(src, /Payments sidebar \/ dashboard deep-link/);
+});
+
+test('sidebar Payments section links Card EFTPOS Cash to Closed Jobs filters', () => {
+  const src = readFileSync(join(root, 'server.js'), 'utf8');
+  assert.match(src, /title="Payments"/);
+  assert.match(src, /menu_title">Payments</);
+  assert.match(
+    src,
+    /ClosedJobsReports\.aspx\?pay=card">Card Payments</,
+  );
+  assert.match(
+    src,
+    /ClosedJobsReports\.aspx\?pay=eftpos">EFTPOS Payments</,
+  );
+  assert.match(
+    src,
+    /ClosedJobsReports\.aspx\?pay=cash">Cash Payments</,
+  );
+  // Distinct filters (not lumping card+eftpos via isCardPaymentMethod)
+  assert.match(src, /if\(_rptPayQ==='card'\)/);
+  assert.match(src, /if\(_rptPayQ==='eftpos'\) return pm\.indexOf\('eftpos'\)/);
+  assert.match(src, /if\(_rptPayQ==='cash'\) return pm\.indexOf\('cash'\)/);
+  // Active nav prefers ?pay= deep-links over bare Closed Jobs
+  assert.match(src, /hasPayFilter/);
+  assert.match(src, /Bare Closed Jobs link stays inactive/);
 });

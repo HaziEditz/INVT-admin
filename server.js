@@ -753,12 +753,24 @@ $(function(){
     altair_forms.parsley_extra_validators();
   }
   var path=window.location.pathname.replace(/.*\\//,'').toLowerCase().split('?')[0];
+  var search=(window.location.search||'').toLowerCase();
+  var hasPayFilter=/[?&]pay=/.test(search);
   $('#sidebar_main a').each(function(){
     var h=$(this).attr('href');
-    if(h && h.toLowerCase().split('?')[0]===path){
-      $(this).closest('li').addClass('active_section');
-      $(this).closest('ul').closest('li').addClass('active_section');
+    if(!h) return;
+    var hLow=h.toLowerCase();
+    var hPath=hLow.split('?')[0];
+    if(hPath!==path) return;
+    if(hLow.indexOf('?')!==-1){
+      // Query-bearing links (e.g. ClosedJobsReports.aspx?pay=card) must match search.
+      var hQ=hLow.split('?')[1]||'';
+      if(search.indexOf(hQ)===-1) return;
+    } else if(hasPayFilter){
+      // Bare Closed Jobs link stays inactive when a ?pay= deep-link is active.
+      return;
     }
+    $(this).closest('li').addClass('active_section');
+    $(this).closest('ul').closest('li').addClass('active_section');
   });
 });
 </script>
@@ -1754,6 +1766,14 @@ function sidebarHTML() {
         <li><a href="BusinessAccountBilling.aspx">Monthly Invoicing</a></li>
         <li><a href="AccClients.aspx">ACC Clients</a></li>
         <li><a href="AccBilling.aspx">ACC Billing</a></li>
+      </ul>
+    </li>
+    <li class="current_section" title="Payments"><a><span class="menu_icon"><i class="material-icons">&#xE870;</i></span><span class="menu_title">Payments</span></a>
+      <ul>
+        <!-- Temporary: Closed Jobs ?pay= filters until dedicated Card/EFTPOS/Cash summary pages exist. -->
+        <li><a href="ClosedJobsReports.aspx?pay=card">Card Payments</a></li>
+        <li><a href="ClosedJobsReports.aspx?pay=eftpos">EFTPOS Payments</a></li>
+        <li><a href="ClosedJobsReports.aspx?pay=cash">Cash Payments</a></li>
       </ul>
     </li>
   </ul></div>
@@ -12899,6 +12919,16 @@ function showStats(rows){
 
 var _rptPayQ='';
 try{ _rptPayQ=String((new URLSearchParams(window.location.search||'')).get('pay')||'').trim().toLowerCase(); }catch(e){}
+// Sidebar Payments + dashboard tile deep-links: ClosedJobsReports.aspx?pay=card|eftpos|cash
+(function(){
+  if(!_rptPayQ) return;
+  var labels={card:'Card Payments',eftpos:'EFTPOS Payments',cash:'Cash Payments'};
+  var label=labels[_rptPayQ];
+  if(!label) return;
+  var h=document.getElementById('rpt-heading');
+  if(h) h.textContent=label;
+  try{ document.title=label+' — BookaWaka'; }catch(e){}
+})();
 function getFilteredRows(){
   var q=ss((document.getElementById('rpt-search')||{}).value,'').toLowerCase();
   var st=((document.getElementById('rpt-status')||{}).value||'').toLowerCase();
@@ -12915,17 +12945,21 @@ function getFilteredRows(){
   if(vehFilter) rows=rows.filter(function(r){return (r.vehicleId||r.taxi||r.vehicle||'')=== vehFilter;});
   if(fromTs) rows=rows.filter(function(r){return r._ts&&r._ts>=fromTs;});
   if(toTs) rows=rows.filter(function(r){return r._ts&&r._ts<=toTs;});
-  // Dashboard Card Payments tile deep-link: ClosedJobsReports.aspx?pay=card
+  // Payments sidebar / dashboard deep-link: ClosedJobsReports.aspx?pay=card|eftpos|cash
   if(_rptPayQ){
     rows=rows.filter(function(r){
-      var pm=r.paymentMethod||r.payMethod||r.paymentType||'';
-      if(_rptPayQ==='card'||_rptPayQ==='eftpos'){
-        return typeof window.isCardPaymentMethod==='function'
-          ? window.isCardPaymentMethod(pm)
-          : /card|eftpos|stripe|visa|master|amex|debit|credit/i.test(String(pm));
+      var pm=String(r.paymentMethod||r.payMethod||r.paymentType||'').toLowerCase().replace(/[_\s-]/g,'');
+      if(_rptPayQ==='card'){
+        if(pm.indexOf('eftpos')!==-1) return false;
+        return pm.indexOf('card')!==-1 || pm.indexOf('stripe')!==-1
+          || pm.indexOf('visa')!==-1 || pm.indexOf('master')!==-1
+          || pm.indexOf('amex')!==-1 || pm.indexOf('debit')!==-1
+          || pm.indexOf('credit')!==-1;
       }
+      if(_rptPayQ==='eftpos') return pm.indexOf('eftpos')!==-1;
+      if(_rptPayQ==='cash') return pm.indexOf('cash')!==-1;
       var needle=_rptPayQ.replace(/[_\s-]/g,'');
-      return String(pm).toLowerCase().replace(/[_\s-]/g,'').indexOf(needle)!==-1;
+      return pm.indexOf(needle)!==-1;
     });
   }
   return rows;
