@@ -15778,6 +15778,8 @@ function tmTripsPage(companyId) {
             <th>Driver / Vehicle</th>
             <th>Fare</th>
             <th>TM Subsidy</th>
+            <th>Hoist $</th>
+            <th>Uses</th>
             <th>Pax Pays</th>
             <th>Km / Wait</th>
             <th>Voucher</th>
@@ -15832,6 +15834,23 @@ function _tmTs(t) {
   var iso = t.completedAt_ISO || t.completedAt || t.startedAt_ISO || t.startedAt;
   if (iso) { var d = new Date(iso); if (!isNaN(d)) return d.getTime(); }
   return 0;
+}
+function _tmHoistPays(t) {
+  return parseFloat(t.tmSubsidyHoist != null ? t.tmSubsidyHoist : (t.hoistTotal != null ? t.hoistTotal : (t.hoistCost || 0))) || 0;
+}
+function _tmHoistUses(t) {
+  if (Array.isArray(t.tmHoists) && t.tmHoists.length) return t.tmHoists.length;
+  var counted = parseInt(String(t.tmHoistCount != null ? t.tmHoistCount : (t.hoistCount != null ? t.hoistCount : t.hoistUsed)), 10);
+  if (isFinite(counted) && counted > 0) return counted;
+  return _tmHoistPays(t) > 0 ? 1 : 0;
+}
+function _tmHoistLines(t) {
+  if (Array.isArray(t.tmHoists) && t.tmHoists.length) {
+    return t.tmHoists.map(function(h, i) {
+      return 'Hoist ' + (i + 1) + ' · card ' + (h.cardNumber || '—') + ' · $' + (parseFloat(h.amount || 0) || 0).toFixed(2);
+    }).join('<br>');
+  }
+  return '';
 }
 function fmtDate(ts) {
   if (!ts) return '—';
@@ -15989,13 +16008,15 @@ function renderTrips(trips) {
     wrap.style.display = 'none'; empty.style.display = 'block'; totalsBar.style.display = 'none'; return;
   }
   wrap.style.display = 'block'; empty.style.display = 'none';
-  var totalFare = 0, totalTm = 0;
+  var totalFare = 0, totalTm = 0, totalHoist = 0, totalUses = 0;
   tbody.innerHTML = trips.map(function(t) {
     var ms = _tmTs(t);
     var fare = parseFloat(t.totalFare || t.fare || 0);
     var tmAmt = parseFloat(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount || 0);
     var paxPays = parseFloat(t.tmPassengerPays || t.passengerPays || t.patientPays || 0);
-    totalFare += fare; totalTm += tmAmt;
+    var hoistAmt = _tmHoistPays(t);
+    var uses = _tmHoistUses(t);
+    totalFare += fare; totalTm += tmAmt; totalHoist += hoistAmt; totalUses += uses;
     var st = getTripStatus(t);
     var passenger = t.tmPassengerName || t.passengerName || t.customerName || '—';
     var dropoff = t.dropAddress || t.dropoffAddress || t.to || '—';
@@ -16015,6 +16036,8 @@ function renderTrips(trips) {
       '<td style="font-size:11px;line-height:1.4">' + driver + '<br><span style="color:#94a3b8">' + vehicle + '</span></td>' +
       '<td>' + fmtMoney(fare) + '</td>' +
       '<td style="font-weight:700;color:#0d9488">' + fmtMoney(tmAmt) + '</td>' +
+      '<td style="color:#1565C0">' + (hoistAmt > 0 ? fmtMoney(hoistAmt) : '—') + '</td>' +
+      '<td>' + (uses > 0 ? uses : '—') + '</td>' +
       '<td>' + fmtMoney(paxPays) + '</td>' +
       '<td style="font-size:11px;color:#64748b">' + km + '<br>' + wait + '</td>' +
       '<td style="font-size:11px;font-family:monospace">' + voucher + '</td>' +
@@ -16026,6 +16049,7 @@ function renderTrips(trips) {
   totalsBar.innerHTML =
     '<div class="tm-total-item"><div class="label">Trip Count</div><div class="value">' + trips.length + '</div></div>' +
     '<div class="tm-total-item"><div class="label">Total Fare</div><div class="value">' + fmtMoney(totalFare) + '</div></div>' +
+    '<div class="tm-total-item"><div class="label">Hoist $ / Uses</div><div class="value" style="color:#1565C0">' + fmtMoney(totalHoist) + ' / ' + totalUses + '</div></div>' +
     '<div class="tm-total-item"><div class="label">Total TM Claim Amount</div><div class="value" style="color:#0d9488">' + fmtMoney(totalTm) + '</div></div>';
 }
 function approveTrip(key) {
@@ -16139,7 +16163,10 @@ function openTripDetail(key) {
         row('Distance Cost', fmtMoney(t.distanceCost)) +
         row('Waiting Cost', fmtMoney(t.waitingCost || t.WaitingCost)) +
         row('Meter Fare (total)', fmtMoney(t.totalFare || t.fare || t.tmMeterFare)) +
-        row('TM Subsidy', '<strong style="color:#0d9488">' + fmtMoney(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount) + '</strong>') +
+        row('Line 1 — Meter subsidy', fmtMoney(t.tmSubsidyFare || '')) +
+        row('Line 2 — Hoist (council)', '<strong style="color:#1565C0">' + fmtMoney(_tmHoistPays(t)) + '</strong>' + (_tmHoistUses(t) ? ' · ' + _tmHoistUses(t) + ' use(s)' : '')) +
+        (_tmHoistLines(t) ? '<div class="tmd-field" style="grid-column:1/-1"><label>Hoist detail</label><span style="font-size:12px;color:#64748b">' + _tmHoistLines(t) + '</span></div>' : '') +
+        row('TM Subsidy (total)', '<strong style="color:#0d9488">' + fmtMoney(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount) + '</strong>') +
         row('Passenger Pays', fmtMoney(t.tmPassengerPays || t.passengerPays || t.patientPays)) +
         row('Payment Type', t.paymentType || t.payment_type) +
       '</div>' +
@@ -16157,6 +16184,7 @@ function openTripDetail(key) {
       '<div class="tmd-field"><label>Waiting</label><input id="te-waitingCost" type="number" step="0.01" value="' + escAttr(t.waitingCost || t.WaitingCost || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Meter subsidy</label><input id="te-tmSubsidyFare" type="number" step="0.01" value="' + escAttr(t.tmSubsidyFare || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Hoist (council)</label><input id="te-tmSubsidyHoist" type="number" step="0.01" value="' + escAttr(t.tmSubsidyHoist || t.hoistTotal || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Hoist uses</label><input id="te-tmHoistCount" type="number" min="0" step="1" value="' + escAttr(_tmHoistUses(t) || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Total council</label><input id="te-tmCouncilPays" type="number" step="0.01" value="' + escAttr(t.tmCouncilPays || t.tmSubsidy || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Passenger pays</label><input id="te-tmPassengerPays" type="number" step="0.01" value="' + escAttr(t.tmPassengerPays || t.passengerPays || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Distance km</label><input id="te-distanceKm" type="number" step="0.01" value="' + escAttr(t.distanceKm || t.distance || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
@@ -16216,6 +16244,8 @@ function saveTripEdits(resubmit) {
     waitingCost: parseFloat(val('te-waitingCost')) || 0,
     tmSubsidyFare: parseFloat(val('te-tmSubsidyFare')) || 0,
     tmSubsidyHoist: parseFloat(val('te-tmSubsidyHoist')) || 0,
+    tmHoistCount: parseInt(val('te-tmHoistCount'), 10) || 0,
+    hoistCount: parseInt(val('te-tmHoistCount'), 10) || 0,
     tmCouncilPays: parseFloat(val('te-tmCouncilPays')) || 0,
     tmSubsidy: parseFloat(val('te-tmCouncilPays')) || 0,
     tmPassengerPays: parseFloat(val('te-tmPassengerPays')) || 0,
@@ -16326,7 +16356,7 @@ function closeTripDetail() {
 function exportCsv() {
   var trips = _filteredTrips.length ? _filteredTrips : _allTrips;
   if (!trips.length) { alert('No trips to export.'); return; }
-  var cols = ['Date','Time','Passenger','Voucher No','Driver','Vehicle/AB No','Tariff','Pickup','Dropoff','Distance(km)','Duration','Flag Fall','Distance Cost','Waiting Cost','Meter Fare','TM Subsidy','Passenger Pays','Status'];
+  var cols = ['Date','Time','Passenger','Voucher No','Driver','Vehicle/AB No','Tariff','Pickup','Dropoff','Distance(km)','Duration','Flag Fall','Distance Cost','Waiting Cost','Meter Fare','TM Subsidy','Hoist $','Hoist Uses','Passenger Pays','Status'];
   var rows = [cols.join(',')];
   trips.forEach(function(t) {
     var st = getTripStatus(t);
@@ -16349,6 +16379,8 @@ function exportCsv() {
       esc(parseFloat(t.waitingCost || t.WaitingCost || 0).toFixed(2)),
       esc(parseFloat(t.totalFare || t.fare || 0).toFixed(2)),
       esc(parseFloat(t.tmCouncilPays || t.tmSubsidy || t.tmAmount || t.totalMobilityAmount || 0).toFixed(2)),
+      esc(_tmHoistPays(t).toFixed(2)),
+      esc(_tmHoistUses(t)),
       esc(parseFloat(t.tmPassengerPays || t.passengerPays || t.patientPays || 0).toFixed(2)),
       esc(st)
     ].join(','));
