@@ -15851,7 +15851,10 @@ function formatOwnerEventLabel(e) {
   };
   var line = labels[e.type] || e.type || 'Event';
   if (e.reasons && e.reasons.length) line += ' (' + e.reasons.join(', ') + ')';
-  if (e.note) line += ' — ' + e.note;
+  if (e.note) {
+    if (e.type === 'owner_edited' || e.type === 'resubmitted') line += ' — Owner: ' + e.note;
+    else line += ' — ' + e.note;
+  }
   return line;
 }
 function ownerTripHistoryHtml(st) {
@@ -16070,8 +16073,10 @@ function openTripDetail(key) {
       '<div class="tmd-field"><label>Trip category</label><input id="te-tmTripCategory" value="' + escAttr(t.tmTripCategory || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Driver</label><input id="te-driverName" value="' + escAttr(t.driverName || t.driver || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Vehicle / cab</label><input id="te-vehicleId" value="' + escAttr(t.vehicleId || t.vehicle || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field" style="grid-column:1/-1"><label>Fix comment <span style="color:#C62828">(required to resubmit)</span></label>' +
+      '<textarea id="te-fixComment" rows="3" placeholder="Explain what you changed so council can see the full back-and-forth in trip history" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font:inherit;resize:vertical"></textarea></div>' +
       '</div>' +
-      '<p style="font-size:12px;color:#666;margin:10px 0 0">Save updates the completed job. Resubmit sets status back to <strong>submitted</strong> for council review.</p>' +
+      '<p style="font-size:12px;color:#666;margin:10px 0 0">Save updates the completed job. Resubmit requires a fix comment and sets status back to <strong>submitted</strong> for council review. Comments appear in trip history.</p>' +
       '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="md-btn md-btn-primary" onclick="saveTripEdits(false)">Save only</button>' +
       '<button type="button" class="md-btn" style="background:#546E7A;color:#fff" onclick="archiveOwnerTrip()">Archive trip</button>' +
@@ -16100,6 +16105,13 @@ function saveTripEdits(resubmit) {
     var el = document.getElementById(id);
     return el ? el.value : '';
   }
+  var fixComment = String(val('te-fixComment') || '').trim();
+  if (resubmit && !fixComment) {
+    alert('A fix comment is required before resubmitting. Explain what you changed for the council history.');
+    var fc = document.getElementById('te-fixComment');
+    if (fc) fc.focus();
+    return;
+  }
   var patch = {
     tmCardName: val('te-tmCardName'),
     tmPassengerName: val('te-tmCardName'),
@@ -16126,7 +16138,14 @@ function saveTripEdits(resubmit) {
   };
   window.adminWrite('completedJobs/' + cid + '/' + key, 'PATCH', patch).then(function() {
     Object.keys(patch).forEach(function(k) { t[k] = patch[k]; });
-    var editEv = { at: Date.now(), type: 'owner_edited', by: cid, byRole: 'owner', toStatus: getTripStatus(t) };
+    var editEv = {
+      at: Date.now(),
+      type: 'owner_edited',
+      by: cid,
+      byRole: 'owner',
+      toStatus: getTripStatus(t),
+      note: fixComment || null
+    };
     var afterEdit = appendOwnerTripEvent(cid, key, editEv).catch(function(){});
     if (!resubmit) {
       return afterEdit.then(function() {
@@ -16147,7 +16166,14 @@ function saveTripEdits(resubmit) {
     }).then(function() {
       if (!_tripStatuses[key]) _tripStatuses[key] = {};
       _tripStatuses[key].status = 'submitted';
-      var resubEv = { at: Date.now(), type: 'resubmitted', by: cid, byRole: 'owner', toStatus: 'submitted' };
+      var resubEv = {
+        at: Date.now(),
+        type: 'resubmitted',
+        by: cid,
+        byRole: 'owner',
+        toStatus: 'submitted',
+        note: fixComment
+      };
       return appendOwnerTripEvent(cid, key, resubEv).then(function() {
         if (!_tripStatuses[key].events) _tripStatuses[key].events = {};
         _tripStatuses[key].events['local_' + resubEv.at] = resubEv;
@@ -16381,20 +16407,26 @@ function tmBatchesPage(companyId) {
 .bat-approved{background:#F0FDF4;color:#16a34a;}
 .bat-paid{background:#ECFDF5;color:#065f46;}
 .bat-rejected{background:#FEF2F2;color:#dc2626;}
+.bat-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 16px;}
+.bat-tab{padding:6px 12px;border-radius:14px;font-size:12px;font-weight:600;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;cursor:pointer;}
+.bat-tab.on{background:#0d9488;color:#fff;border-color:#0d9488;}
+.bat-proof-miss{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:#FFF8E1;color:#E65100;border:1px solid #FFE082;}
+.bat-proof-ok{font-size:12px;font-weight:600;color:#0d9488;cursor:pointer;border:none;background:none;padding:0;text-decoration:underline;}
 </style>`;
 
   const body = `<div class="page-content"><div class="tm-wrap">
   <div>
     <div class="tm-page-title"><i class="material-icons" style="color:#0d9488;font-size:24px">&#xE8E5;</i>TM Claim Batches</div>
-    <div class="tm-page-sub">Monthly claim batches submitted to each council — track submission and payment status.</div>
+    <div class="tm-page-sub">Monthly claim batches — track Submitted → Approved → Paid. Download proof of payment when council uploads it.</div>
   </div>
+  <div class="bat-tabs" id="bat-tabs" style="display:none"></div>
   <div id="bat-loading" style="text-align:center;padding:48px;color:#94a3b8;">
     <i class="material-icons" style="font-size:36px;display:block;margin-bottom:8px">&#xE8E5;</i>Loading batches…
   </div>
   <div id="bat-content" style="display:none;"></div>
   <div id="bat-empty" style="display:none;text-align:center;padding:48px;color:#94a3b8;">
     <i class="material-icons" style="font-size:48px;display:block;margin-bottom:12px;color:#e2e8f0">&#xE8E5;</i>
-    No claim batches found.<br><small>Batches appear here once the Super Admin processes monthly TM claims.</small>
+    No claim batches found.<br><small>Batches appear here once monthly TM claims are submitted.</small>
   </div>
 </div></div>`;
 
@@ -16426,6 +16458,8 @@ var COUNCIL_NAMES = {
   'timaru': 'Timaru District Council',
   'grey': 'Grey District Council'
 };
+var _batAll = [];
+var _batTab = 'all';
 function fmtMoney(v) {
   var n = parseFloat(v); if (isNaN(n)) return '—';
   return '$' + n.toFixed(2);
@@ -16442,10 +16476,125 @@ function batchBadge(status) {
   var labels = { draft:'Draft', submitted:'Submitted', approved:'Approved', paid:'Paid', rejected:'Rejected' };
   return '<span class="bat-badge ' + cls + '">' + (labels[(status||'').toLowerCase()] || status || 'Draft') + '</span>';
 }
+function hasProof(b) {
+  return !!(b && (b.paymentDocUrl || b.paymentDocPath || b.paymentDocName));
+}
+function proofCell(b, councilId, ym) {
+  var st = String(b.status || '').toLowerCase();
+  if (st !== 'paid') return '—';
+  if (hasProof(b)) {
+    var label = (b.paymentDocName || 'Download proof').replace(/"/g, '');
+    return '<button type="button" class="bat-proof-ok" onclick="downloadBatchProof(\\'' + councilId + '\\',\\'' + ym + '\\',\\'' + String(b.paymentDocUrl||'').replace(/'/g,'') + '\\',\\'' + label.replace(/'/g,'') + '\\')">&#128196; ' + label + '</button>';
+  }
+  return '<span class="bat-proof-miss">No proof uploaded</span>';
+}
+function downloadBatchProof(councilId, ym, url, filename) {
+  if (url && url.indexOf('http') === 0) {
+    window.open(url, '_blank');
+    return;
+  }
+  var path = (url && url.indexOf('rtdb:') === 0) ? url.slice(5) : ('tmBatchDocs/' + councilId + '/' + window.COMPANY_ID + '/' + ym);
+  window.adminRead(path).then(function(doc) {
+    if (!doc || !doc.data) { alert('Proof document not found.'); return; }
+    var bin = atob(String(doc.data));
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    var blob = new Blob([bytes], { type: doc.contentType || 'application/octet-stream' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = doc.filename || filename || 'proof.bin';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }).catch(function(e) {
+    alert('Download failed: ' + (e && e.message ? e.message : e));
+  });
+}
+function setBatTab(tab) {
+  _batTab = tab || 'all';
+  renderBatContent();
+}
+function renderBatTabs(counts) {
+  var tabs = document.getElementById('bat-tabs');
+  if (!tabs) return;
+  var items = [
+    ['all','All',counts.all],
+    ['submitted','Submitted',counts.submitted],
+    ['approved','Approved',counts.approved],
+    ['paid','Paid',counts.paid]
+  ];
+  tabs.style.display = 'flex';
+  tabs.innerHTML = items.map(function(it) {
+    return '<button type="button" class="bat-tab' + (_batTab===it[0]?' on':'') + '" onclick="setBatTab(\\'' + it[0] + '\\')">' + it[1] + ' (' + it[2] + ')</button>';
+  }).join('');
+}
+function renderBatContent() {
+  var results = _batAll;
+  var flat = [];
+  results.forEach(function(r) {
+    Object.keys(r.data || {}).forEach(function(ym) {
+      flat.push({ councilId: r.councilId, ym: ym, b: r.data[ym] || {} });
+    });
+  });
+  var counts = { all: flat.length, submitted:0, approved:0, paid:0 };
+  flat.forEach(function(row) {
+    var st = String(row.b.status || '').toLowerCase();
+    if (st === 'submitted') counts.submitted++;
+    else if (st === 'approved') counts.approved++;
+    else if (st === 'paid') counts.paid++;
+  });
+  renderBatTabs(counts);
+  var filtered = flat.filter(function(row) {
+    if (_batTab === 'all') return true;
+    return String(row.b.status || '').toLowerCase() === _batTab;
+  });
+  var byCouncil = {};
+  filtered.forEach(function(row) {
+    if (!byCouncil[row.councilId]) byCouncil[row.councilId] = [];
+    byCouncil[row.councilId].push(row);
+  });
+  var html = '';
+  var totalShown = 0;
+  Object.keys(byCouncil).sort().forEach(function(councilId) {
+    var rows = byCouncil[councilId].sort(function(a,b){ return String(b.ym).localeCompare(String(a.ym)); });
+    totalShown += rows.length;
+    var cname = COUNCIL_NAMES[councilId] || councilId;
+    html += '<div class="tm-section-head">' + cname + '</div>';
+    html += '<div class="tm-card">';
+    html += '<table class="tm-table"><thead><tr><th>Period</th><th>Trips</th><th>Total Fare</th><th>TM Claim Amount</th><th>Submitted</th><th>Paid</th><th>Status</th><th>Proof</th></tr></thead><tbody>';
+    html += rows.map(function(row) {
+      var b = row.b;
+      var subDate = b.submittedAt ? new Date(b.submittedAt).toLocaleDateString('en-NZ', {timeZone: NZ_TZ, day:'2-digit', month:'short', year:'numeric'}) : '—';
+      var paidDate = b.paidAt ? new Date(b.paidAt).toLocaleDateString('en-NZ', {timeZone: NZ_TZ, day:'2-digit', month:'short', year:'numeric'}) : '—';
+      if (b.payRef || b.paidRef) paidDate += '<div style="font-size:11px;color:#64748b;font-family:monospace">' + String(b.payRef || b.paidRef) + '</div>';
+      return '<tr>' +
+        '<td style="font-weight:600">' + fmtMonth(row.ym) + '</td>' +
+        '<td>' + (b.tripCount || b.count || b.totalTrips || '—') + '</td>' +
+        '<td>' + fmtMoney(b.totalFare) + '</td>' +
+        '<td style="font-weight:700;color:#0d9488">' + fmtMoney(b.tmAmount || b.claimAmount || b.totalSubsidy || b.paidAmount) + '</td>' +
+        '<td>' + subDate + '</td>' +
+        '<td>' + paidDate + '</td>' +
+        '<td>' + batchBadge(b.status) + '</td>' +
+        '<td>' + proofCell(b, councilId, row.ym) + '</td>' +
+      '</tr>';
+    }).join('');
+    html += '</tbody></table></div>';
+  });
+  var content = document.getElementById('bat-content');
+  var empty = document.getElementById('bat-empty');
+  if (!totalShown) {
+    content.style.display = 'none';
+    empty.style.display = 'block';
+    empty.innerHTML = '<i class="material-icons" style="font-size:48px;display:block;margin-bottom:12px;color:#e2e8f0">&#xE8E5;</i>No batches in this tab.';
+  } else {
+    empty.style.display = 'none';
+    content.innerHTML = html;
+    content.style.display = 'block';
+  }
+}
 function loadBatches() {
   var cid = window.COMPANY_ID;
   if (!cid) { setTimeout(loadBatches, 400); return; }
-  // First get which councils this company has access to
   window.adminRead('tmCompanyAccess/' + cid).then(function(accessData) {
     var councils = Object.keys(accessData || {});
     if (!councils.length) {
@@ -16453,7 +16602,6 @@ function loadBatches() {
       document.getElementById('bat-empty').style.display = 'block';
       return;
     }
-    // Load batches for each council in parallel
     return Promise.all(councils.map(function(councilId) {
       return window.adminRead('tmBatches/' + councilId + '/' + cid).then(function(data) {
         return { councilId: councilId, data: data || {} };
@@ -16462,41 +16610,13 @@ function loadBatches() {
   }).then(function(results) {
     if (!results) return;
     document.getElementById('bat-loading').style.display = 'none';
-    var totalBatches = 0;
-    var html = '';
-    results.forEach(function(r) {
-      var months = Object.keys(r.data).sort().reverse();
-      totalBatches += months.length;
-      var cname = COUNCIL_NAMES[r.councilId] || r.councilId;
-      html += '<div class="tm-section-head">' + cname + '</div>';
-      html += '<div class="tm-card">';
-      if (!months.length) {
-        html += '<div class="tm-empty">No batches found for this council.</div>';
-      } else {
-        html += '<table class="tm-table"><thead><tr><th>Period</th><th>Trips</th><th>Total Fare</th><th>TM Claim Amount</th><th>Submitted</th><th>Status</th></tr></thead><tbody>';
-        html += months.map(function(ym) {
-          var b = r.data[ym] || {};
-          var subDate = b.submittedAt ? new Date(b.submittedAt).toLocaleDateString('en-NZ', {timeZone: NZ_TZ, day:'2-digit', month:'short', year:'numeric'}) : '—';
-          return '<tr>' +
-            '<td style="font-weight:600">' + fmtMonth(ym) + '</td>' +
-            '<td>' + (b.tripCount || b.count || '—') + '</td>' +
-            '<td>' + fmtMoney(b.totalFare) + '</td>' +
-            '<td style="font-weight:700;color:#0d9488">' + fmtMoney(b.tmAmount || b.claimAmount) + '</td>' +
-            '<td>' + subDate + '</td>' +
-            '<td>' + batchBadge(b.status) + '</td>' +
-            '</tr>';
-        }).join('');
-        html += '</tbody></table>';
-      }
-      html += '</div>';
-    });
-    if (!totalBatches) {
+    _batAll = results;
+    var any = results.some(function(r){ return Object.keys(r.data||{}).length > 0; });
+    if (!any) {
       document.getElementById('bat-empty').style.display = 'block';
-    } else {
-      var content = document.getElementById('bat-content');
-      content.innerHTML = html;
-      content.style.display = 'block';
+      return;
     }
+    renderBatContent();
   }).catch(function(e) {
     document.getElementById('bat-loading').innerHTML = '<span style="color:#dc2626">Failed to load: ' + e.message + '</span>';
   });
