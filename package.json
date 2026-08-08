@@ -1,7 +1,7 @@
 {
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/owner-trip-visibility.test.mjs"
+    "test": "node --test tests/*.mjs"
   },
   "dependencies": {
     "@turf/turf": "^6.5.0",

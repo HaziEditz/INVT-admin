@@ -4281,7 +4281,7 @@ function vehicleTypesPage() {
         </div>
         <hr style="margin:16px 0 12px;border-color:#eee"/>
         <p style="font-size:12px;color:#9e9e9e;margin:0">
-          <strong>Tip:</strong> These types appear in the Tariff Schedule vehicle type selector and on vehicle registration forms.
+          <strong>Tip:</strong> These types appear in Vehicle Fleet and Vendor Cars registration forms (active types only), and in the Tariff Schedule vehicle type selector.
         </p>
       </div>
     </div>
@@ -8940,8 +8940,10 @@ function vehiclesPage(companyId, isSA) {
             <option value="Van">Van</option>
             <option value="Ute">Ute / Pickup</option>
             <option value="Limousine">Limousine</option>
+            <option value="Wheelchair">Wheelchair</option>
             <option value="Other">Other</option>
           </select>
+          <small style="color:#757575;font-size:11px;display:block;margin-top:4px">Options load from Settings → Vehicle Types (active types). Wheelchair marks the vehicle WAV-capable for hoist/TM.</small>
         </div>
         <div class="field-group"><label>Status</label>
           <select id="v-status">
@@ -9005,12 +9007,14 @@ function vehiclesPage(companyId, isSA) {
 var allVehicles = {};
 var allDrivers = {};
 var _vehRef = null;
+var _fleetVehicleTypesLoaded = false;
 
 window._fbOnLogin = function(user) {
   document.getElementById('lblName').textContent = user.email || user.displayName || '';
   document.getElementById('header-user-email').textContent = user.email || '';
   loadVehicles();
   loadDriversForDropdown();
+  loadFleetVehicleTypes();
 };
 
 function showToast(msg, type) {
@@ -9020,6 +9024,63 @@ function showToast(msg, type) {
   t.textContent = msg;
   c.appendChild(t);
   setTimeout(function(){ if(t.parentNode) c.removeChild(t); }, 4000);
+}
+
+/** Rebuild #v-type from Settings → Vehicle Types (same source as Vendor Cars). */
+function loadFleetVehicleTypes(preferredValue) {
+  var cid = window.COMPANY_ID || '';
+  var path = cid ? ('vehicleTypes/' + cid) : 'vehicleTypes';
+  var sel = document.getElementById('v-type');
+  if (!sel) return Promise.resolve();
+  var keep = preferredValue != null ? String(preferredValue) : String(sel.value || '');
+  function applyNames(names) {
+    var seen = {};
+    sel.innerHTML = '<option value="">— Select type —</option>';
+    (names || []).forEach(function(n) {
+      var name = String(n || '').trim();
+      if (!name || seen[name.toLowerCase()]) return;
+      seen[name.toLowerCase()] = true;
+      var opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if (keep) {
+      var found = false;
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === keep) { found = true; break; }
+      }
+      if (!found) {
+        var orphan = document.createElement('option');
+        orphan.value = keep;
+        orphan.textContent = keep + ' (saved)';
+        sel.appendChild(orphan);
+      }
+      sel.value = keep;
+    }
+    _fleetVehicleTypesLoaded = true;
+  }
+  var fallback = ['Sedan','SUV','Hatchback','Wagon','Minivan','Van','Ute','Limousine','Wheelchair','Other'];
+  return adminRead(path).then(function(data) {
+    var names = [];
+    if (data && typeof data === 'object') {
+      Object.keys(data).forEach(function(k) {
+        var row = data[k];
+        if (!row || typeof row !== 'object') return;
+        if (row.active === false) return;
+        names.push(row.name || k);
+      });
+    }
+    if (!names.length) names = fallback.slice();
+    // Ensure Wheelchair remains available even if config omits it (hoist/WAV).
+    if (!names.some(function(n){ return String(n).toLowerCase() === 'wheelchair'; })) {
+      names.push('Wheelchair');
+    }
+    names.sort(function(a,b){ return String(a).localeCompare(String(b)); });
+    applyNames(names);
+  }).catch(function() {
+    applyNames(fallback);
+  });
 }
 
 function loadDriversForDropdown() {
@@ -9215,13 +9276,14 @@ var VEH_FIELDS = ['v-taxi-no','v-vin','v-type','v-make','v-model','v-year','v-co
 function openVehicleModal(id) {
   document.getElementById('veh-modal-error').style.display = 'none';
   document.getElementById('veh-modal').style.display = 'block';
+  var preferredType = '';
   if (id) {
     var v = allVehicles[id];
+    preferredType = (v && v.vehicleType) || '';
     document.getElementById('veh-modal-title').textContent = 'Edit Vehicle';
     document.getElementById('edit-veh-id').value = id;
     document.getElementById('v-taxi-no').value    = v.taxiNumber||'';
     document.getElementById('v-vin').value         = v.vin||'';
-    document.getElementById('v-type').value        = v.vehicleType||'';
     document.getElementById('v-make').value        = v.make||'';
     document.getElementById('v-model').value       = v.model||'';
     document.getElementById('v-year').value        = v.year||'';
@@ -9245,6 +9307,10 @@ function openVehicleModal(id) {
     var vcid = document.getElementById('v-company-id');
     if (vcid && !vcid.readOnly) vcid.value = COMPANY_ID;
   }
+  // Populate from live Vehicle Types config (create + edit), then apply saved/preferred type.
+  loadFleetVehicleTypes(preferredType).then(function() {
+    if (preferredType) document.getElementById('v-type').value = preferredType;
+  });
 }
 function closeVehicleModal() { document.getElementById('veh-modal').style.display='none'; }
 
