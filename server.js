@@ -16322,11 +16322,20 @@ function saveTripEdits(resubmit) {
         status: 'submitted',
         submittedAt: Date.now(),
         resubmittedAt: Date.now(),
-        resubmittedBy: cid
+        resubmittedBy: cid,
+        // Clear stale flag/reject metadata so council list doesn't keep showing Flagged chips.
+        flagReasons: [],
+        anomalyDetail: null,
+        flaggedAt: null,
+        rejectedAt: null,
+        rejectNote: null
       });
     }).then(function() {
       if (!_tripStatuses[key]) _tripStatuses[key] = {};
       _tripStatuses[key].status = 'submitted';
+      _tripStatuses[key].flagReasons = [];
+      _tripStatuses[key].anomalyDetail = null;
+      _tripStatuses[key].flaggedAt = null;
       var resubEv = {
         at: Date.now(),
         type: 'resubmitted',
