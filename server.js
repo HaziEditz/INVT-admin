@@ -15939,7 +15939,7 @@ function renderTrips(trips) {
     var wait = (t.waitingCost || t.WaitingCost) ? fmtMoney(t.waitingCost || t.WaitingCost) : '—';
     var voucher = t.tmCardNumber || t.tmVoucherNo || t.voucherNumber || '—';
     var approveBtn = (st === 'pending')
-      ? '<button class="tm-approve-btn" id="ab-' + t._key + '" onclick="event.stopPropagation();approveTrip(\\'' + t._key + '\\')" title="Mark as Company Approved">Approve</button>'
+      ? '<button class="tm-approve-btn" id="ab-' + t._key + '" onclick="event.stopPropagation();approveTrip(\\'' + t._key + '\\')" title="Approve and send to council">Approve</button>'
       : '';
     return '<tr onclick="openTripDetail(\\'' + t._key + '\\')">' +
       '<td>' + fmtDate(ms) + '<br><small style="color:#94a3b8">' + fmtTime(ms) + '</small></td>' +
@@ -15966,13 +15966,39 @@ function approveTrip(key) {
   var cid = window.COMPANY_ID;
   var btn = document.getElementById('ab-' + key);
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-  var update = { status: 'company_approved', approvedAt: Date.now(), approvedBy: cid };
+  var t = _tripsByKey[key] || {};
+  var st0 = _tripStatuses[key] || {};
+  var councilId = st0.councilId || t.councilId || t.tmCouncilId || '';
+  var now = Date.now();
+  var update = {
+    status: 'submitted',
+    approvedAt: now,
+    approvedBy: cid,
+    submittedAt: now,
+    submittedBy: cid
+  };
+  if (councilId) update.councilId = councilId;
   window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', update).then(function() {
     if (!_tripStatuses[key]) _tripStatuses[key] = {};
-    _tripStatuses[key].status = 'company_approved';
+    _tripStatuses[key].status = 'submitted';
+    _tripStatuses[key].submittedAt = now;
+    if (councilId) _tripStatuses[key].councilId = councilId;
     var stCell = document.getElementById('st-' + key);
-    if (stCell) stCell.innerHTML = statusBadge('company_approved');
+    if (stCell) stCell.innerHTML = statusBadge('submitted');
     if (btn) { btn.style.display = 'none'; }
+    var ev = {
+      at: now,
+      type: 'submitted',
+      by: cid,
+      byRole: 'owner',
+      fromStatus: st0.status || 'pending',
+      toStatus: 'submitted',
+      note: 'Owner approved and sent to council'
+    };
+    return appendOwnerTripEvent(cid, key, ev).then(function() {
+      if (!_tripStatuses[key].events) _tripStatuses[key].events = {};
+      _tripStatuses[key].events['local_' + ev.at] = ev;
+    });
   }).catch(function(e) {
     if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
     alert('Failed to approve: ' + e.message);
@@ -15984,7 +16010,7 @@ function approveTripFromModal() {
   var btn = document.getElementById('tmd-approve-btn');
   if (btn) btn.style.display = 'none';
   var stRow = document.getElementById('tmd-status-row');
-  if (stRow) stRow.innerHTML = statusBadge('company_approved');
+  if (stRow) stRow.innerHTML = statusBadge('submitted');
 }
 function openTripDetail(key) {
   var t = _tripsByKey[key];
