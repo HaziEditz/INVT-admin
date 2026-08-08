@@ -15852,6 +15852,25 @@ function _tmHoistLines(t) {
   }
   return '';
 }
+var TM_FLAG_REASON_LABELS = {
+  fare_mismatch: 'Fare mismatch',
+  same_card_reuse_3min: 'Card reused <3min',
+  same_card_same_time_diff_taxi: 'Same card, different taxi',
+  limit_exceeded_daily: 'Daily limit exceeded',
+  limit_exceeded_monthly: 'Monthly limit exceeded',
+  card_expired: 'Card expired',
+  implausible_short_trip: 'Implausible short trip',
+  waiting_charged: 'Waiting charged',
+  hoist_rate_mismatch: 'Hoist rate mismatch'
+};
+function tmFlagReasonLabel(code) {
+  var c = String(code || '').trim();
+  return TM_FLAG_REASON_LABELS[c] || c || 'flagged';
+}
+function tmFlagReasonLabels(reasons) {
+  if (!Array.isArray(reasons) || !reasons.length) return [];
+  return reasons.map(tmFlagReasonLabel).filter(Boolean);
+}
 function fmtDate(ts) {
   if (!ts) return '—';
   var d = new Date(typeof ts === 'number' ? ts : Number(ts));
@@ -16025,6 +16044,11 @@ function renderTrips(trips) {
     var km = t.distanceKm ? Number(t.distanceKm).toFixed(2) + ' km' : '—';
     var wait = (t.waitingCost || t.WaitingCost) ? fmtMoney(t.waitingCost || t.WaitingCost) : '—';
     var voucher = t.tmCardNumber || t.tmVoucherNo || t.voucherNumber || '—';
+    var stMeta = _tripStatuses[t._key] || {};
+    var flagReasons = Array.isArray(stMeta.flagReasons) ? stMeta.flagReasons : (Array.isArray(t.flagReasons) ? t.flagReasons : []);
+    var flagChip = (st === 'flagged' || st === 'revision_needed') && flagReasons.length
+      ? '<div style="margin-top:3px;font-size:10px;color:#C62828">' + tmFlagReasonLabels(flagReasons).join(' · ') + '</div>'
+      : '';
     var approveBtn = (st === 'pending')
       ? '<button class="tm-approve-btn" id="ab-' + t._key + '" onclick="event.stopPropagation();approveTrip(\\'' + t._key + '\\')" title="Approve and send to council">Approve</button>'
       : '';
@@ -16041,7 +16065,7 @@ function renderTrips(trips) {
       '<td>' + fmtMoney(paxPays) + '</td>' +
       '<td style="font-size:11px;color:#64748b">' + km + '<br>' + wait + '</td>' +
       '<td style="font-size:11px;font-family:monospace">' + voucher + '</td>' +
-      '<td id="st-' + t._key + '">' + statusBadge(st) + '</td>' +
+      '<td id="st-' + t._key + '">' + statusBadge(st) + flagChip + '</td>' +
       '<td>' + approveBtn + '</td>' +
       '</tr>';
   }).join('');
@@ -16120,13 +16144,19 @@ function openTripDetail(key) {
   var stMeta = _tripStatuses[t._key] || {};
   var flagReasons = Array.isArray(stMeta.flagReasons) ? stMeta.flagReasons : (Array.isArray(t.flagReasons) ? t.flagReasons : []);
   var anomalyDetail = stMeta.anomalyDetail || t.anomalyDetail || '';
+  var flagLabels = tmFlagReasonLabels(flagReasons);
   var flagWarnHtml = '';
-  if (st === 'revision_needed' && flagReasons.length) {
+  if ((st === 'revision_needed' || st === 'flagged') && (flagLabels.length || anomalyDetail)) {
+    var title =
+      st === 'flagged'
+        ? 'Flagged by council — view only until returned for edit'
+        : 'Council flagged — fix before resubmit';
     flagWarnHtml =
       '<div style="margin-bottom:12px;padding:12px 14px;background:#FFEBEE;border-left:4px solid #C62828;border-radius:6px;font-size:13px">' +
-      '<strong style="color:#B71C1C">Council flagged — fix before resubmit</strong>' +
-      '<div style="margin-top:6px;color:#5d4037">' + escAttr(flagReasons.join(', ')) + '</div>' +
+      '<strong style="color:#B71C1C">' + title + '</strong>' +
+      (flagLabels.length ? '<div style="margin-top:6px;color:#5d4037">' + escAttr(flagLabels.join(', ')) + '</div>' : '') +
       (anomalyDetail ? '<div style="margin-top:6px;font-size:12px;color:#6d4c41">' + escAttr(anomalyDetail) + '</div>' : '') +
+      (st === 'flagged' ? '<div style="margin-top:8px;font-size:12px;color:#6d4c41">Council must click Return before you can edit and resubmit.</div>' : '') +
       (revNote ? '<div style="margin-top:8px"><strong>Council note:</strong> ' + escAttr(revNote) + '</div>' : '') +
       '</div>';
   }
