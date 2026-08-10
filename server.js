@@ -13652,6 +13652,9 @@ function driverCompliancePage() {
 .comp-chip.ok{background:#dcfce7;color:#15803d}.comp-chip.warning{background:#fef3c7;color:#92400e}
 .comp-chip.breach{background:#fee2e2;color:#b91c1c}.comp-chip.active{background:#dbeafe;color:#1e40af}
 .comp-chip.nodata{background:#f1f5f9;color:#94a3b8}
+.comp-ghost-banner{display:none;margin:0;padding:10px 20px;background:#FEF3C7;border-bottom:1px solid #FCD34D;color:#92400E;font-size:12px;line-height:1.45}
+.comp-ghost-banner.show{display:block}
+.comp-ghost-banner b{color:#78350F}
 </style>`;
 
   const body = `
@@ -13663,12 +13666,13 @@ function driverCompliancePage() {
     </div>
     <div class="rpt-toolbar-actions">
       <span id="comp-updated" class="rpt-toolbar-meta"></span>
-      <button class="rpt-btn rpt-btn-white" onclick="closeAllGhostShifts()" id="comp-close-ghosts" style="margin-right:8px">
+      <button class="rpt-btn rpt-btn-white" onclick="closeAllGhostShifts()" id="comp-close-ghosts" style="margin-right:8px" title="Also runs automatically on every page load">
         <i class="material-icons">&#xE872;</i> Close All Ghost Shifts
       </button>
       <button class="rpt-btn rpt-btn-white" onclick="loadCompliance()"><i class="material-icons">&#xE5D5;</i> Refresh</button>
     </div>
   </div>
+  <div id="comp-ghost-banner" class="comp-ghost-banner"></div>
 
   <div id="comp-loading" class="rpt-state-box">
     <div class="rpt-spinner"></div><p>Loading shift and compliance data&hellip;</p>
@@ -13945,6 +13949,51 @@ function chipHtml(s){
   return '<span class="comp-chip '+(s||'nodata')+'">'+(l[s]||'—')+'</span>';
 }
 
+/** Close unclosed shifts older than STALE_MS (18h). Returns Promise<number closed>. */
+function closeGhostShiftsSilent(cid){
+  if(!cid) return Promise.resolve(0);
+  var now=Date.now(), closed=0, promises=[];
+  return window.adminRead('shiftLogs/'+cid).then(function(shiftData){
+    if(!shiftData||typeof shiftData!=='object') return 0;
+    Object.keys(shiftData).forEach(function(driverId){
+      var shifts=shiftData[driverId];
+      if(!shifts||typeof shifts!=='object') return;
+      Object.keys(shifts).forEach(function(shiftId){
+        var s=shifts[shiftId];
+        if(!s||typeof s!=='object') return;
+        var st=parseTs(s.startTime||s.loginTime||s.start||s.shiftStartAt||s.startTs);
+        var en=parseTs(s.endTime||s.logoutTime||s.end||s.finishTime||s.shiftEndAt||s.endTs);
+        var stLower=String(s.status||'').toLowerCase();
+        if(en || stLower==='closed' || stLower==='completed') return;
+        var isActive=(stLower==='active')||(s.isActive===true)||(!stLower && st>0);
+        if(!isActive||!st||now-st<=STALE_MS) return;
+        var capEnd=st+STALE_MS;
+        promises.push(window.adminWrite('shiftLogs/'+cid+'/'+driverId+'/'+shiftId,'PATCH',{
+          endTime:capEnd,logoutTime:capEnd,shiftEndAt:capEnd,endTs:capEnd,
+          status:'closed', isActive:false,
+          closedBy:'admin',closedReason:'ghost_shift_auto_cleanup',updatedAt:now
+        }).then(function(){closed++;}).catch(function(e){
+          console.warn('[comp] ghost close failed', driverId, shiftId, e&&e.message||e);
+        }));
+      });
+    });
+    return Promise.all(promises).then(function(){return closed;});
+  }).catch(function(e){
+    console.warn('[comp] ghost scan failed', e&&e.message||e);
+    return 0;
+  });
+}
+
+function showGhostBanner(n, auto){
+  var el=document.getElementById('comp-ghost-banner');
+  if(!el) return;
+  if(!n){ el.classList.remove('show'); el.innerHTML=''; return; }
+  el.innerHTML='<b>Auto-cleanup:</b> closed <b>'+n+'</b> unclosed shift'+(n===1?'':'s')+
+    ' older than 18 hours'+(auto?' on page load':'')+
+    '. End time capped at start + 18h so NZTA hours stay honest. Manual button still available.';
+  el.classList.add('show');
+}
+
 function loadCompliance(){
   document.getElementById('comp-loading').style.display='';
   document.getElementById('comp-cards').style.display='none';
@@ -13952,12 +14001,21 @@ function loadCompliance(){
   document.getElementById('comp-history').style.display='none';
   document.getElementById('comp-empty').style.display='none';
   var cid=window.COMPANY_ID||'';
-  Promise.all([
-    window.adminRead('shiftLogs/'+cid).catch(function(){return null;}),
-    window.adminRead('drivers/'+cid).catch(function(){return null;}),
-    window.adminRead('drivers').catch(function(){return null;}),
-    window.adminRead('vehicles').catch(function(){return null;})
-  ]).then(function(res){
+  if(!cid){
+    document.getElementById('comp-loading').innerHTML='<div class="rpt-spinner"></div><p>Waiting for company session&hellip;</p>';
+    return;
+  }
+  // Auto ghost-close before reading — catches stale opens before they poison compliance math.
+  closeGhostShiftsSilent(cid).then(function(closed){
+    showGhostBanner(closed, true);
+    return Promise.all([
+      window.adminRead('shiftLogs/'+cid).catch(function(){return null;}),
+      window.adminRead('drivers/'+cid).catch(function(){return null;}),
+      window.adminRead('drivers').catch(function(){return null;}),
+      window.adminRead('vehicles').catch(function(){return null;})
+    ]);
+  }).then(function(res){
+    if(!res) return;
     var shiftData=res[0],driverData=res[1],driversFlat=res[2],vehicleData=res[3];
     _compDriverNames={};_compDriverVeh={};_compVehicles={};_compCanon={};
     function setCanon(alias, canon){
@@ -14124,29 +14182,8 @@ function closeAllGhostShifts(){
   if(!confirm('Close all unclosed shifts older than 18 hours? Drivers will need to start a fresh shift in the app.'))return;
   var btn=document.getElementById('comp-close-ghosts');
   if(btn){btn.disabled=true;btn.textContent='Closing…';}
-  var now=Date.now(), closed=0, promises=[];
-  window.adminRead('shiftLogs/'+cid).then(function(shiftData){
-    if(!shiftData||typeof shiftData!=='object') return Promise.resolve(0);
-    Object.keys(shiftData).forEach(function(driverId){
-      var shifts=shiftData[driverId];
-      if(!shifts||typeof shifts!=='object') return;
-      Object.keys(shifts).forEach(function(shiftId){
-        var s=shifts[shiftId];
-        if(!s||typeof s!=='object') return;
-        var st=parseTs(s.startTime||s.loginTime||s.start||s.shiftStartAt);
-        var en=parseTs(s.endTime||s.logoutTime||s.end||s.finishTime||s.shiftEndAt);
-        var isActive=(s.status==='active')||(!en&&st>0);
-        if(!isActive||!st||now-st<=STALE_MS) return;
-        var capEnd=st+STALE_MS;
-        promises.push(window.adminWrite('shiftLogs/'+cid+'/'+driverId+'/'+shiftId,'PATCH',{
-          endTime:capEnd,logoutTime:capEnd,shiftEndAt:capEnd,endTs:capEnd,
-          status:'closed', isActive:false,
-          closedBy:'admin',closedReason:'ghost_shift_cleanup',updatedAt:now
-        }).then(function(){closed++;}));
-      });
-    });
-    return Promise.all(promises).then(function(){return closed;});
-  }).then(function(n){
+  closeGhostShiftsSilent(cid).then(function(n){
+    showGhostBanner(n, false);
     alert(n?('Closed '+n+' ghost shift(s).'):'No ghost shifts found.');
     loadCompliance();
   }).catch(function(e){
@@ -14156,7 +14193,16 @@ function closeAllGhostShifts(){
   });
 }
 
-loadCompliance();
+var _compCidTries=0;
+function bootCompliance(){
+  if(!window.COMPANY_ID){
+    if(++_compCidTries>40) return;
+    setTimeout(bootCompliance, 250);
+    return;
+  }
+  loadCompliance();
+}
+bootCompliance();
 <\/script>`;
 
   return pageWrap(commonHead('Driver Compliance', css), body, commonScripts(js));
