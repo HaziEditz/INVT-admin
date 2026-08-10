@@ -796,17 +796,34 @@ window._loadCompanyTZ = function(cid) {
   }).catch(function() {});
 };
 
+// Returns the Unix-ms timestamp for 00:00:00 on YYYY-MM-DD in the given IANA timezone.
+// Date-only strings must NOT use new Date('YYYY-MM-DD') (UTC midnight ≠ NZ midnight).
+window._tzDayStart = function(ymd, tz) {
+  var z = tz || window.COMPANY_TZ || 'Pacific/Auckland';
+  if (!ymd || !/^\\d{4}-\\d{2}-\\d{2}$/.test(String(ymd))) return 0;
+  var p = String(ymd).split('-').map(Number);
+  var probe = new Date(Date.UTC(p[0], p[1] - 1, p[2], 12, 0, 0));
+  var inTZ  = new Date(probe.toLocaleString('en-CA', {timeZone: z,     hour12: false}));
+  var inUTC = new Date(probe.toLocaleString('en-CA', {timeZone: 'UTC', hour12: false}));
+  var offsetMs = inTZ - inUTC;
+  return Date.UTC(p[0], p[1] - 1, p[2]) - offsetMs;
+};
+
+// Inclusive end of calendar day ymd in timezone (next midnight − 1ms).
+window._tzDayEnd = function(ymd, tz) {
+  var start = window._tzDayStart(ymd, tz);
+  if (!start) return 0;
+  var p = String(ymd).split('-').map(Number);
+  var next = new Date(Date.UTC(p[0], p[1] - 1, p[2] + 1));
+  var nm = next.getUTCMonth() + 1, nd = next.getUTCDate();
+  var nextYmd = next.getUTCFullYear() + '-' + (nm < 10 ? '0' : '') + nm + '-' + (nd < 10 ? '0' : '') + nd;
+  return window._tzDayStart(nextYmd, tz) - 1;
+};
+
 // Returns the Unix-ms timestamp for 00:00:00 today in the given IANA timezone.
 // Use instead of new Date().setHours(0,0,0,0) which gives browser-local midnight.
 window._tzTodayStart = function(tz) {
-  var z = tz || window.COMPANY_TZ || 'Pacific/Auckland';
-  var ds = new Date().toLocaleDateString('en-CA', {timeZone: z}); // "YYYY-MM-DD"
-  var p = ds.split('-');
-  var now = new Date();
-  var inTZ  = new Date(now.toLocaleString('en-CA', {timeZone: z,     hour12: false}));
-  var inUTC = new Date(now.toLocaleString('en-CA', {timeZone: 'UTC', hour12: false}));
-  var offsetMs = inTZ - inUTC; // ms ahead of UTC
-  return Date.UTC(+p[0], +p[1]-1, +p[2]) - offsetMs;
+  return window._tzDayStart(window._tzTodayStr(tz), tz);
 };
 
 // Returns today's date as "YYYY-MM-DD" in the given IANA timezone.
@@ -12842,7 +12859,11 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
     if(hasValid&&!_validDriverIds[driverKey]) return;
     var dur=_shiftSessionDurMin(sessionObj||{}, startTs, endTs);
     var brk=_shiftExtractBreakMin(sessionObj||{});
-    ensureDriver(driverKey).sessions.push({startTs:startTs||0,endTs:endTs||0,durationMin:dur,breakMin:brk,vehicleId:ss(vehicleId,'—')});
+    var loggedAt=_parseTs((sessionObj&&(sessionObj.loggedAt||sessionObj.LoggedAt))||0);
+    ensureDriver(driverKey).sessions.push({
+      startTs:startTs||0,endTs:endTs||0,loggedAt:loggedAt||0,
+      durationMin:dur,breakMin:brk,vehicleId:ss(vehicleId,'—')
+    });
     if(dur>0) ensureDriver(driverKey).totalMinutes+=dur;
   }
 
@@ -12907,7 +12928,8 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         var found=Object.values(_vehicles).find(function(v){return v&&(String(v.taxiNumber||'').toLowerCase()===vidLow||String(v.registration||'').toLowerCase()===vidLow||String(v.vehicleId||'').toLowerCase()===vidLow);});
         if(found) vInfo=found;
       }
-      var dateStr=s.startTs?new Date(s.startTs).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'}):(s.endTs?new Date(s.endTs).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'}):'—');
+      var activityTs=s.endTs||s.loggedAt||s.startTs||0;
+      var dateStr=activityTs?new Date(activityTs).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'}):'—';
       var isOpen=s.startTs>0&&!s.endTs;
       var isStale=isOpen && (Date.now()-s.startTs > 18*60*60*1000);
       rows.push({
@@ -12927,7 +12949,10 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         _totalMin:    d.totalMinutes,
         _sessionMin:  s.durationMin||0,
         _breakMin:    s.breakMin||0,
-        _ts:          s.startTs||s.endTs||0,
+        _startTs:     s.startTs||0,
+        _endTs:       s.endTs||0,
+        _activityTs:  activityTs,
+        _ts:          activityTs,
       });
     });
   });
@@ -13162,15 +13187,43 @@ function getFilteredRows(){
   var toVal=((document.getElementById('rpt-to')||{}).value||'');
   var drvFilter=((document.getElementById('rpt-driver')||{}).value||'');
   var vehFilter=((document.getElementById('rpt-vehicle')||{}).value||'');
-  var fromTs=fromVal?new Date(fromVal).getTime():0;
-  var toTs=toVal?new Date(toVal+'T23:59:59').getTime():0;
+  // Company-TZ day bounds — never new Date('YYYY-MM-DD') (UTC midnight ≠ NZ midnight)
+  var tz=window.COMPANY_TZ||NZ_TZ||'Pacific/Auckland';
+  var fromTs=0, toTs=0;
+  if(fromVal){
+    fromTs=(typeof window._tzDayStart==='function')
+      ? window._tzDayStart(fromVal, tz)
+      : new Date(fromVal+'T00:00:00').getTime();
+  }
+  if(toVal){
+    toTs=(typeof window._tzDayEnd==='function')
+      ? window._tzDayEnd(toVal, tz)
+      : new Date(toVal+'T23:59:59').getTime();
+  }
   var rows=_allRows;
   if(q) rows=rows.filter(function(r){return Object.values(r).some(function(v){return typeof v==='string'&&v.toLowerCase().includes(q);});});
   if(st) rows=rows.filter(function(r){return (r.jobstatus||'').toLowerCase()===st||(r.status||'').toLowerCase()===st;});
   if(drvFilter) rows=rows.filter(function(r){return (r.driverId||r.driver||'')=== drvFilter;});
   if(vehFilter) rows=rows.filter(function(r){return (r.vehicleId||r.taxi||r.vehicle||'')=== vehFilter;});
-  if(fromTs) rows=rows.filter(function(r){return r._ts&&r._ts>=fromTs;});
-  if(toTs) rows=rows.filter(function(r){return r._ts&&r._ts<=toTs;});
+  if(fromTs||toTs){
+    var rangeStart=fromTs||0;
+    var rangeEnd=toTs||Number.MAX_SAFE_INTEGER;
+    rows=rows.filter(function(r){
+      if(_isShiftRpt){
+        var s=r._startTs||0;
+        var e=r._endTs||0;
+        var act=r._activityTs||e||s||r._ts||0;
+        // Closed: interval overlap with selected days. Open/point: activity in range.
+        if(s&&e) return s<=rangeEnd && e>=rangeStart;
+        if(!act) return false;
+        return act>=rangeStart && act<=rangeEnd;
+      }
+      if(!r._ts) return false;
+      if(fromTs && r._ts<fromTs) return false;
+      if(toTs && r._ts>toTs) return false;
+      return true;
+    });
+  }
   // Payments sidebar / dashboard deep-link: ClosedJobsReports.aspx?pay=card|eftpos|cash
   if(_rptPayQ){
     rows=rows.filter(function(r){
@@ -14274,13 +14327,20 @@ function applyCompFilter(){
   var from=document.getElementById('comp-from').value;
   var to=document.getElementById('comp-to').value;
   var driver=document.getElementById('comp-driver-sel').value;
-  var fromTs=from?new Date(from).getTime():0;
-  var toTs=to?new Date(to+'T23:59:59').getTime():Infinity;
+  var tz=window.COMPANY_TZ||'Pacific/Auckland';
+  var fromTs=from?(typeof window._tzDayStart==='function'?window._tzDayStart(from,tz):new Date(from+'T00:00:00').getTime()):0;
+  var toTs=to?(typeof window._tzDayEnd==='function'?window._tzDayEnd(to,tz):new Date(to+'T23:59:59').getTime()):Infinity;
   var rows=_allCompRows.filter(function(r){
     if(driver&&r.driverId!==driver) return false;
-    var ts=r.startTs||r.endTs||0;
-    if(ts&&fromTs&&ts<fromTs) return false;
-    if(ts&&isFinite(toTs)&&ts>toTs) return false;
+    var s=r.startTs||0, e=r.endTs||0;
+    var act=e||s||0;
+    if(s&&e){
+      if(fromTs&&e<fromTs) return false;
+      if(isFinite(toTs)&&s>toTs) return false;
+      return true;
+    }
+    if(act&&fromTs&&act<fromTs) return false;
+    if(act&&isFinite(toTs)&&act>toTs) return false;
     return true;
   });
   var countEl=document.getElementById('comp-count');
@@ -18666,8 +18726,9 @@ function loadInvTrips(){
   var fromStr=document.getElementById('ca-inv-from').value;
   var toStr=document.getElementById('ca-inv-to').value;
   if(!fromStr||!toStr){alert('Please select a date range.');return;}
-  var fromMs=new Date(fromStr+'T00:00:00').getTime();
-  var toMs=new Date(toStr+'T23:59:59').getTime();
+  var _caTz=window.COMPANY_TZ||'Pacific/Auckland';
+  var fromMs=(typeof window._tzDayStart==='function'?window._tzDayStart(fromStr,_caTz):new Date(fromStr+'T00:00:00').getTime());
+  var toMs=(typeof window._tzDayEnd==='function'?window._tzDayEnd(toStr,_caTz):new Date(toStr+'T23:59:59').getTime());
   // Build set of registered phones
   var phones=Object.keys(a.registeredPhones||{});
   if(a.phone&&!phones.includes(a.phone))phones.unshift(a.phone);
@@ -18713,8 +18774,9 @@ function printInvoice(){
   var toStr=document.getElementById('ca-inv-to').value;
   var phones=Object.keys(a.registeredPhones||{});
   if(a.phone&&!phones.includes(a.phone))phones.unshift(a.phone);
-  var fromMs=new Date(fromStr+'T00:00:00').getTime();
-  var toMs=new Date(toStr+'T23:59:59').getTime();
+  var _caTz=window.COMPANY_TZ||'Pacific/Auckland';
+  var fromMs=(typeof window._tzDayStart==='function'?window._tzDayStart(fromStr,_caTz):new Date(fromStr+'T00:00:00').getTime());
+  var toMs=(typeof window._tzDayEnd==='function'?window._tzDayEnd(toStr,_caTz):new Date(toStr+'T23:59:59').getTime());
   var trips=_caJobCache.filter(function(j){
     var phone=(j.PhoneNo||j.phoneNo||'').trim();
     if(!phones.includes(phone))return false;
@@ -18781,8 +18843,9 @@ function emailInvoice(){
   var toStr=document.getElementById('ca-inv-to').value;
   var phones=Object.keys(a.registeredPhones||{});
   if(a.phone&&!phones.includes(a.phone))phones.unshift(a.phone);
-  var fromMs=new Date(fromStr+'T00:00:00').getTime();
-  var toMs=new Date(toStr+'T23:59:59').getTime();
+  var _caTz=window.COMPANY_TZ||'Pacific/Auckland';
+  var fromMs=(typeof window._tzDayStart==='function'?window._tzDayStart(fromStr,_caTz):new Date(fromStr+'T00:00:00').getTime());
+  var toMs=(typeof window._tzDayEnd==='function'?window._tzDayEnd(toStr,_caTz):new Date(toStr+'T23:59:59').getTime());
   var trips=_caJobCache.filter(function(j){
     var phone=(j.PhoneNo||j.phoneNo||'').trim();
     if(!phones.includes(phone))return false;
