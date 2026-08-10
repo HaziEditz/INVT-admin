@@ -83,7 +83,7 @@ describe('flatten with live 860869 fixtures', () => {
     assert.equal(byDriver['RKUXnwU1cRe1r59qat8fTAWbFzz2'], undefined);
   });
 
-  it('uses workedMinutes so Abdullah total is ~505h not ~46773h wall-clock', () => {
+  it('uses workedMinutes + window collapse so Abdullah is ~102h not wall-clock', () => {
     assert.ok(cidNode && drvCid, 'need fixtures');
     const { canon, valid } = buildDriverCanon(drvRoot, drvCid, CID);
     const byDriver = flattenShiftLogNodes([cidNode], {
@@ -92,8 +92,9 @@ describe('flatten with live 860869 fixtures', () => {
       validIds: valid,
     });
     const hrs = byDriver['D001'].totalMinutes / 60;
-    // Legacy D001 short sessions + IRkn workedMinutes (~505.3h); no wall-clock inflation
-    assert.ok(hrs > 500 && hrs < 550, 'expected ~505h worked, got ' + hrs);
+    // Progressive End Shift snapshots share shiftStartAt — collapse to max wm/window.
+    // Live post-dedupe ≈102h; must never be wall-clock lifetime (~46773h).
+    assert.ok(hrs > 90 && hrs < 130, 'expected ~102h after window collapse, got ' + hrs);
     assert.ok(hrs < 1000, 'must not use inflated wall-clock lifetime (~46773h), got ' + hrs);
   });
 });
@@ -295,7 +296,28 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     assert.equal(fmtDur(null), '—');
   });
 
-  it('buildDayTimeline: multi-session day with gaps', () => {
+  it('buildDayTimeline: legacy progressive ends (same window) do not invent gaps', () => {
+    const { buildDayTimeline, collapseProgressiveSessions, sumCollapsedWorkMin } = require('../lib/shiftReportFlatten.js');
+    const windowOpen = Date.parse('2026-08-11T02:12:00+12:00');
+    const e1 = Date.parse('2026-08-11T02:16:00+12:00');
+    const e2 = Date.parse('2026-08-11T03:27:00+12:00');
+    const e3 = Date.parse('2026-08-11T03:31:00+12:00');
+    const rows = [
+      { driverId: 'D001', _windowTs: windowOpen, _startTs: windowOpen, _endTs: e1, _sessionMin: 4, _hasSessionStart: false },
+      { driverId: 'D001', _windowTs: windowOpen, _startTs: windowOpen, _endTs: e2, _sessionMin: 75, _hasSessionStart: false },
+      { driverId: 'D001', _windowTs: windowOpen, _startTs: windowOpen, _endTs: e3, _sessionMin: 79, _hasSessionStart: false },
+    ];
+    assert.equal(collapseProgressiveSessions(rows).length, 1);
+    assert.equal(sumCollapsedWorkMin(rows), 79);
+    const tl = buildDayTimeline(rows);
+    assert.equal(tl.gapsReliable, false);
+    assert.equal(tl.offlineKnown, false);
+    assert.equal(tl.onlineMin, 79);
+    assert.equal(tl.segments.filter((x) => x.type === 'offline').length, 0);
+    assert.equal(tl.segments.filter((x) => x.type === 'online').length, 1);
+  });
+
+  it('buildDayTimeline: multi-session day with sessionStartedAt shows real gaps', () => {
     const { buildDayTimeline, fmtDur } = require('../lib/shiftReportFlatten.js');
     // 02:12–03:31 (79m), gap, 08:05–10:20 (135m), gap, 12:00–14:31 (151m)
     const s1 = Date.parse('2026-08-11T02:12:00+12:00');
@@ -305,10 +327,11 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     const s3 = Date.parse('2026-08-11T12:00:00+12:00');
     const e3 = Date.parse('2026-08-11T14:31:00+12:00');
     const tl = buildDayTimeline([
-      { _startTs: s1, _endTs: e1, _sessionMin: 79 },
-      { _startTs: s2, _endTs: e2, _sessionMin: 135 },
-      { _startTs: s3, _endTs: e3, _sessionMin: 151 },
+      { _startTs: s1, _endTs: e1, _sessionMin: 79, _sessionTs: s1, _windowTs: s1, _hasSessionStart: true },
+      { _startTs: s2, _endTs: e2, _sessionMin: 135, _sessionTs: s2, _windowTs: s1, _hasSessionStart: true },
+      { _startTs: s3, _endTs: e3, _sessionMin: 151, _sessionTs: s3, _windowTs: s1, _hasSessionStart: true },
     ]);
+    assert.equal(tl.gapsReliable, true);
     assert.equal(tl.spanStart, s1);
     assert.equal(tl.spanEnd, e3);
     assert.equal(tl.onlineMin, 79 + 135 + 151);
@@ -328,7 +351,7 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     const { buildDayTimeline } = require('../lib/shiftReportFlatten.js');
     const start = Date.parse('2026-08-11T02:12:00+12:00');
     const end = Date.parse('2026-08-11T02:16:00+12:00');
-    const tl = buildDayTimeline([{ _startTs: start, _endTs: end, _sessionMin: 4 }]);
+    const tl = buildDayTimeline([{ _startTs: start, _endTs: end, _sessionMin: 4, _hasSessionStart: true, _sessionTs: start, _windowTs: start }]);
     assert.equal(tl.onlineMin, 4);
     assert.equal(tl.spanMin, 4);
     assert.equal(tl.offlineKnown, false);
@@ -345,14 +368,86 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     const s2 = 1_000_000 + 30 * 60 * 1000; // overlaps
     const e2 = 1_000_000 + 90 * 60 * 1000;
     const tl = buildDayTimeline([
-      { startTs: s1, endTs: e1, durationMin: 60 },
-      { startTs: s2, endTs: e2, durationMin: 60 },
+      { startTs: s1, endTs: e1, durationMin: 60, _hasSessionStart: true, _sessionTs: s1, _windowTs: s1 },
+      { startTs: s2, endTs: e2, durationMin: 60, _hasSessionStart: true, _sessionTs: s2, _windowTs: s1 },
     ]);
     assert.equal(tl.segments.filter((x) => x.type === 'offline').length, 0);
     assert.equal(tl.segments.filter((x) => x.type === 'online').length, 2);
     assert.equal(tl.spanMin, 90);
     assert.equal(tl.onlineMin, 120);
     assert.equal(tl.offlineMin, 0); // clamped span - online
+  });
+
+  it('flatten: Login Time uses sessionStartedAt; progressive window takes max wm', () => {
+    const opts = {
+      companyId: CID,
+      canonMap: { D001: 'D001' },
+      validIds: { D001: true },
+    };
+    const withSession = flattenShiftLogNodes(
+      [
+        {
+          D001: {
+            a: {
+              shiftStartAt: 1_700_000_000_000,
+              sessionStartedAt: 1_700_000_000_000 + 10 * 60_000,
+              shiftEndAt: 1_700_000_000_000 + 40 * 60_000,
+              workedMinutes: 30,
+            },
+          },
+        },
+      ],
+      opts
+    );
+    assert.equal(withSession.D001.sessions[0].hasSessionStart, true);
+    assert.equal(withSession.D001.sessions[0].sessionTs, 1_700_000_000_000 + 10 * 60_000);
+    assert.equal(withSession.D001.sessions[0].startTs, withSession.D001.sessions[0].sessionTs);
+
+    const legacyProgressive = flattenShiftLogNodes(
+      [
+        {
+          D001: {
+            a: {
+              shiftStartAt: 1_700_000_000_000,
+              shiftEndAt: 1_700_000_000_000 + 40 * 60_000,
+              workedMinutes: 30,
+            },
+            b: {
+              shiftStartAt: 1_700_000_000_000,
+              shiftEndAt: 1_700_000_000_000 + 50 * 60_000,
+              workedMinutes: 50,
+            },
+          },
+        },
+      ],
+      opts
+    );
+    assert.equal(legacyProgressive.D001.sessions.length, 2);
+    assert.equal(legacyProgressive.D001.sessions.every((s) => !s.hasSessionStart), true);
+    assert.equal(legacyProgressive.D001.totalMinutes, 50);
+
+    const sameSessionProgressive = flattenShiftLogNodes(
+      [
+        {
+          D001: {
+            a: {
+              shiftStartAt: 1_700_000_000_000,
+              sessionStartedAt: 1_700_000_000_000 + 5 * 60_000,
+              shiftEndAt: 1_700_000_000_000 + 40 * 60_000,
+              workedMinutes: 30,
+            },
+            b: {
+              shiftStartAt: 1_700_000_000_000,
+              sessionStartedAt: 1_700_000_000_000 + 5 * 60_000,
+              shiftEndAt: 1_700_000_000_000 + 50 * 60_000,
+              workedMinutes: 50,
+            },
+          },
+        },
+      ],
+      opts
+    );
+    assert.equal(sameSessionProgressive.D001.totalMinutes, 50);
   });
 
   it('attaches breakMin onto flattened sessions from source fields', () => {

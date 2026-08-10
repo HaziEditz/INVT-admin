@@ -12558,7 +12558,7 @@ function getColumns(){
         {key:'shiftDate',label:'Date'},{key:'vehicleId',label:'Vehicle ID'},{key:'taxiNum',label:'Taxi #'},
         {key:'registration',label:'Plate'},{key:'vehicleType',label:'Vehicle Type'},
         {key:'makeModel',label:'Make/Model'},{key:'driverName',label:'Driver'},
-        {key:'loginTime',label:'Login Time'},{key:'finishTime',label:'Finish Time'},
+        {key:'windowOpened',label:'Window opened'},{key:'loginTime',label:'Login Time'},{key:'finishTime',label:'Finish Time'},
         {key:'duration',label:'Duration'},{key:'breakTime',label:'Break Time'},
         {key:'totalHours',label:'Total Hours (Driver)'}
       ];
@@ -12566,7 +12566,7 @@ function getColumns(){
       return [
         {key:'shiftDate',label:'Date'},{key:'driverName',label:'Driver'},
         {key:'driverId',label:'Driver ID'},{key:'vehicleId',label:'Vehicle'},
-        {key:'loginTime',label:'Login Time'},{key:'finishTime',label:'Finish Time'},
+        {key:'windowOpened',label:'Window opened'},{key:'loginTime',label:'Login Time'},{key:'finishTime',label:'Finish Time'},
         {key:'duration',label:'Duration'},{key:'breakTime',label:'Break Time'},
         {key:'totalHours',label:'Total Hours'}
       ];
@@ -12794,25 +12794,57 @@ function _fmtTimeOnly(ts){
   return ts?new Date(ts).toLocaleTimeString('en-NZ',{timeZone:NZ_TZ,hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 }
 /** Calendar-day online/offline timeline — sync with lib/shiftReportFlatten.buildDayTimeline (NOT NZTA 14h). */
-function _buildDayTimeline(sessions){
-  var usable=[];
+function _collapseProgressiveSessions(sessions){
+  var groups={};
   (sessions||[]).forEach(function(s){
     if(!s||typeof s!=='object') return;
-    var start=Number(s._startTs||s.startTs||0)||0;
+    var windowTs=Number(s._windowTs||s.windowTs||0)||Number(s._startTs||s.startTs||0)||0;
+    var sessionTs=Number(s._sessionTs||s.sessionTs||0)||0;
+    var hasSession=!!(sessionTs||s._hasSessionStart);
     var end=Number(s._endTs||s.endTs||0)||0;
-    if(!start||!end||end<=start) return;
-    var minutes=s._sessionMin!=null?Number(s._sessionMin):(s.durationMin!=null?Number(s.durationMin):Math.round((end-start)/60000));
+    var minutes=s._sessionMin!=null?Number(s._sessionMin):(s.durationMin!=null?Number(s.durationMin):0);
     if(!isFinite(minutes)||minutes<0) minutes=0;
-    usable.push({startTs:start,endTs:end,minutes:Math.round(minutes)});
+    var key=String(s.driverId||'')+'|'+String(windowTs||'none')+'|'+(hasSession?String(sessionTs):'legacy');
+    if(!groups[key]){
+      groups[key]={windowTs:windowTs,sessionTs:sessionTs,hasSessionStart:hasSession,endTs:end,minutes:Math.round(minutes),breakMin:Number(s._breakMin||0)||0,driverId:s.driverId};
+    } else {
+      var g=groups[key];
+      if(end>g.endTs) g.endTs=end;
+      if(Math.round(minutes)>g.minutes) g.minutes=Math.round(minutes);
+      var br=Number(s._breakMin||0)||0;
+      if(br>g.breakMin) g.breakMin=br;
+      if(hasSession&&sessionTs&&(!g.sessionTs||sessionTs<g.sessionTs)) g.sessionTs=sessionTs;
+    }
+  });
+  return Object.keys(groups).map(function(k){
+    var g=groups[k];
+    var startTs=g.hasSessionStart&&g.sessionTs?g.sessionTs:g.windowTs;
+    return {_startTs:startTs,_endTs:g.endTs,_sessionMin:g.minutes,_breakMin:g.breakMin,_windowTs:g.windowTs,_sessionTs:g.sessionTs,_hasSessionStart:g.hasSessionStart,driverId:g.driverId};
+  });
+}
+function _sumCollapsedWorkMin(sessions){
+  return _collapseProgressiveSessions(sessions).reduce(function(a,s){return a+(s._sessionMin||0);},0);
+}
+function _buildDayTimeline(sessions){
+  var usable=[];
+  _collapseProgressiveSessions(sessions||[]).forEach(function(s){
+    if(!s||typeof s!=='object') return;
+    var start=Number(s._startTs||0)||0;
+    var end=Number(s._endTs||0)||0;
+    if(!start||!end||end<=start) return;
+    var minutes=s._sessionMin!=null?Number(s._sessionMin):0;
+    if(!isFinite(minutes)||minutes<0) minutes=0;
+    usable.push({startTs:start,endTs:end,minutes:Math.round(minutes),hasSessionStart:!!s._hasSessionStart});
   });
   usable.sort(function(a,b){ return a.startTs!==b.startTs?a.startTs-b.startTs:a.endTs-b.endTs; });
   if(!usable.length){
-    return {segments:[],spanStart:0,spanEnd:0,spanMin:0,onlineMin:0,offlineMin:0,offlineKnown:false,onlinePct:null};
+    return {segments:[],spanStart:0,spanEnd:0,spanMin:0,onlineMin:0,offlineMin:0,offlineKnown:false,onlinePct:null,gapsReliable:false};
   }
+  var gapsReliable=usable.every(function(u){return u.hasSessionStart;});
   var segments=[], onlineMin=0;
   for(var i=0;i<usable.length;i++){
     var cur=usable[i];
-    if(i>0){
+    if(gapsReliable&&i>0){
       var prev=usable[i-1];
       var gapMin=Math.round((cur.startTs-prev.endTs)/60000);
       if(gapMin>0) segments.push({type:'offline',startTs:prev.endTs,endTs:cur.startTs,minutes:gapMin});
@@ -12824,15 +12856,15 @@ function _buildDayTimeline(sessions){
   usable.forEach(function(s){ if(s.endTs>spanEnd) spanEnd=s.endTs; });
   var spanMin=Math.max(0,Math.round((spanEnd-spanStart)/60000));
   var multi=usable.length>=2;
-  var offlineMin=multi?Math.max(0,spanMin-onlineMin):0;
-  var onlinePct=spanMin>0?Math.min(100,Math.round((100*onlineMin)/spanMin)):null;
-  if(!multi&&spanMin>0) onlinePct=100;
-  return {segments:segments,spanStart:spanStart,spanEnd:spanEnd,spanMin:spanMin,onlineMin:onlineMin,offlineMin:offlineMin,offlineKnown:multi,onlinePct:onlinePct};
+  var offlineMin=gapsReliable&&multi?Math.max(0,spanMin-onlineMin):0;
+  var onlinePct=gapsReliable&&spanMin>0?Math.min(100,Math.round((100*onlineMin)/spanMin)):(!multi&&spanMin>0?100:null);
+  if(!gapsReliable&&!multi&&spanMin>0) onlinePct=100;
+  return {segments:segments,spanStart:spanStart,spanEnd:spanEnd,spanMin:spanMin,onlineMin:onlineMin,offlineMin:offlineMin,offlineKnown:gapsReliable&&multi,onlinePct:onlinePct,gapsReliable:gapsReliable};
 }
 
 function _shiftLooksLikeSession(s){
   if(!s||typeof s!=='object') return false;
-  return !!(s.startTime||s.shiftStartAt||s.startTs||s.loginTime||s.endTime||s.shiftEndAt||s.endTs||s.logoutTime||s.finishTime||s.workedMinutes!=null||s.totalMinutes!=null||s.status||s.isActive!=null);
+  return !!(s.startTime||s.shiftStartAt||s.sessionStartedAt||s.startTs||s.loginTime||s.endTime||s.shiftEndAt||s.endTs||s.logoutTime||s.finishTime||s.workedMinutes!=null||s.totalMinutes!=null||s.status||s.isActive!=null);
 }
 function _shiftLooksLikeDriverBucket(v){
   if(!v||typeof v!=='object') return false;
@@ -12909,18 +12941,20 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
     return byDriver[id];
   }
 
-  function addSession(rawDriverKey, vehicleId, startTs, endTs, sessionObj){
+  function addSession(rawDriverKey, vehicleId, windowTs, endTs, sessionObj, sessionTs){
     var driverKey=_shiftResolveDriverId(rawDriverKey);
     if(!driverKey) return;
     if(hasValid&&!_validDriverIds[driverKey]) return;
+    var hasSessionStart=!!(sessionTs&&sessionTs>0);
+    var startTs=hasSessionStart?sessionTs:(windowTs||0);
     var dur=_shiftSessionDurMin(sessionObj||{}, startTs, endTs);
     var brk=_shiftExtractBreakMin(sessionObj||{});
     var loggedAt=_parseTs((sessionObj&&(sessionObj.loggedAt||sessionObj.LoggedAt))||0);
     ensureDriver(driverKey).sessions.push({
       startTs:startTs||0,endTs:endTs||0,loggedAt:loggedAt||0,
-      durationMin:dur,breakMin:brk,vehicleId:ss(vehicleId,'—')
+      durationMin:dur,breakMin:brk,vehicleId:ss(vehicleId,'—'),
+      windowTs:windowTs||0,sessionTs:hasSessionStart?sessionTs:0,hasSessionStart:hasSessionStart
     });
-    if(dur>0) ensureDriver(driverKey).totalMinutes+=dur;
   }
 
   function ingestDriverSessions(driverKey, sessions){
@@ -12928,9 +12962,10 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
     Object.keys(sessions).forEach(function(sk){
       var s=sessions[sk];
       if(!_shiftLooksLikeSession(s)) return;
-      var start=_parseTs(s.startTime||s.loginTime||s.start||s.StartTime||s.login||s.shiftStartAt||s.startTs);
+      var windowTs=_parseTs(s.shiftStartAt||s.startTime||s.start||s.StartTime||s.startTs);
+      var sessionTs=_parseTs(s.sessionStartedAt);
       var end=_parseTs(s.endTime||s.logoutTime||s.end||s.EndTime||s.logout||s.finishTime||s.shiftEndAt||s.endTs);
-      addSession(driverKey, s.vehicleId||s.VehicleId||s.vehicle||'—', start, end, s);
+      addSession(driverKey, s.vehicleId||s.VehicleId||s.vehicle||'—', windowTs, end, s, sessionTs);
     });
   }
 
@@ -12950,9 +12985,10 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
       }
       if(_shiftLooksLikeSession(v1)){
         var did=v1.driverId||v1.DriverId||v1.driver||k1;
-        var start=_parseTs(v1.startTime||v1.loginTime||v1.start||v1.StartTime||v1.shiftStartAt||v1.startTs);
+        var windowTs=_parseTs(v1.shiftStartAt||v1.startTime||v1.start||v1.StartTime||v1.startTs);
+        var sessionTs=_parseTs(v1.sessionStartedAt);
         var end=_parseTs(v1.endTime||v1.logoutTime||v1.end||v1.EndTime||v1.finishTime||v1.shiftEndAt||v1.endTs);
-        addSession(did, v1.vehicleId||v1.VehicleId||'—', start, end, v1);
+        addSession(did, v1.vehicleId||v1.VehicleId||'—', windowTs, end, v1, sessionTs);
       }
     });
   });
@@ -12967,9 +13003,16 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
       var endTs=_parseTs(lastShiftData[id]);
       if(!endTs) return;
       var vehId=(_driverVehicles&&(_driverVehicles[resolved]||_driverVehicles[id]))||'—';
-      addSession(resolved, vehId, 0, endTs, {});
+      addSession(resolved, vehId, 0, endTs, {}, 0);
     });
   }
+
+  Object.keys(byDriver).forEach(function(driverId){
+    var d=byDriver[driverId];
+    d.totalMinutes=_sumCollapsedWorkMin((d.sessions||[]).map(function(s){
+      return {driverId:driverId,_windowTs:s.windowTs,_sessionTs:s.sessionTs,_hasSessionStart:s.hasSessionStart,_startTs:s.startTs,_endTs:s.endTs,_sessionMin:s.durationMin,_breakMin:s.breakMin};
+    }));
+  });
 
   var rows=[];
   Object.keys(byDriver).forEach(function(driverId){
@@ -12990,6 +13033,7 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
       var dateStr=activityTs?new Date(activityTs).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'}):'—';
       var isOpen=s.startTs>0&&!s.endTs;
       var isStale=isOpen && (Date.now()-s.startTs > 18*60*60*1000);
+      var windowTs=s.windowTs||0;
       rows.push({
         driverId:     driverId,
         driverName:   ss(_drivers[driverId],'Driver '+driverId),
@@ -12999,7 +13043,8 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         taxiNum:      ss(vInfo.taxiNumber,'—'),
         makeModel:    ([vInfo.make,vInfo.model].filter(Boolean).join(' '))||'—',
         shiftDate:    dateStr,
-        loginTime:    _fmtTs(s.startTs),
+        windowOpened: windowTs?_fmtTs(windowTs):'—',
+        loginTime:    s.hasSessionStart?_fmtTs(s.sessionTs):'—',
         finishTime:   isStale?'Unclosed (stale)':(isOpen?'Active':_fmtTs(s.endTs)),
         duration:     isStale?'Stale open':(isOpen?'Ongoing':_fmtDur(s.durationMin)),
         breakTime:    _fmtDur(s.breakMin),
@@ -13009,13 +13054,31 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         _breakMin:    s.breakMin||0,
         _startTs:     s.startTs||0,
         _endTs:       s.endTs||0,
+        _windowTs:    windowTs,
+        _sessionTs:   s.sessionTs||0,
+        _hasSessionStart: !!s.hasSessionStart,
         _activityTs:  activityTs,
         _ts:          activityTs,
       });
     });
   });
 
-  return rows.sort(function(a,b){return (b._ts||0)-(a._ts||0);});
+  // Show "Window opened" once per driver+window; siblings get ↳
+  rows.sort(function(a,b){
+    if((b._ts||0)!==(a._ts||0)) return (b._ts||0)-(a._ts||0);
+    if(String(a.driverId)!==String(b.driverId)) return String(a.driverId||'').localeCompare(String(b.driverId||''));
+    if((a._windowTs||0)!==(b._windowTs||0)) return (a._windowTs||0)-(b._windowTs||0);
+    return (a._endTs||0)-(b._endTs||0);
+  });
+  var seenWindow={};
+  rows.forEach(function(r){
+    var wk=String(r.driverId||'')+'|'+(r._windowTs||0);
+    if(!r._windowTs){ r.windowOpened='—'; return; }
+    if(seenWindow[wk]){ r.windowOpened='↳'; }
+    else { seenWindow[wk]=true; }
+  });
+
+  return rows;
 }
 
 function renderTable(rows){
@@ -13158,21 +13221,26 @@ function getGroupedRows(rows){
     if(b._ts!==a._ts) return b._ts-a._ts;
     return String(a.driverName||'').localeCompare(String(b.driverName||''));
   }).map(function(g){
-    var hrs=_fmtDur(g.totalSessionMin);
-    var brk=_fmtDur(g.totalBreakMin);
+    // Progressive End Shift snapshots share a window — collapse before hour totals.
+    var collapsed=_collapseProgressiveSessions(g._sessions);
+    var workMin=_sumCollapsedWorkMin(g._sessions);
+    var brkMin=collapsed.reduce(function(a,s){return a+(s._breakMin||0);},0);
+    var hrs=_fmtDur(workMin);
+    var brk=_fmtDur(brkMin||g.totalBreakMin);
     var prefix=_groupBy==='week'?'Week of ':(_groupBy==='month'?'':'');
     var row={
       groupKey:    prefix+g.groupKey,
       driverId:    g.driverId,
       driverName:  g.driverName,
-      sessions:    g.sessions,
+      sessions:    collapsed.length,
       totalHrs:    hrs,
       totalBreak:  brk,
       vehicles:    g.vehicleCount||'—',
       _ts:         g._ts,
-      _sessionMin: g.totalSessionMin,
-      _breakMin:   g.totalBreakMin,
-      _sessions:   g._sessions
+      _sessionMin: workMin,
+      _breakMin:   brkMin||g.totalBreakMin,
+      _sessions:   g._sessions,
+      _endLogs:    g.sessions
     };
     if(_groupBy==='day'){
       var tl=_buildDayTimeline(g._sessions);
@@ -13182,7 +13250,6 @@ function getGroupedRows(rows){
       row.offlineHrs=tl.offlineKnown?_fmtDur(tl.offlineMin):'—';
       row.onlinePct=tl.onlinePct!=null?(tl.onlinePct+'%'):'—';
       row.spanMin=tl.spanMin;
-      // Keep Hours Worked column as online total (same as before)
       row.totalHrs=row.onlineHrs;
     }
     return row;
@@ -13211,11 +13278,11 @@ function showStats(rows){
       if(drvComm>0) html+=statCard('&#xE8B0;','#FFF3E0','#E65100','$'+drvComm.toFixed(2),'Commission');
       html+=statCard('&#xE263;','#E0F2F1','#00695C','$'+drvNet.toFixed(2),'Net Payout');
     }
-  } else if(rows[0].loginTime!==undefined || rows[0]._sessionMin!==undefined){
-    // Shift logs stats — sum filtered session work/break (NOT lifetime driver totals)
-    var totalSessionMin=rows.reduce(function(a,r){return a+(r._sessionMin||0);},0);
+  } else if(rows[0].loginTime!==undefined || rows[0]._sessionMin!==undefined || rows[0].windowOpened!==undefined){
+    // Shift logs stats — collapse progressive window snapshots before summing hours
+    var totalSessionMin=_sumCollapsedWorkMin(rows);
     var totalBreakMin=rows.reduce(function(a,r){return a+(r._breakMin||0);},0);
-    var totalSessions=rows.length;
+    var totalSessions=_collapseProgressiveSessions(rows).length;
     var uniqueDrivers={};
     rows.forEach(function(r){ if(r.driverId) uniqueDrivers[r.driverId]=true; });
     html+=statCard('&#xE7FD;','#E0F2F1','#00695C',Object.keys(uniqueDrivers).length,'Drivers');
@@ -13349,6 +13416,10 @@ function toggleDayExpand(idx){
 function renderDayTimelineHtml(r){
   var tl=r._timeline||_buildDayTimeline(r._sessions||[]);
   var head='Day span  '+_fmtTimeOnly(tl.spanStart)+' → '+_fmtTimeOnly(tl.spanEnd)+'  ('+_fmtDur(tl.spanMin)+')';
+  var note='';
+  if(!tl.gapsReliable){
+    note='<div class="rpt-day-tl-row" style="color:#78909c;font-size:12px">Offline gaps need sessionStartedAt on End Shift logs (rolling out). Until then, progressive ends that share a window are collapsed — no invented gaps.</div>';
+  }
   var rowsHtml=(tl.segments||[]).map(function(seg){
     var on=seg.type==='online';
     return '<div class="rpt-day-tl-row">'
@@ -13362,7 +13433,7 @@ function renderDayTimelineHtml(r){
   var foot='Online '+_fmtDur(tl.onlineMin)
     +' · Offline '+(tl.offlineKnown?_fmtDur(tl.offlineMin):'—')
     +' · '+(tl.onlinePct!=null?tl.onlinePct+'% online':'—');
-  return '<div class="rpt-day-tl"><div class="rpt-day-tl-head">'+head+'</div>'+rowsHtml+'<div class="rpt-day-tl-foot">'+foot+'</div></div>';
+  return '<div class="rpt-day-tl"><div class="rpt-day-tl-head">'+head+'</div>'+note+rowsHtml+'<div class="rpt-day-tl-foot">'+foot+'</div></div>';
 }
 
 function renderGroupedTable(rows){
