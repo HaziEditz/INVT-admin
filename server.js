@@ -12252,6 +12252,20 @@ function reportsPage(rtype, title) {
 .rpt-net{font-weight:700;color:#00695C}
 .rpt-comm{font-weight:600;color:#E65100}
 .rpt-mono{font-family:monospace;font-size:11px;color:#546e7a}
+.rpt-day-row{cursor:pointer}
+.rpt-day-row td:first-child{white-space:nowrap}
+.rpt-day-chevron{display:inline-block;width:14px;color:#90a4ae;font-size:11px;margin-right:4px}
+.rpt-day-expand td{background:#F7FAFC!important;padding:0!important;white-space:normal!important;max-width:none!important;overflow:visible!important}
+.rpt-day-tl{padding:12px 16px 14px 28px;font-size:12px;color:#37474f;line-height:1.45}
+.rpt-day-tl-head{font-weight:700;color:#00695C;margin-bottom:8px}
+.rpt-day-tl-row{display:flex;gap:10px;align-items:baseline;padding:3px 0;border-bottom:1px dashed #e8edf2}
+.rpt-day-tl-row:last-child{border-bottom:none}
+.rpt-day-tl-tag{min-width:58px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+.rpt-day-tl-tag.on{color:#2E7D32}
+.rpt-day-tl-tag.off{color:#E65100}
+.rpt-day-tl-when{min-width:150px;font-variant-numeric:tabular-nums;color:#546e7a}
+.rpt-day-tl-dur{min-width:72px;font-weight:700}
+.rpt-day-tl-foot{margin-top:8px;font-size:11px;color:#607D8B}
 
 /* Loading / Empty */
 .rpt-state-box{text-align:center;padding:52px 20px;color:#bdbdbd}
@@ -12452,6 +12466,8 @@ var _driverLastLogin = {}, _driverVehicles = {}, _validDriverIds = {}, _driverCa
 var _groupBy = 'all';
 var _isShiftRpt = ['shiftreports','drivershifts','carshifts'].indexOf('${rtype}') !== -1;
 var _SHIFT_MAX_SESSION_MIN = 18 * 60; // sync with lib/shiftReportFlatten.js + compliance stale cap
+var _dayExpandIdx = -1;
+var _dayGroupedCache = [];
 
 function ss(v,d){ return (v==null||v===''||v===undefined)?d:(String(v).trim()||d); }
 
@@ -12774,6 +12790,45 @@ function _fmtDur(minutes){
   var h=Math.floor(total/60),m=total%60;
   return h+'h '+(m<10?'0':'')+m+'m';
 }
+function _fmtTimeOnly(ts){
+  return ts?new Date(ts).toLocaleTimeString('en-NZ',{timeZone:NZ_TZ,hour:'2-digit',minute:'2-digit',hour12:false}):'—';
+}
+/** Calendar-day online/offline timeline — sync with lib/shiftReportFlatten.buildDayTimeline (NOT NZTA 14h). */
+function _buildDayTimeline(sessions){
+  var usable=[];
+  (sessions||[]).forEach(function(s){
+    if(!s||typeof s!=='object') return;
+    var start=Number(s._startTs||s.startTs||0)||0;
+    var end=Number(s._endTs||s.endTs||0)||0;
+    if(!start||!end||end<=start) return;
+    var minutes=s._sessionMin!=null?Number(s._sessionMin):(s.durationMin!=null?Number(s.durationMin):Math.round((end-start)/60000));
+    if(!isFinite(minutes)||minutes<0) minutes=0;
+    usable.push({startTs:start,endTs:end,minutes:Math.round(minutes)});
+  });
+  usable.sort(function(a,b){ return a.startTs!==b.startTs?a.startTs-b.startTs:a.endTs-b.endTs; });
+  if(!usable.length){
+    return {segments:[],spanStart:0,spanEnd:0,spanMin:0,onlineMin:0,offlineMin:0,offlineKnown:false,onlinePct:null};
+  }
+  var segments=[], onlineMin=0;
+  for(var i=0;i<usable.length;i++){
+    var cur=usable[i];
+    if(i>0){
+      var prev=usable[i-1];
+      var gapMin=Math.round((cur.startTs-prev.endTs)/60000);
+      if(gapMin>0) segments.push({type:'offline',startTs:prev.endTs,endTs:cur.startTs,minutes:gapMin});
+    }
+    segments.push({type:'online',startTs:cur.startTs,endTs:cur.endTs,minutes:cur.minutes});
+    onlineMin+=cur.minutes;
+  }
+  var spanStart=usable[0].startTs, spanEnd=0;
+  usable.forEach(function(s){ if(s.endTs>spanEnd) spanEnd=s.endTs; });
+  var spanMin=Math.max(0,Math.round((spanEnd-spanStart)/60000));
+  var multi=usable.length>=2;
+  var offlineMin=multi?Math.max(0,spanMin-onlineMin):0;
+  var onlinePct=spanMin>0?Math.min(100,Math.round((100*onlineMin)/spanMin)):null;
+  if(!multi&&spanMin>0) onlinePct=100;
+  return {segments:segments,spanStart:spanStart,spanEnd:spanEnd,spanMin:spanMin,onlineMin:onlineMin,offlineMin:offlineMin,offlineKnown:multi,onlinePct:onlinePct};
+}
 
 function _shiftLooksLikeSession(s){
   if(!s||typeof s!=='object') return false;
@@ -13016,6 +13071,7 @@ function statCard(icon,iconBg,iconColor,val,label){
 }
 function setGroupBy(mode, el){
   _groupBy = mode;
+  _dayExpandIdx = -1;
   document.querySelectorAll('.rpt-group-tab').forEach(function(b){b.classList.remove('active');});
   if(el) el.classList.add('active');
   applyFilters();
@@ -13086,13 +13142,14 @@ function getGroupedRows(rows){
       grouped[key]={
         groupKey:period, driverId:did, driverName:r.driverName||did,
         sessions:0, totalSessionMin:0, totalBreakMin:0,
-        _vSet:{}, vehicleCount:0, _ts:0
+        _vSet:{}, vehicleCount:0, _ts:0, _sessions:[]
       };
     }
     var g=grouped[key];
     g.sessions++;
     g.totalSessionMin+=r._sessionMin||0;
     g.totalBreakMin+=r._breakMin||0;
+    g._sessions.push(r);
     if(r.vehicleId&&r.vehicleId!=='—'&&!g._vSet[r.vehicleId]){g._vSet[r.vehicleId]=true;g.vehicleCount++;}
     if((r._ts||0)>g._ts) g._ts=r._ts||0;
     if(r.driverName) g.driverName=r.driverName;
@@ -13104,7 +13161,7 @@ function getGroupedRows(rows){
     var hrs=_fmtDur(g.totalSessionMin);
     var brk=_fmtDur(g.totalBreakMin);
     var prefix=_groupBy==='week'?'Week of ':(_groupBy==='month'?'':'');
-    return {
+    var row={
       groupKey:    prefix+g.groupKey,
       driverId:    g.driverId,
       driverName:  g.driverName,
@@ -13114,8 +13171,21 @@ function getGroupedRows(rows){
       vehicles:    g.vehicleCount||'—',
       _ts:         g._ts,
       _sessionMin: g.totalSessionMin,
-      _breakMin:   g.totalBreakMin
+      _breakMin:   g.totalBreakMin,
+      _sessions:   g._sessions
     };
+    if(_groupBy==='day'){
+      var tl=_buildDayTimeline(g._sessions);
+      row._timeline=tl;
+      row.daySpan=(tl.spanStart&&tl.spanEnd)?(_fmtTimeOnly(tl.spanStart)+' – '+_fmtTimeOnly(tl.spanEnd)):'—';
+      row.onlineHrs=_fmtDur(tl.onlineMin);
+      row.offlineHrs=tl.offlineKnown?_fmtDur(tl.offlineMin):'—';
+      row.onlinePct=tl.onlinePct!=null?(tl.onlinePct+'%'):'—';
+      row.spanMin=tl.spanMin;
+      // Keep Hours Worked column as online total (same as before)
+      row.totalHrs=row.onlineHrs;
+    }
+    return row;
   });
 }
 
@@ -13259,20 +13329,54 @@ function applyFilters(){
   var rows=getFilteredRows();
   var grouped=getGroupedRows(rows);
   if(grouped){
+    // Filter/group changes invalidate expand index
+    if(_dayExpandIdx>=grouped.length) _dayExpandIdx=-1;
     renderGroupedTable(grouped);
     showStats(rows);
   } else {
+    _dayExpandIdx=-1;
     renderTable(rows);
     showStats(rows);
   }
 }
 
+function toggleDayExpand(idx){
+  idx=Number(idx);
+  _dayExpandIdx=(_dayExpandIdx===idx)?-1:idx;
+  if(_dayGroupedCache&&_dayGroupedCache.length) renderGroupedTable(_dayGroupedCache);
+}
+
+function renderDayTimelineHtml(r){
+  var tl=r._timeline||_buildDayTimeline(r._sessions||[]);
+  var head='Day span  '+_fmtTimeOnly(tl.spanStart)+' → '+_fmtTimeOnly(tl.spanEnd)+'  ('+_fmtDur(tl.spanMin)+')';
+  var rowsHtml=(tl.segments||[]).map(function(seg){
+    var on=seg.type==='online';
+    return '<div class="rpt-day-tl-row">'
+      +'<span class="rpt-day-tl-tag '+(on?'on':'off')+'">'+(on?'Online':'Offline')+'</span>'
+      +'<span class="rpt-day-tl-when">'+_fmtTimeOnly(seg.startTs)+' → '+_fmtTimeOnly(seg.endTs)+'</span>'
+      +'<span class="rpt-day-tl-dur">'+_fmtDur(seg.minutes)+'</span>'
+      +'<span style="color:#90a4ae">'+(on?'Session':'Gap')+'</span>'
+      +'</div>';
+  }).join('');
+  if(!rowsHtml) rowsHtml='<div class="rpt-day-tl-row" style="color:#90a4ae">No timed sessions to chart.</div>';
+  var foot='Online '+_fmtDur(tl.onlineMin)
+    +' · Offline '+(tl.offlineKnown?_fmtDur(tl.offlineMin):'—')
+    +' · '+(tl.onlinePct!=null?tl.onlinePct+'% online':'—');
+  return '<div class="rpt-day-tl"><div class="rpt-day-tl-head">'+head+'</div>'+rowsHtml+'<div class="rpt-day-tl-foot">'+foot+'</div></div>';
+}
+
 function renderGroupedTable(rows){
-  var label=_groupBy==='day'?'Date':(_groupBy==='month'?'Month':'Week (starting)');
+  var isDay=_groupBy==='day';
+  var label=isDay?'Date':(_groupBy==='month'?'Month':'Week (starting)');
   var thead=document.getElementById('rpt-thead');
   var tbody=document.getElementById('rpt-tbody');
   if(!thead||!tbody) return;
-  thead.innerHTML='<th>'+label+'</th><th>Driver</th><th>Driver ID</th><th>Sessions</th><th>Hours Worked</th><th>Break Time</th><th>Vehicles</th>';
+  _dayGroupedCache=rows||[];
+  if(isDay){
+    thead.innerHTML='<th>'+label+'</th><th>Driver</th><th>Driver ID</th><th>Sessions</th><th>Day span</th><th>Online</th><th>Offline</th><th>Online %</th><th>Break Time</th><th>Vehicles</th>';
+  } else {
+    thead.innerHTML='<th>'+label+'</th><th>Driver</th><th>Driver ID</th><th>Sessions</th><th>Hours Worked</th><th>Break Time</th><th>Vehicles</th>';
+  }
   if(rows.length===0){
     tbody.innerHTML='';
     document.getElementById('rpt-table-wrap').style.display='none';
@@ -13283,7 +13387,28 @@ function renderGroupedTable(rows){
   }
   document.getElementById('rpt-empty-box').style.display='none';
   document.getElementById('rpt-loading-box').style.display='none';
-  tbody.innerHTML=rows.map(function(r){
+  var colCount=isDay?10:7;
+  tbody.innerHTML=rows.map(function(r,i){
+    if(isDay){
+      var open=_dayExpandIdx===i;
+      var chev=open?'▼':'▶';
+      var main='<tr class="rpt-day-row" onclick="toggleDayExpand('+i+')">'
+        +'<td><span class="rpt-day-chevron">'+chev+'</span><strong>'+r.groupKey+'</strong></td>'
+        +'<td>'+(r.driverName||'—')+'</td>'
+        +'<td class="rpt-mono">'+(r.driverId||'—')+'</td>'
+        +'<td>'+r.sessions+'</td>'
+        +'<td class="rpt-mono">'+(r.daySpan||'—')+'</td>'
+        +'<td><strong style="color:#2E7D32">'+(r.onlineHrs||r.totalHrs||'—')+'</strong></td>'
+        +'<td>'+(r.offlineHrs||'—')+'</td>'
+        +'<td>'+(r.onlinePct||'—')+'</td>'
+        +'<td>'+(r.totalBreak||'—')+'</td>'
+        +'<td>'+(r.vehicles||'—')+'</td>'
+        +'</tr>';
+      if(open){
+        main+='<tr class="rpt-day-expand"><td colspan="'+colCount+'">'+renderDayTimelineHtml(r)+'</td></tr>';
+      }
+      return main;
+    }
     return '<tr>'
       +'<td><strong>'+r.groupKey+'</strong></td>'
       +'<td>'+(r.driverName||'—')+'</td>'
@@ -13323,6 +13448,7 @@ function clearFilters(){
   var dr=document.getElementById('rpt-driver');if(dr)dr.value='';
   var vh=document.getElementById('rpt-vehicle');if(vh)vh.value='';
   _groupBy='all';
+  _dayExpandIdx=-1;
   document.querySelectorAll('.rpt-group-tab').forEach(function(b,i){b.classList.toggle('active',i===0);});
   applyFilters();
 }

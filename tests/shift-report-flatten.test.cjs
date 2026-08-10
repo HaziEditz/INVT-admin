@@ -295,6 +295,66 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     assert.equal(fmtDur(null), '—');
   });
 
+  it('buildDayTimeline: multi-session day with gaps', () => {
+    const { buildDayTimeline, fmtDur } = require('../lib/shiftReportFlatten.js');
+    // 02:12–03:31 (79m), gap, 08:05–10:20 (135m), gap, 12:00–14:31 (151m)
+    const s1 = Date.parse('2026-08-11T02:12:00+12:00');
+    const e1 = Date.parse('2026-08-11T03:31:00+12:00');
+    const s2 = Date.parse('2026-08-11T08:05:00+12:00');
+    const e2 = Date.parse('2026-08-11T10:20:00+12:00');
+    const s3 = Date.parse('2026-08-11T12:00:00+12:00');
+    const e3 = Date.parse('2026-08-11T14:31:00+12:00');
+    const tl = buildDayTimeline([
+      { _startTs: s1, _endTs: e1, _sessionMin: 79 },
+      { _startTs: s2, _endTs: e2, _sessionMin: 135 },
+      { _startTs: s3, _endTs: e3, _sessionMin: 151 },
+    ]);
+    assert.equal(tl.spanStart, s1);
+    assert.equal(tl.spanEnd, e3);
+    assert.equal(tl.onlineMin, 79 + 135 + 151);
+    assert.equal(tl.spanMin, Math.round((e3 - s1) / 60000));
+    assert.equal(tl.offlineMin, tl.spanMin - tl.onlineMin);
+    assert.equal(tl.offlineKnown, true);
+    assert.ok(tl.onlinePct >= 0 && tl.onlinePct <= 100);
+    assert.equal(tl.segments.filter((x) => x.type === 'online').length, 3);
+    assert.equal(tl.segments.filter((x) => x.type === 'offline').length, 2);
+    assert.equal(tl.segments[0].type, 'online');
+    assert.equal(tl.segments[1].type, 'offline');
+    assert.equal(tl.segments[1].minutes, Math.round((s2 - e1) / 60000));
+    assert.equal(fmtDur(tl.onlineMin), '6h 05m');
+  });
+
+  it('buildDayTimeline: single session → offline unknown, 100% online', () => {
+    const { buildDayTimeline } = require('../lib/shiftReportFlatten.js');
+    const start = Date.parse('2026-08-11T02:12:00+12:00');
+    const end = Date.parse('2026-08-11T02:16:00+12:00');
+    const tl = buildDayTimeline([{ _startTs: start, _endTs: end, _sessionMin: 4 }]);
+    assert.equal(tl.onlineMin, 4);
+    assert.equal(tl.spanMin, 4);
+    assert.equal(tl.offlineKnown, false);
+    assert.equal(tl.offlineMin, 0);
+    assert.equal(tl.onlinePct, 100);
+    assert.equal(tl.segments.length, 1);
+    assert.equal(tl.segments[0].type, 'online');
+  });
+
+  it('buildDayTimeline: overlapping sessions skip negative gaps', () => {
+    const { buildDayTimeline } = require('../lib/shiftReportFlatten.js');
+    const s1 = 1_000_000;
+    const e1 = 1_000_000 + 60 * 60 * 1000;
+    const s2 = 1_000_000 + 30 * 60 * 1000; // overlaps
+    const e2 = 1_000_000 + 90 * 60 * 1000;
+    const tl = buildDayTimeline([
+      { startTs: s1, endTs: e1, durationMin: 60 },
+      { startTs: s2, endTs: e2, durationMin: 60 },
+    ]);
+    assert.equal(tl.segments.filter((x) => x.type === 'offline').length, 0);
+    assert.equal(tl.segments.filter((x) => x.type === 'online').length, 2);
+    assert.equal(tl.spanMin, 90);
+    assert.equal(tl.onlineMin, 120);
+    assert.equal(tl.offlineMin, 0); // clamped span - online
+  });
+
   it('attaches breakMin onto flattened sessions from source fields', () => {
     const byDriver = flattenShiftLogNodes(
       [
