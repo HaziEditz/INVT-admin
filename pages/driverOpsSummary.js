@@ -200,6 +200,13 @@ function dosMoney(n){
   n = Math.round((parseFloat(n)||0)*100)/100;
   return '$' + n.toFixed(2);
 }
+/** Hours/minutes display — e.g. 4 → "0h 04m", 125 → "2h 05m". */
+function dosFmtDur(minutes){
+  if(minutes==null||minutes===''||!isFinite(Number(minutes))||Number(minutes)<=0) return '—';
+  var total=Math.round(Number(minutes));
+  var h=Math.floor(total/60), m=total%60;
+  return h+'h '+(m<10?'0':'')+m+'m';
+}
 function dosClassifyPm(pm){
   var s = String(pm||'').toLowerCase().replace(/[\\s_-]/g,'');
   if(!s) return 'other';
@@ -590,9 +597,9 @@ function dosFiltered(){
 }
 function dosRender(){
   var rows=dosFiltered();
-  var unpaid=0, paidN=0, cash=0, jobs=0, hours=0;
+  var unpaid=0, paidN=0, cash=0, jobs=0, workMin=0;
   rows.forEach(function(r){
-    unpaid+=r.owedTotal; cash+=r.cashHeld; jobs+=r.outcomes.total; hours+=r.workHours;
+    unpaid+=r.owedTotal; cash+=r.cashHeld; jobs+=r.outcomes.total; workMin+=r.workMinutes||0;
     if(r.status==='paid') paidN++;
   });
   document.getElementById('dos-stats').innerHTML=
@@ -601,7 +608,7 @@ function dosRender(){
     '<div class="dos-stat"><div class="v cash">'+dosMoney(cash)+'</div><div class="l">Cash held by drivers</div></div>'+
     '<div class="dos-stat"><div class="v paid">'+paidN+'</div><div class="l">Paid / locked</div></div>'+
     '<div class="dos-stat"><div class="v">'+jobs+'</div><div class="l">Jobs</div></div>'+
-    '<div class="dos-stat"><div class="v">'+hours.toFixed(1)+'h</div><div class="l">Hours worked</div></div>';
+    '<div class="dos-stat"><div class="v">'+dosFmtDur(workMin)+'</div><div class="l">Hours worked</div></div>';
 
   document.getElementById('dos-tbody').innerHTML=rows.map(function(r){
     var bank=r.accountNumber
@@ -612,7 +619,7 @@ function dosRender(){
       : '<button class="dos-btn primary" onclick="dosMarkPaid(\\''+dosEsc(r.driverId)+'\\')">Mark Paid</button>';
     return '<tr>'+
       '<td><b>'+dosEsc(r.driverName)+'</b><div style="font-size:10px;color:#90a4ae">'+dosEsc(r.driverId)+'</div></td>'+
-      '<td>'+r.workHours+'h <span style="color:#90a4ae;font-size:10px">('+r.breakMinutes+'m brk)</span></td>'+
+      '<td>'+dosFmtDur(r.workMinutes)+' <span style="color:#90a4ae;font-size:10px">('+dosFmtDur(r.breakMinutes)+' brk)</span></td>'+
       '<td title="C/Canc/Rej/NS">'+r.outcomes.completed+'/'+r.outcomes.cancelled+'/'+r.outcomes.rejected+'/'+r.outcomes.no_show+
         ' <span style="color:#90a4ae">('+r.outcomes.total+')</span></td>'+
       '<td>'+dosEsc(r.vehicles.join(', ')||'—')+'</td>'+
@@ -647,7 +654,7 @@ function dosOpenDetail(driverId){
   document.getElementById('dos-detail-title').textContent=r.driverName+' — '+(_dosPeriod&&_dosPeriod.label||'');
   var srcBits=Object.keys(r.sources).filter(function(k){return r.sources[k];}).map(function(k){return k.replace(/_/g,' ')+': '+r.sources[k];}).join(' · ');
   var html='<div class="dos-kv">'+
-    '<div><div class="k">Hours / breaks</div><div class="val">'+r.workHours+'h / '+r.breakMinutes+'m</div></div>'+
+    '<div><div class="k">Hours / breaks</div><div class="val">'+dosFmtDur(r.workMinutes)+' / '+dosFmtDur(r.breakMinutes)+'</div></div>'+
     '<div><div class="k">Company owes</div><div class="val" style="color:#E65100">'+dosMoney(r.owedTotal)+'</div></div>'+
     '<div><div class="k">Cash held</div><div class="val">'+dosMoney(r.cashHeld)+'</div></div>'+
     '<div><div class="k">Status</div><div class="val">'+(r.locked?'Paid & locked':'Open / unpaid')+'</div></div>'+

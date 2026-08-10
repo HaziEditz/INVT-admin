@@ -276,7 +276,7 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     assert.equal(d001.sessions, 3);
     assert.equal(d001.workMin, 214); // 4+90+120
     assert.equal(d001.breakMin, 15);
-    assert.equal(d001.totalHrs, '3.6h');
+    assert.equal(d001.totalHrs, '3h 34m');
     assert.equal(d002.sessions, 1);
     assert.equal(d002.workMin, 30);
 
@@ -284,6 +284,15 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     assert.equal(rangeTotals.workMin, 244);
     assert.equal(rangeTotals.workHours, 4.1);
     assert.equal(rangeTotals.sessions, 4);
+  });
+
+  it('fmtDur uses zero-padded h/m (not decimal hours)', () => {
+    const { fmtDur } = require('../lib/shiftReportFlatten.js');
+    assert.equal(fmtDur(4), '0h 04m');
+    assert.equal(fmtDur(60), '1h 00m');
+    assert.equal(fmtDur(125), '2h 05m');
+    assert.equal(fmtDur(0), '—');
+    assert.equal(fmtDur(null), '—');
   });
 
   it('attaches breakMin onto flattened sessions from source fields', () => {

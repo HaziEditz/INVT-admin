@@ -12769,9 +12769,10 @@ function _parseTs(v){
 }
 function _fmtTs(ts){ return ts?new Date(ts).toLocaleString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'; }
 function _fmtDur(minutes){
-  if(!minutes||minutes<=0) return '—';
-  var h=Math.floor(minutes/60),m=Math.round(minutes%60);
-  return h?h+'h '+(m?m+'m':''):m+'m';
+  if(minutes==null||minutes===''||!isFinite(Number(minutes))||Number(minutes)<=0) return '—';
+  var total=Math.round(Number(minutes));
+  var h=Math.floor(total/60),m=total%60;
+  return h+'h '+(m<10?'0':'')+m+'m';
 }
 
 function _shiftLooksLikeSession(s){
@@ -12918,8 +12919,7 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
   var rows=[];
   Object.keys(byDriver).forEach(function(driverId){
     var d=byDriver[driverId];
-    var totalHrsNum=d.totalMinutes/60;
-    var totalHrsStr=totalHrsNum>0?totalHrsNum.toFixed(1)+'h':'—';
+    var totalHrsStr=d.totalMinutes>0?_fmtDur(d.totalMinutes):'—';
     d.sessions.forEach(function(s){
       var vid=s.vehicleId||'—';
       if((!vid||vid==='—') && _driverVehicles){
@@ -13101,7 +13101,7 @@ function getGroupedRows(rows){
     if(b._ts!==a._ts) return b._ts-a._ts;
     return String(a.driverName||'').localeCompare(String(b.driverName||''));
   }).map(function(g){
-    var hrs=g.totalSessionMin>0?(g.totalSessionMin/60).toFixed(1)+'h':'—';
+    var hrs=_fmtDur(g.totalSessionMin);
     var brk=_fmtDur(g.totalBreakMin);
     var prefix=_groupBy==='week'?'Week of ':(_groupBy==='month'?'':'');
     return {
@@ -13151,7 +13151,7 @@ function showStats(rows){
     html+=statCard('&#xE7FD;','#E0F2F1','#00695C',Object.keys(uniqueDrivers).length,'Drivers');
     html+=statCard('&#xE8D5;','#E8F5E9','#2E7D32',totalSessions,'Sessions');
     if(totalSessionMin>0){
-      html+=statCard('&#xE8B5;','#FFF8E1','#E65100',(totalSessionMin/60).toFixed(1)+'h','Hours Worked');
+      html+=statCard('&#xE8B5;','#FFF8E1','#E65100',_fmtDur(totalSessionMin),'Hours Worked');
     }
     if(totalBreakMin>0){
       html+=statCard('&#xE192;','#E3F2FD','#1565C0',_fmtDur(totalBreakMin),'Break Time');
