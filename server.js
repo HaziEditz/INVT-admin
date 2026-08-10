@@ -11176,22 +11176,71 @@ function loadVendorDropdown() {
   }).catch(function(){});
 }
 
-function loadVehicleTypes() {
+/** Rebuild #vcar-type from Settings → Vehicle Types (parity with Fleet #v-type). */
+function loadVehicleTypes(preferredValue) {
   var cid = window.COMPANY_ID || '';
   var path = cid ? ('vehicleTypes/' + cid) : 'vehicleTypes';
-  fbDB.ref(path).once('value').then(function(snap) {
-    var data = snap.val();
-    if (!data) return;
-    var sel = document.getElementById('vcar-type');
+  var sel = document.getElementById('vcar-type');
+  if (!sel) return Promise.resolve();
+  var keep = preferredValue != null ? String(preferredValue) : String(sel.value || '');
+  function applyNames(names) {
+    var seen = {};
     sel.innerHTML = '<option value="">— Select Type —</option>';
-    Object.entries(data).forEach(function(e) {
-      if (e[1].active === false) return;
+    (names || []).forEach(function(n) {
+      var name = String(n || '').trim();
+      if (!name || seen[name.toLowerCase()]) return;
+      seen[name.toLowerCase()] = true;
       var opt = document.createElement('option');
-      opt.value = e[1].name || e[0];
-      opt.textContent = e[1].name || e[0];
+      opt.value = name;
+      opt.textContent = name;
       sel.appendChild(opt);
     });
-  }).catch(function(){});
+    if (keep) {
+      var found = false;
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === keep) { found = true; break; }
+      }
+      if (!found) {
+        var orphan = document.createElement('option');
+        orphan.value = keep;
+        orphan.textContent = keep + ' (saved)';
+        sel.appendChild(orphan);
+      }
+      sel.value = keep;
+    }
+  }
+  var fallback = ['Sedan','Van','SUV','Minibus','Wheelchair'];
+  function fromData(data) {
+    var names = [];
+    if (data && typeof data === 'object') {
+      Object.keys(data).forEach(function(k) {
+        var row = data[k];
+        if (!row || typeof row !== 'object') return;
+        if (row.active === false) return;
+        names.push(row.name || k);
+      });
+    }
+    if (!names.length) names = fallback.slice();
+    // Ensure Wheelchair remains available even if config omits it (hoist/WAV).
+    if (!names.some(function(n){ return String(n).toLowerCase() === 'wheelchair'; })) {
+      names.push('Wheelchair');
+    }
+    names.sort(function(a,b){ return String(a).localeCompare(String(b)); });
+    applyNames(names);
+  }
+  // Prefer adminRead (same source as Fleet); fall back to client Firebase if needed.
+  if (typeof adminRead === 'function') {
+    return adminRead(path).then(fromData).catch(function() {
+      return fbDB.ref(path).once('value').then(function(snap) { fromData(snap.val()); }).catch(function() {
+        applyNames(fallback);
+      });
+    });
+  }
+  return fbDB.ref(path).once('value').then(function(snap) {
+    fromData(snap.val());
+  }).catch(function() {
+    applyNames(fallback);
+  });
 }
 
 function loadVendorCars() {
@@ -11294,11 +11343,13 @@ function editVcar(key) {
   document.getElementById('vcar-colour').value    = v.colour || v.color || '';
   document.getElementById('vcar-capacity').value  = v.capacity || 4;
   document.getElementById('vcar-vendor').value    = v.vendorId || v.vendor || '';
-  document.getElementById('vcar-type').value      = v.vehicleType || '';
   document.getElementById('vcar-active').checked  = v.active !== false;
   document.getElementById('vcar-form-title').textContent = 'Edit: ' + (v.plate || key);
   document.getElementById('vcar-cancel-btn').style.display = '';
-  document.getElementById('vcar-plate').focus();
+  // Reload types then apply saved type (keeps Wheelchair + orphan saved values).
+  loadVehicleTypes(v.vehicleType || '').then(function() {
+    document.getElementById('vcar-plate').focus();
+  });
   window.scrollTo(0, 0);
 }
 
