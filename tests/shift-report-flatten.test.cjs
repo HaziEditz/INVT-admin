@@ -15,6 +15,10 @@ const {
   flattenShiftLogNodes,
   summarizeDrivers,
   sessionDurationMin,
+  extractBreakMin,
+  filterSessionsByDateRange,
+  groupSessionsByPeriod,
+  sumFilteredPeriodTotals,
 } = require('../lib/shiftReportFlatten.js');
 
 const TEMP = process.env.TEMP || process.env.TMPDIR || '/tmp';
@@ -158,5 +162,124 @@ describe('unit: phantom company driver without guards', () => {
     assert.equal(byDriver['860869'], undefined);
     assert.ok(byDriver['D001']);
     assert.ok(byDriver['D002']);
+  });
+});
+
+describe('extractBreakMin', () => {
+  it('sums breakMinutes, breakMin, and breaks map', () => {
+    assert.equal(extractBreakMin({ breakMinutes: 12 }), 12);
+    // top-level breakMinutes/breakMin are OR'd (same as Compliance) — not double-counted
+    assert.equal(extractBreakMin({ breakMin: 5, breakMinutes: 10 }), 10);
+    assert.equal(extractBreakMin({ breakMin: 5 }), 5);
+    assert.equal(
+      extractBreakMin({
+        breaks: {
+          a: { breakMinutes: 8 },
+          b: {
+            breakStart: 1_700_000_000_000,
+            breakEnd: 1_700_000_000_000 + 15 * 60 * 1000,
+          },
+        },
+      }),
+      23
+    );
+  });
+});
+
+describe('period totals with date range (Abdullah/Mustafa live fixtures)', () => {
+  const cidNode = loadTemp('sl860.json');
+  const drvRoot = loadTemp('drvroot.json');
+  const drvCid = loadTemp('drv860869.json');
+
+  it('filters sessions to range and sums work+break (not lifetime wall totals)', () => {
+    assert.ok(cidNode && drvCid, 'need fixtures');
+    const { canon, valid } = buildDriverCanon(drvRoot, drvCid, CID);
+    const byDriver = flattenShiftLogNodes([cidNode], {
+      companyId: CID,
+      canonMap: canon,
+      validIds: valid,
+    });
+
+    // Flatten to row-like objects
+    const allRows = [];
+    for (const [driverId, d] of Object.entries(byDriver)) {
+      for (const s of d.sessions) {
+        allRows.push({
+          driverId,
+          driverName: driverId === 'D001' ? 'Abdullah Gul' : 'Mustafa Tekinkaya',
+          startTs: s.startTs,
+          endTs: s.endTs,
+          _ts: s.startTs || s.endTs,
+          durationMin: s.durationMin,
+          _sessionMin: s.durationMin,
+          breakMin: s.breakMin || 0,
+          _breakMin: s.breakMin || 0,
+        });
+      }
+    }
+
+    assert.ok(allRows.some((r) => r.driverId === 'D001'));
+    assert.ok(allRows.some((r) => r.driverId === 'D002'));
+
+    // Inject known breaks for period math (live data currently all 0)
+    const withBreaks = allRows.map((r, i) =>
+      i < 3 ? { ...r, breakMin: 10, _breakMin: 10 } : r
+    );
+
+    const fromTs = Math.min(...withBreaks.map((r) => r._ts).filter(Boolean));
+    const toTs = fromTs + 14 * 86400000; // two weeks from earliest
+    const filtered = filterSessionsByDateRange(withBreaks, fromTs, toTs);
+    assert.ok(filtered.length > 0, 'expected some sessions in first 14 days');
+    assert.ok(filtered.length < withBreaks.length || withBreaks.every((r) => r._ts >= fromTs && r._ts <= toTs));
+
+    const totals = sumFilteredPeriodTotals(filtered);
+    const naiveLifetime = filtered.reduce((a, r) => a + (r._sessionMin || 0), 0);
+    assert.equal(totals.workMin, naiveLifetime);
+    assert.equal(totals.breakMin, filtered.reduce((a, r) => a + (r._breakMin || 0), 0));
+    // Must not equal the old ~46773h wall-clock lifetime
+    assert.ok(totals.workHours < 2000, 'period work hours must be realistic, got ' + totals.workHours);
+
+    const byDay = groupSessionsByPeriod(filtered, 'day');
+    const byWeek = groupSessionsByPeriod(filtered, 'week');
+    const byMonth = groupSessionsByPeriod(filtered, 'month');
+    assert.ok(byDay.length >= 1);
+    assert.ok(byWeek.length >= 1);
+    assert.ok(byMonth.length >= 1);
+    const dayWork = byDay.reduce((a, g) => a + g.workMin, 0);
+    const dayBreak = byDay.reduce((a, g) => a + g.breakMin, 0);
+    assert.equal(dayWork, totals.workMin);
+    assert.equal(dayBreak, totals.breakMin);
+    assert.equal(
+      byWeek.reduce((a, g) => a + g.workMin, 0),
+      totals.workMin
+    );
+    assert.equal(
+      byMonth.reduce((a, g) => a + g.workMin, 0),
+      totals.workMin
+    );
+  });
+
+  it('attaches breakMin onto flattened sessions from source fields', () => {
+    const byDriver = flattenShiftLogNodes(
+      [
+        {
+          D001: {
+            s1: {
+              shiftStartAt: 1_700_000_000_000,
+              shiftEndAt: 1_700_000_000_000 + 60 * 60 * 1000,
+              workedMinutes: 50,
+              breakMinutes: 10,
+            },
+          },
+        },
+      ],
+      {
+        companyId: CID,
+        canonMap: { D001: 'D001' },
+        validIds: { D001: true },
+      }
+    );
+    assert.equal(byDriver.D001.sessions[0].breakMin, 10);
+    assert.equal(byDriver.D001.sessions[0].durationMin, 50);
   });
 });

@@ -12247,7 +12247,7 @@ function reportsPage(rtype, title) {
 .inv-form-row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:16px 20px}
 </style>`;
 
-  const needDateFilter   = ['closedjobs','carreports','driverreports','dispatcherjobs','driversummary','dispatchsummary','accreport','totalmobility','fooddelivery','freight'].indexOf(rtype) !== -1;
+  const needDateFilter   = ['closedjobs','carreports','driverreports','dispatcherjobs','driversummary','dispatchsummary','accreport','totalmobility','fooddelivery','freight','shiftreports','drivershifts','carshifts'].indexOf(rtype) !== -1;
   const needStatusFilter = ['closedjobs','driverreports','dispatcherjobs','accreport','totalmobility','fooddelivery','freight'].indexOf(rtype) !== -1;
   const needDriverFilter = ['closedjobs','driverreports','driversummary','dispatcherjobs','accreport','totalmobility','shiftreports','drivershifts','carshifts','fooddelivery','freight'].indexOf(rtype) !== -1;
   const needVehicleFilter= ['closedjobs','carreports','shiftreports','carshifts','accreport','totalmobility','fooddelivery','freight'].indexOf(rtype) !== -1;
@@ -12394,6 +12394,7 @@ function reportsPage(rtype, title) {
           <button class="rpt-group-tab active" onclick="setGroupBy('all',this)">All Sessions</button>
           <button class="rpt-group-tab" onclick="setGroupBy('day',this)">By Day</button>
           <button class="rpt-group-tab" onclick="setGroupBy('week',this)">By Week</button>
+          <button class="rpt-group-tab" onclick="setGroupBy('month',this)">By Month</button>
         </div>
       </div>
 
@@ -12525,14 +12526,16 @@ function getColumns(){
         {key:'registration',label:'Plate'},{key:'vehicleType',label:'Vehicle Type'},
         {key:'makeModel',label:'Make/Model'},{key:'driverName',label:'Driver'},
         {key:'loginTime',label:'Login Time'},{key:'finishTime',label:'Finish Time'},
-        {key:'duration',label:'Duration'},{key:'totalHours',label:'Total Hours (Driver)'}
+        {key:'duration',label:'Duration'},{key:'breakTime',label:'Break Time'},
+        {key:'totalHours',label:'Total Hours (Driver)'}
       ];
     case 'drivershifts':
       return [
         {key:'shiftDate',label:'Date'},{key:'driverName',label:'Driver'},
         {key:'driverId',label:'Driver ID'},{key:'vehicleId',label:'Vehicle'},
         {key:'loginTime',label:'Login Time'},{key:'finishTime',label:'Finish Time'},
-        {key:'duration',label:'Duration'},{key:'totalHours',label:'Total Hours'}
+        {key:'duration',label:'Duration'},{key:'breakTime',label:'Break Time'},
+        {key:'totalHours',label:'Total Hours'}
       ];
     case 'fooddelivery':
       return [
@@ -12798,6 +12801,22 @@ function _shiftSessionDurMin(s, startTs, endTs){
   }
   return 0;
 }
+function _shiftExtractBreakMin(s){
+  if(!s||typeof s!=='object') return 0;
+  var breakMin=0;
+  if(s.breaks&&typeof s.breaks==='object'){
+    Object.values(s.breaks).forEach(function(b){
+      if(!b) return;
+      var bm=parseFloat(b.breakMinutes||0);
+      if(bm>0){ breakMin+=bm; return; }
+      var bs=_parseTs(b.breakStart||b.start||b.startTime);
+      var be=_parseTs(b.breakEnd||b.end||b.endTime);
+      if(bs&&be&&be>bs) breakMin+=Math.round((be-bs)/60000);
+    });
+  }
+  breakMin+=parseFloat(s.breakMinutes||s.breakMin||0)||0;
+  return Math.max(0, Math.round(breakMin));
+}
 function _shiftResolveDriverId(rawId){
   if(rawId==null||rawId===''||rawId==='0') return null;
   var id=String(rawId);
@@ -12822,7 +12841,8 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
     if(!driverKey) return;
     if(hasValid&&!_validDriverIds[driverKey]) return;
     var dur=_shiftSessionDurMin(sessionObj||{}, startTs, endTs);
-    ensureDriver(driverKey).sessions.push({startTs:startTs||0,endTs:endTs||0,durationMin:dur,vehicleId:ss(vehicleId,'—')});
+    var brk=_shiftExtractBreakMin(sessionObj||{});
+    ensureDriver(driverKey).sessions.push({startTs:startTs||0,endTs:endTs||0,durationMin:dur,breakMin:brk,vehicleId:ss(vehicleId,'—')});
     if(dur>0) ensureDriver(driverKey).totalMinutes+=dur;
   }
 
@@ -12902,9 +12922,11 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         loginTime:    _fmtTs(s.startTs),
         finishTime:   isStale?'Unclosed (stale)':(isOpen?'Active':_fmtTs(s.endTs)),
         duration:     isStale?'Stale open':(isOpen?'Ongoing':_fmtDur(s.durationMin)),
+        breakTime:    _fmtDur(s.breakMin),
         totalHours:   isStale?'—':(isOpen?'Ongoing':totalHrsStr),
         _totalMin:    d.totalMinutes,
         _sessionMin:  s.durationMin||0,
+        _breakMin:    s.breakMin||0,
         _ts:          s.startTs||s.endTs||0,
       });
     });
@@ -13020,15 +13042,18 @@ function getWeekKey(ts){
   var mon=new Date(d); mon.setDate(diff); mon.setHours(0,0,0,0);
   return mon.toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'});
 }
+function getMonthKey(ts){
+  return new Date(ts||0).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,month:'short',year:'numeric'});
+}
 
 function getGroupedRows(rows){
   if(!_isShiftRpt||_groupBy==='all') return null; // null = use raw rows
   var grouped={};
   rows.forEach(function(r){
-    var key=_groupBy==='day'?(r.shiftDate||'—'):getWeekKey(r._ts);
+    var key=_groupBy==='month'?getMonthKey(r._ts):(_groupBy==='day'?(r.shiftDate||'—'):getWeekKey(r._ts));
     if(!grouped[key]){
       grouped[key]={
-        groupKey:key, sessions:0, totalSessionMin:0,
+        groupKey:key, sessions:0, totalSessionMin:0, totalBreakMin:0,
         drivers:[], _drvSet:{}, _ts:0,
         vehicleCount:0, _vSet:{}
       };
@@ -13036,18 +13061,22 @@ function getGroupedRows(rows){
     var g=grouped[key];
     g.sessions++;
     g.totalSessionMin+=r._sessionMin||0;
+    g.totalBreakMin+=r._breakMin||0;
     if(r.driverId&&!g._drvSet[r.driverId]){g._drvSet[r.driverId]=true;g.drivers.push(r.driverName||r.driverId);}
     if(r.vehicleId&&r.vehicleId!=='—'&&!g._vSet[r.vehicleId]){g._vSet[r.vehicleId]=true;g.vehicleCount++;}
     if((r._ts||0)>g._ts) g._ts=r._ts||0;
   });
   return Object.values(grouped).sort(function(a,b){return b._ts-a._ts;}).map(function(g){
     var hrs=g.totalSessionMin>0?(g.totalSessionMin/60).toFixed(1)+'h':'—';
+    var brk=_fmtDur(g.totalBreakMin);
+    var prefix=_groupBy==='week'?'Week of ':(_groupBy==='month'?'':'');
     return {
-      groupKey:    _groupBy==='week'?'Week of '+g.groupKey:g.groupKey,
+      groupKey:    prefix+g.groupKey,
       drivers:     g.drivers.slice(0,3).join(', ')+(g.drivers.length>3?' +'+( g.drivers.length-3)+' more':''),
       driverCount: g.drivers.length,
       sessions:    g.sessions,
       totalHrs:    hrs,
+      totalBreak:  brk,
       vehicles:    g.vehicleCount||'—',
       _ts:         g._ts
     };
@@ -13076,21 +13105,22 @@ function showStats(rows){
       if(drvComm>0) html+=statCard('&#xE8B0;','#FFF3E0','#E65100','$'+drvComm.toFixed(2),'Commission');
       html+=statCard('&#xE263;','#E0F2F1','#00695C','$'+drvNet.toFixed(2),'Net Payout');
     }
-  } else if(rows[0].loginTime!==undefined){
-    // Shift logs stats — avoid double-counting by summing per unique driver
-    var driverTotals={};
-    rows.forEach(function(r){
-      if(!driverTotals[r.driverId]||r._totalMin>driverTotals[r.driverId])
-        driverTotals[r.driverId]=r._totalMin||0;
-    });
-    var totalMin=Object.values(driverTotals).reduce(function(a,v){return a+v;},0);
+  } else if(rows[0].loginTime!==undefined || rows[0]._sessionMin!==undefined){
+    // Shift logs stats — sum filtered session work/break (NOT lifetime driver totals)
+    var totalSessionMin=rows.reduce(function(a,r){return a+(r._sessionMin||0);},0);
+    var totalBreakMin=rows.reduce(function(a,r){return a+(r._breakMin||0);},0);
     var totalSessions=rows.length;
-    var uniqueDrivers=Object.keys(driverTotals).length;
-    html+=statCard('&#xE7FD;','#E0F2F1','#00695C',uniqueDrivers,'Drivers');
+    var uniqueDrivers={};
+    rows.forEach(function(r){ if(r.driverId) uniqueDrivers[r.driverId]=true; });
+    html+=statCard('&#xE7FD;','#E0F2F1','#00695C',Object.keys(uniqueDrivers).length,'Drivers');
     html+=statCard('&#xE8D5;','#E8F5E9','#2E7D32',totalSessions,'Sessions');
-    if(totalMin>0){
-      var displayHrs=(totalMin/60).toFixed(1)+'h';
-      html+=statCard('&#xE8B5;','#FFF8E1','#E65100',displayHrs,'Total Hours');
+    if(totalSessionMin>0){
+      html+=statCard('&#xE8B5;','#FFF8E1','#E65100',(totalSessionMin/60).toFixed(1)+'h','Hours Worked');
+    }
+    if(totalBreakMin>0){
+      html+=statCard('&#xE192;','#E3F2FD','#1565C0',_fmtDur(totalBreakMin),'Break Time');
+    } else if(_isShiftRpt){
+      html+=statCard('&#xE192;','#ECEFF1','#607D8B','—','Break Time');
     }
   } else if(rows[0].jobstatus!==undefined&&rows[0].driverName!==undefined){
     var totalGross=rows.reduce(function(a,r){return a+(r._fareNum||0);},0);
@@ -13174,11 +13204,11 @@ function applyFilters(){
 }
 
 function renderGroupedTable(rows){
-  var label=_groupBy==='day'?'Date':'Week (starting)';
+  var label=_groupBy==='day'?'Date':(_groupBy==='month'?'Month':'Week (starting)');
   var thead=document.getElementById('rpt-thead');
   var tbody=document.getElementById('rpt-tbody');
   if(!thead||!tbody) return;
-  thead.innerHTML='<th>'+label+'</th><th>Drivers</th><th>Driver Count</th><th>Sessions</th><th>Total Hours</th>';
+  thead.innerHTML='<th>'+label+'</th><th>Drivers</th><th>Driver Count</th><th>Sessions</th><th>Hours Worked</th><th>Break Time</th>';
   if(rows.length===0){
     tbody.innerHTML='';
     document.getElementById('rpt-table-wrap').style.display='none';
@@ -13187,6 +13217,8 @@ function renderGroupedTable(rows){
     var cb=document.getElementById('rpt-count-badge');if(cb){cb.textContent='0 records';cb.style.display='';}
     return;
   }
+  document.getElementById('rpt-empty-box').style.display='none';
+  document.getElementById('rpt-loading-box').style.display='none';
   tbody.innerHTML=rows.map(function(r){
     return '<tr>'
       +'<td><strong>'+r.groupKey+'</strong></td>'
@@ -13194,13 +13226,17 @@ function renderGroupedTable(rows){
       +'<td>'+r.driverCount+'</td>'
       +'<td>'+r.sessions+'</td>'
       +'<td><strong style="color:#2E7D32">'+r.totalHrs+'</strong></td>'
+      +'<td>'+(r.totalBreak||'—')+'</td>'
       +'</tr>';
   }).join('');
   document.getElementById('rpt-table-wrap').style.display='';
   document.getElementById('rpt-empty-box').style.display='none';
   document.getElementById('rpt-loading-box').style.display='none';
   var cb=document.getElementById('rpt-count-badge');
-  if(cb){cb.textContent=rows.length+' '+(_groupBy==='day'?'days':'weeks');cb.style.display='';}
+  if(cb){
+    var unit=_groupBy==='day'?'days':(_groupBy==='month'?'months':'weeks');
+    cb.textContent=rows.length+' '+unit;cb.style.display='';
+  }
 }
 
 function sortBy(col){
