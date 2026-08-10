@@ -182,7 +182,9 @@ module.exports = function driverOpsSummaryPage(pageWrap, commonHead, commonScrip
 </div>
 `;
 
+  // Must wrap in <script> — commonScripts appends extraJs after a closed </script>.
   const js = `
+<script>
 var _dosRows = [];
 var _dosDisp = [];
 var _dosPeriod = null;
@@ -708,6 +710,7 @@ function dosExportCsv(){
 
 dosInitDates();
 dosLoad();
+<\/script>
 `;
 
   return pageWrap(commonHead('Driver Ops & Payment Summary', css), body, commonScripts(js));
