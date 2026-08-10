@@ -236,6 +236,7 @@ const PAGE_META = {
   'tm_trips.aspx':               { title: 'TM Trip History',         icon: '&#xE8E5;',  section: 'Total Mobility' },
   'tm_batches.aspx':             { title: 'TM Claim Batches',        icon: '&#xE8E5;',  section: 'Total Mobility' },
   'drivercompliance.aspx':       { title: 'Driver Compliance',       icon: '&#xE8D5;',  section: 'Reports' },
+  'driveropssummary.aspx':       { title: 'Driver Ops & Payments',   icon: '&#xE227;',  section: 'Reports' },
   'businessaccounts.aspx':          { title: 'Business Accounts',          icon: '&#xE8A1;',  section: 'Accounts' },
   'businessaccountbilling.aspx':    { title: 'Business Account Billing',   icon: '&#xE8C7;',  section: 'Accounts' },
   'accclients.aspx':                { title: 'ACC Clients',                 icon: '&#xE7FB;',  section: 'Accounts' },
@@ -1735,6 +1736,7 @@ function sidebarHTML() {
         <li><a href="DriverShiftsSummary.aspx">Drivers Shifts Summary</a></li>
         <li><a href="CarShiftsSummary.aspx">Cars Shifts Summary</a></li>
         <li><a href="DriverCompliance.aspx">Driver Compliance</a></li>
+        <li><a href="DriverOpsSummary.aspx">Driver Ops &amp; Payments</a></li>
         <li><a href="TotalMobility.aspx">Total Mobility Jobs</a></li>
       </ul>
     </li>
@@ -6886,6 +6888,12 @@ function driversPage(companyId, isSA) {
             </div>
             <div class="field-group" style="grid-column:1/-1"><label>Emergency Contact (Name &amp; Phone)</label><input id="d-emergency" type="text" placeholder="Jane Smith — 027 123 4567"/></div>
           </div>
+          <div class="section-title">Payout bank details <span style="font-size:11px;font-weight:400;color:#90a4ae">(for your manual transfer reference — not an in-app payout)</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
+            <div class="field-group"><label>Bank Name</label><input id="d-bank-name" type="text" placeholder="e.g. ANZ, ASB, Westpac"/></div>
+            <div class="field-group"><label>Account Name</label><input id="d-account-name" type="text" placeholder="Name on account"/></div>
+            <div class="field-group" style="grid-column:1/-1"><label>Account Number</label><input id="d-account-number" type="text" placeholder="e.g. 12-3456-7890123-00"/></div>
+          </div>
           <div class="section-title">License &amp; Credentials</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
             <div class="field-group"><label>Driver License Number *</label><input id="d-license" type="text" placeholder="NZ12345678"/></div>
@@ -7707,6 +7715,9 @@ function openDriverModal(id) {
     document.getElementById('d-gst').value          = d.gstNumber||'';
     document.getElementById('d-employment').value   = d.employmentType||'';
     document.getElementById('d-emergency').value    = d.emergencyContact||'';
+    document.getElementById('d-bank-name').value    = d.bankName||'';
+    document.getElementById('d-account-name').value = d.accountName||'';
+    document.getElementById('d-account-number').value = d.accountNumber||'';
     document.getElementById('d-license').value      = d.licenseNumber||'';
     document.getElementById('d-expiry').value       = d.licenseExpiry||'';
     document.getElementById('d-taxi-lic').value     = d.taxiLicenseNumber||'';
@@ -7780,6 +7791,7 @@ function openDriverModal(id) {
     document.getElementById('edit-driver-id').value = '';
     document.getElementById('d-pass-label').textContent = 'App Password *';
     ['d-name','d-email','d-phone','d-address','d-gst','d-emergency',
+     'd-bank-name','d-account-name','d-account-number',
      'd-license','d-taxi-lic','d-password','d-pass-name','d-eid'].forEach(function(x){
       document.getElementById(x).value='';
     });
@@ -7823,6 +7835,9 @@ function saveDriver() {
   var gst         = document.getElementById('d-gst').value.trim();
   var employment  = document.getElementById('d-employment').value;
   var emergency   = document.getElementById('d-emergency').value.trim();
+  var bankName    = document.getElementById('d-bank-name').value.trim();
+  var accountName = document.getElementById('d-account-name').value.trim();
+  var accountNumber = document.getElementById('d-account-number').value.trim();
   var license     = document.getElementById('d-license').value.trim();
   var expiry      = document.getElementById('d-expiry').value;
   var taxiLic     = document.getElementById('d-taxi-lic').value.trim();
@@ -7988,6 +8003,7 @@ function saveDriver() {
     name: name, email: email, phone: phone, address: address,
     gstNumber: gst, employmentType: employment,
     emergencyContact: emergency, licenseNumber: license,
+    bankName: bankName, accountName: accountName, accountNumber: accountNumber,
     taxiLicenseNumber: taxiLic, taxiLicenseExpiry: taxiExpiry,
     licenseExpiry: expiry,
     passEndorsementName: passName, passEndorsementExpiry: passExpiry,
@@ -14097,6 +14113,10 @@ loadCompliance();
 <\/script>`;
 
   return pageWrap(commonHead('Driver Compliance', css), body, commonScripts(js));
+}
+
+function driverOpsSummaryPage() {
+  return require('./pages/driverOpsSummary')(pageWrap, commonHead, commonScripts);
 }
 
 // ── Business Accounts ────────────────────────────────────────────────────────
@@ -22306,6 +22326,10 @@ const server = http.createServer((req, res) => {
     if (lname === 'drivercompliance.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
       res.end(withSa(withCid(driverCompliancePage(), cid), isSA)); return;
+    }
+    if (lname === 'driveropssummary.aspx') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
+      res.end(withSa(withCid(driverOpsSummaryPage(), cid), isSA)); return;
     }
     if (lname === 'businessaccounts.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
