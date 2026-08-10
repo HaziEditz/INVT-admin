@@ -12310,17 +12310,17 @@ function reportsPage(rtype, title) {
         </div>
       </div>
       <div class="inv-form-row">
-        <div class="md-input-wrapper" style="min-width:190px">
+        <div class="rpt-fi" style="min-width:190px">
           <label>Driver</label>
           <select id="inv-driver" onchange="loadInvoiceJobs()">
             <option value="">-- Select Driver --</option>
           </select>
         </div>
-        <div class="md-input-wrapper" style="min-width:140px">
+        <div class="rpt-fi" style="min-width:140px">
           <label>Period From</label>
           <input type="date" id="inv-from"/>
         </div>
-        <div class="md-input-wrapper" style="min-width:140px">
+        <div class="rpt-fi" style="min-width:140px">
           <label>Period To</label>
           <input type="date" id="inv-to"/>
         </div>
@@ -12620,7 +12620,14 @@ function flattenJoback(data){
                 ||j.fareAmount||j.RideCost||j.rideCost||j.Amount||j.amount||j.totalFare
                 ||j.DriverCost||j.driverCost||j.price||j.Price||null;
       var fareNum=parseFloat(fareRaw)||0;
-      var payMethod=ss(j.paymentMethod||j.PaymentMethod||j.payment||j.Payment||j.payType||j.paymentType||j.PaymentType,'—');
+      var payMethodRaw=ss(j.paymentMethod||j.PaymentMethod||j.payment||j.Payment||j.payType||j.paymentType||j.PaymentType,'—');
+      var payMethod=(function(pm){
+        if(!pm||pm==='—') return '—';
+        var s=String(pm).trim();
+        if(!s) return '—';
+        // Display Title Case so Cash/cash/CASH collapse visually; filters already lower-case.
+        return s.charAt(0).toUpperCase()+s.slice(1).toLowerCase();
+      })(payMethodRaw);
       var distRaw=j.distanceKm||j.DistanceKm||j.distance||j.Distance||j.km||j.kilometres||j.kilometers||j.totalDistance||j.meterDistance||null;
       var distStr=distRaw?(parseFloat(distRaw).toFixed(1)+' km'):'—';
       var durRaw=j.durationMin||j.DurationMin||j.durationLabel||j.DurationLabel||j.duration||j.Duration||j.minutes||null;
@@ -12721,8 +12728,11 @@ function groupByDriver(rows){
 function groupByStatus(rows){
   var map={};
   rows.forEach(function(r){
-    var key=(r.companyId||'—')+'|'+(r.jobstatus||'—');
-    if(!map[key]) map[key]={companyId:r.companyId,jobstatus:r.jobstatus,count:0};
+    var st=normalizeJobStatus(r.jobstatus||r.status||'—')||'—';
+    // Title-case for display consistency (Completed, Cancelled, …)
+    var label=st==='—'?'—':(st.charAt(0).toUpperCase()+st.slice(1));
+    var key=(r.companyId||'—')+'|'+st;
+    if(!map[key]) map[key]={companyId:r.companyId,jobstatus:label,count:0};
     map[key].count++;
   });
   return Object.values(map).sort(function(a,b){return b.count-a.count;});
@@ -13936,18 +13946,33 @@ function loadCompliance(){
   Promise.all([
     window.adminRead('shiftLogs/'+cid).catch(function(){return null;}),
     window.adminRead('drivers/'+cid).catch(function(){return null;}),
+    window.adminRead('drivers').catch(function(){return null;}),
     window.adminRead('vehicles').catch(function(){return null;})
   ]).then(function(res){
-    var shiftData=res[0],driverData=res[1],vehicleData=res[2];
+    var shiftData=res[0],driverData=res[1],driversFlat=res[2],vehicleData=res[3];
     _compDriverNames={};_compDriverVeh={};_compVehicles={};
+    function ingestDriver(key,d,fromCompanyScoped){
+      if(!d||typeof d!=='object') return;
+      // Flat /drivers tree is multi-company — require matching companyId when present.
+      if(!fromCompanyScoped && d.companyId!=null && String(d.companyId)!==String(cid)) return;
+      var name=[d.firstName||'',d.lastName||'',d.name||''].join(' ').trim()||d.email||d.dispatcherId||'';
+      if(!name) return;
+      function put(id){ if(id!=null && String(id)!=='') _compDriverNames[String(id)]=name; }
+      put(key);
+      put(d.uid); put(d.Uid);
+      put(d.id); put(d.driverId); put(d.DriverId); put(d.dispatcherId);
+      var vid=d.vehicleId||d.VehicleId||d.allocatedTaxi||'';
+      if(vid){
+        [key,d.uid,d.id,d.driverId,d.dispatcherId].filter(Boolean).forEach(function(id){
+          _compDriverVeh[String(id)]=String(vid);
+        });
+      }
+    }
     if(driverData&&typeof driverData==='object'){
-      Object.values(driverData).forEach(function(d){
-        if(!d||typeof d!=='object') return;
-        var id=String(d.id||d.driverId||'');
-        if(!id) return;
-        _compDriverNames[id]=d.name||d.email||id;
-        if(d.vehicleId) _compDriverVeh[id]=d.vehicleId;
-      });
+      Object.entries(driverData).forEach(function(e){ ingestDriver(e[0],e[1],true); });
+    }
+    if(driversFlat&&typeof driversFlat==='object'){
+      Object.entries(driversFlat).forEach(function(e){ ingestDriver(e[0],e[1],false); });
     }
     if(vehicleData&&typeof vehicleData==='object'){
       Object.entries(vehicleData).forEach(function(e){
@@ -15458,6 +15483,7 @@ function scheduledRidesPage() {
 </div>`;
 
   const js = `
+<script>
 var _srData = [];
 var _srFilter = 'all';
 

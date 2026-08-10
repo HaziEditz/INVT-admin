@@ -359,7 +359,9 @@ function dosFlattenJobs(merged){
       if(!j||typeof j!=='object') return;
       var copy=Object.assign({},j);
       copy.bookingId=copy.bookingId||copy.BookingId||bid;
-      copy.driverId=String(copy.driverId||copy.DriverId||copy.driverid||did);
+      copy.driverId=String(copy.driverId||copy.DriverId||copy.driverid||did||'').trim();
+      // Nested joback keys can be booking ids when structure is weird — drop those.
+      if(!copy.driverId || copy.driverId===bid || copy.driverId===String(copy.bookingId||'')) return;
       out.push(copy);
     });
   });
@@ -380,7 +382,9 @@ function dosMergeJobSources(results){
     Object.keys(data).forEach(function(bid){
       var job=data[bid];
       if(!job||typeof job!=='object') return;
-      var did=String(job.driverId||job.DriverId||job.driverid||bid);
+      // Never fall back to bookingId — that created phantom "driver" rows (869…).
+      var did=String(job.driverId||job.DriverId||job.driverid||'').trim();
+      if(!did) return;
       if(!merged[bid]) merged[bid]={};
       if(!merged[bid][did]) merged[bid][did]={};
       Object.assign(merged[bid][did], job);
@@ -396,7 +400,8 @@ function dosMergeJobSources(results){
       var vals=Object.values(job);
       var isFlat=vals.length>0&&vals.every(function(v){return v===null||typeof v!=='object';});
       if(isFlat){
-        var did=String(job.driverId||job.DriverId||job.driverid||bid);
+        var did=String(job.driverId||job.DriverId||job.driverid||'').trim();
+        if(!did) return;
         if(!merged[bid][did]) merged[bid][did]={};
         Object.assign(merged[bid][did], job);
       } else {
@@ -533,7 +538,12 @@ function dosLoad(){
         bankName:meta.bankName, accountName:meta.accountName, accountNumber:meta.accountNumber
       });
     }).filter(function(r){
-      return r.outcomes.total>0 || r.workMinutes>0 || r.owedBeforeLock>0;
+      if(!(r.outcomes.total>0 || r.workMinutes>0 || r.owedBeforeLock>0)) return false;
+      // Drop phantom booking-id rows with no profile and no paid activity.
+      var meta=_dosDriversMeta[r.driverId];
+      var looksLikeBooking=/^869\\d{6,}$/.test(r.driverId) || (/^\\d{10,}$/.test(r.driverId) && !meta);
+      if(looksLikeBooking && !meta && r.workMinutes===0 && r.owedBeforeLock===0 && r.outcomes.completed===0) return false;
+      return true;
     });
 
     var sel=document.getElementById('dos-driver-filter');
