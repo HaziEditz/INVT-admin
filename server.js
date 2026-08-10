@@ -12430,9 +12430,10 @@ function reportsPage(rtype, title) {
 var RTYPE = '${rtype}';
 var NZ_TZ = window.COMPANY_TZ || 'Pacific/Auckland';
 var _allRows = [], _drivers = {}, _vehicles = {}, _zonesLookup = {}, _sortCol = -1, _sortDir = 1;
-var _driverLastLogin = {}, _driverVehicles = {}, _validDriverIds = {};
+var _driverLastLogin = {}, _driverVehicles = {}, _validDriverIds = {}, _driverCanon = {};
 var _groupBy = 'all';
 var _isShiftRpt = ['shiftreports','drivershifts','carshifts'].indexOf('${rtype}') !== -1;
+var _SHIFT_MAX_SESSION_MIN = 18 * 60; // sync with lib/shiftReportFlatten.js + compliance stale cap
 
 function ss(v,d){ return (v==null||v===''||v===undefined)?d:(String(v).trim()||d); }
 
@@ -12753,74 +12754,126 @@ function _fmtDur(minutes){
   return h?h+'h '+(m?m+'m':''):m+'m';
 }
 
+function _shiftLooksLikeSession(s){
+  if(!s||typeof s!=='object') return false;
+  return !!(s.startTime||s.shiftStartAt||s.startTs||s.loginTime||s.endTime||s.shiftEndAt||s.endTs||s.logoutTime||s.finishTime||s.workedMinutes!=null||s.totalMinutes!=null||s.status||s.isActive!=null);
+}
+function _shiftLooksLikeDriverBucket(v){
+  if(!v||typeof v!=='object') return false;
+  var vals=Object.values(v);
+  return vals.length>0&&vals.some(_shiftLooksLikeSession);
+}
+function _shiftLooksLikeCompanyBucket(v){
+  if(!v||typeof v!=='object') return false;
+  var vals=Object.values(v), driverish=0, sessionish=0;
+  vals.forEach(function(child){
+    if(!child||typeof child!=='object') return;
+    if(_shiftLooksLikeSession(child)) sessionish++;
+    else if(_shiftLooksLikeDriverBucket(child)) driverish++;
+  });
+  return driverish>0&&sessionish===0;
+}
+function _shiftIsCompanyKey(k){
+  var s=String(k||'');
+  if(!s) return false;
+  var cid=String(window.COMPANY_ID||'');
+  if(cid&&s===cid) return true;
+  return /^\\d+$/.test(s); // pure-numeric keys are company ids (D001 is not)
+}
+function _shiftSessionDurMin(s, startTs, endTs){
+  // Prefer app-authored work totals. workedMinutes:0 must NOT fall back to wall clock
+  // (reused shiftStartAt across end-logs inflated Abdullah UID to ~46773h).
+  if(s&&s.workedMinutes!=null&&s.workedMinutes!==''){
+    var wm=parseFloat(s.workedMinutes);
+    return (isFinite(wm)&&wm>0)?Math.round(wm):0;
+  }
+  if(s&&s.totalMinutes!=null&&s.totalMinutes!==''){
+    var tm=parseFloat(s.totalMinutes);
+    return (isFinite(tm)&&tm>0)?Math.round(tm):0;
+  }
+  if(startTs&&endTs&&endTs>startTs){
+    var wall=Math.round((endTs-startTs)/60000);
+    if(wall>=_SHIFT_MAX_SESSION_MIN) return 0; // ghost/stale 18h stamps
+    return wall;
+  }
+  return 0;
+}
+function _shiftResolveDriverId(rawId){
+  if(rawId==null||rawId===''||rawId==='0') return null;
+  var id=String(rawId);
+  if(_shiftIsCompanyKey(id)) return null;
+  if(_driverCanon&&_driverCanon[id]) return _driverCanon[id];
+  return id;
+}
+
 function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
-  // logsArr: array of raw node values from shiftLogs/attendance (any of them could be null)
-  // lastShiftData: {driverId: endTimestamp} from lastshifttime
-  // Build per-driver session list
+  // Keep in sync with lib/shiftReportFlatten.js
+  // logsArr: shiftLogs/cid (+ optional legacy nodes). Never treat company id as a driver.
   var byDriver={};
+  var hasValid=Object.keys(_validDriverIds||{}).length>0;
 
   function ensureDriver(id){
     if(!byDriver[id]) byDriver[id]={sessions:[],totalMinutes:0};
     return byDriver[id];
   }
 
-  function addSession(driverKey, vehicleId, startTs, endTs){
+  function addSession(rawDriverKey, vehicleId, startTs, endTs, sessionObj){
+    var driverKey=_shiftResolveDriverId(rawDriverKey);
     if(!driverKey) return;
-    if(driverKey === '0') return; // skip test/null entry only
-    var dur=(startTs&&endTs&&endTs>startTs)?Math.round((endTs-startTs)/60000):0;
+    if(hasValid&&!_validDriverIds[driverKey]) return;
+    var dur=_shiftSessionDurMin(sessionObj||{}, startTs, endTs);
     ensureDriver(driverKey).sessions.push({startTs:startTs||0,endTs:endTs||0,durationMin:dur,vehicleId:ss(vehicleId,'—')});
     if(dur>0) ensureDriver(driverKey).totalMinutes+=dur;
   }
 
-  // Process each shiftLogs node
-  logsArr.forEach(function(logData){
+  function ingestDriverSessions(driverKey, sessions){
+    if(!sessions||typeof sessions!=='object') return;
+    Object.keys(sessions).forEach(function(sk){
+      var s=sessions[sk];
+      if(!_shiftLooksLikeSession(s)) return;
+      var start=_parseTs(s.startTime||s.loginTime||s.start||s.StartTime||s.login||s.shiftStartAt||s.startTs);
+      var end=_parseTs(s.endTime||s.logoutTime||s.end||s.EndTime||s.logout||s.finishTime||s.shiftEndAt||s.endTs);
+      addSession(driverKey, s.vehicleId||s.VehicleId||s.vehicle||'—', start, end, s);
+    });
+  }
+
+  (logsArr||[]).forEach(function(logData){
     if(!logData||typeof logData!=='object') return;
     Object.keys(logData).forEach(function(k1){
-      if(/^\d+$/.test(k1)) return; // skip company-id keys at root
       var v1=logData[k1];
       if(!v1||typeof v1!=='object') return;
-      // Detect structure: {driverId:{sessionKey:{startTime,endTime,...}}} vs {sessionKey:{driverId,startTime,...}}
-      var firstChild=Object.values(v1)[0];
-      if(firstChild&&typeof firstChild==='object'){
-        // k1 is driverId, children are sessions
-        Object.keys(v1).forEach(function(sk){
-          var s=v1[sk];
-          if(!s||typeof s!=='object') return;
-          var start=_parseTs(s.startTime||s.loginTime||s.start||s.StartTime||s.login||s.shiftStartAt||s.startTs);
-          var end=_parseTs(s.endTime||s.logoutTime||s.end||s.EndTime||s.logout||s.finishTime||s.shiftEndAt||s.endTs);
-          var vid=s.vehicleId||s.VehicleId||s.vehicle||'—';
-          addSession(k1, vid, start, end);
-        });
-      } else {
-        // k1 is a sessionKey, v1 is a session with driverId field
+      // Company bucket (shiftLogs root keyed by cid): recurse — never use cid as driverId
+      if(_shiftIsCompanyKey(k1)||_shiftLooksLikeCompanyBucket(v1)){
+        Object.keys(v1).forEach(function(driverKey){ ingestDriverSessions(driverKey, v1[driverKey]); });
+        return;
+      }
+      if(_shiftLooksLikeDriverBucket(v1)){
+        ingestDriverSessions(k1, v1);
+        return;
+      }
+      if(_shiftLooksLikeSession(v1)){
         var did=v1.driverId||v1.DriverId||v1.driver||k1;
         var start=_parseTs(v1.startTime||v1.loginTime||v1.start||v1.StartTime||v1.shiftStartAt||v1.startTs);
         var end=_parseTs(v1.endTime||v1.logoutTime||v1.end||v1.EndTime||v1.finishTime||v1.shiftEndAt||v1.endTs);
-        var vid=v1.vehicleId||v1.VehicleId||'—';
-        addSession(did, vid, start, end);
+        addSession(did, v1.vehicleId||v1.VehicleId||'—', start, end, v1);
       }
     });
   });
 
-  // Supplement from lastshifttime (end times only) — ONLY for company 1216 registered drivers
   if(lastShiftData&&typeof lastShiftData==='object'){
     Object.keys(lastShiftData).forEach(function(id){
-      if(id === '0') return; // skip test entry
-      // Skip IDs not belonging to our registered drivers — avoids showing other companies' data
-      if(_drivers && !_drivers[id]) return;
+      if(id==='0'||_shiftIsCompanyKey(id)) return;
+      var resolved=_shiftResolveDriverId(id);
+      if(!resolved) return;
+      if(hasValid&&!_validDriverIds[resolved]) return;
+      if(byDriver[resolved]&&byDriver[resolved].sessions.length) return;
       var endTs=_parseTs(lastShiftData[id]);
       if(!endTs) return;
-      if(!byDriver[id]||!byDriver[id].sessions.length){
-        var vehId = (_driverVehicles && _driverVehicles[id]) || '—';
-        addSession(id, vehId, 0, endTs);
-      }
+      var vehId=(_driverVehicles&&(_driverVehicles[resolved]||_driverVehicles[id]))||'—';
+      addSession(resolved, vehId, 0, endTs, {});
     });
   }
 
-  // NOTE: lastLogin is NOT used as shift data — it only records when the driver app was opened,
-  // not when an actual shift started or ended. Real shift data comes from lastshifttime / shiftLogs.
-
-  // Flatten to rows — one row per session
   var rows=[];
   Object.keys(byDriver).forEach(function(driverId){
     var d=byDriver[driverId];
@@ -12829,7 +12882,6 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
     d.sessions.forEach(function(s){
       var vid=s.vehicleId||'—';
       var vInfo=_vehicles[vid]||_vehicles[(vid||'').toUpperCase()]||_vehicles[(vid||'').toLowerCase()]||{};
-      // Case-insensitive fallback scan across all vehicles
       if(!vInfo.taxiNumber&&vid!=='—'){
         var vidLow=(vid||'').toLowerCase();
         var found=Object.values(_vehicles).find(function(v){return v&&(String(v.taxiNumber||'').toLowerCase()===vidLow||String(v.registration||'').toLowerCase()===vidLow||String(v.vehicleId||'').toLowerCase()===vidLow);});
@@ -13214,30 +13266,67 @@ function loadReport(){
       _drivers={};
       _validDriverIds={};
       _driverVehicles={};
-      // Build name map from driver push-key profiles
-      if(d&&typeof d==='object'){
-        Object.entries(d).forEach(function(e){
-          var k=e[0],v=e[1];
-          if(/^\d+$/.test(k)) return;
-          if(!v||typeof v!=='object') return;
-          var name=[v.firstName||v.first_name||'',v.lastName||v.last_name||v.surname||'',v.name||''].join(' ').trim()||v.dispatcherId||k;
-          _drivers[k]=name;
-          if(v.dispatcherId) _drivers[v.dispatcherId]=name;
-          if(v.driverId) _drivers[v.driverId]=name;
-        });
-      }
-      // Build validDriverIds + driverVehicles + driverLastLogin from drivers/{cid} uid-lookup
+      _driverCanon={};
       _driverLastLogin={};
+      function isLegacyDriverId(id){ return /^D\\d+/i.test(String(id||'').trim()); }
+      function setCanon(alias, canonId, name){
+        if(alias==null||alias==='') return;
+        var a=String(alias), c=String(canonId||'');
+        if(!a||!c) return;
+        if(/^\\d+$/.test(a)||(window.COMPANY_ID&&a===String(window.COMPANY_ID))) return;
+        if(/^\\d+$/.test(c)||(window.COMPANY_ID&&c===String(window.COMPANY_ID))) return;
+        if(_driverCanon[a]&&isLegacyDriverId(_driverCanon[a])&&!isLegacyDriverId(c)) return;
+        _driverCanon[a]=c;
+        if(name){ _drivers[a]=name; _drivers[c]=name; }
+        _validDriverIds[c]=true;
+      }
+      function preferCanon(v, key){
+        var cands=[v.dispatcherId,v.id,v.driverId,v.DriverId,key];
+        for(var i=0;i<cands.length;i++){
+          if(cands[i]!=null&&String(cands[i]).trim()!==''&&isLegacyDriverId(cands[i])) return String(cands[i]).trim();
+        }
+        var aliases=[v.uid,v.Uid,key,v.fleetKey].filter(Boolean).map(String);
+        for(var a=0;a<aliases.length;a++){
+          if(_driverCanon[aliases[a]]&&isLegacyDriverId(_driverCanon[aliases[a]])) return _driverCanon[aliases[a]];
+        }
+        for(var j=0;j<cands.length;j++){
+          if(cands[j]!=null&&String(cands[j]).trim()!=='') return String(cands[j]).trim();
+        }
+        return String(key||'');
+      }
+      function ingestDriver(key,v,fromCompanyScoped){
+        if(!v||typeof v!=='object') return;
+        // Company bucket under drivers root — recurse, never register cid as a driver
+        if(/^\\d+$/.test(String(key))&&!v.name&&!v.firstName&&!v.email&&!v.uid&&!v.id&&!v.driverId){
+          Object.keys(v).forEach(function(ck){ ingestDriver(ck,v[ck],true); });
+          return;
+        }
+        if(!fromCompanyScoped&&v.companyId!=null&&window.COMPANY_ID&&String(v.companyId)!==String(window.COMPANY_ID)) return;
+        var name=[v.firstName||v.first_name||'',v.lastName||v.last_name||v.surname||'',v.name||''].join(' ').trim()||v.dispatcherId||'';
+        if(!name&&!v.id&&!v.driverId&&!v.dispatcherId&&!v.uid) return;
+        var canon=preferCanon(v,key);
+        if(!canon||/^\\d+$/.test(canon)) return;
+        setCanon(key,canon,name||canon);
+        setCanon(v.uid,canon,name||canon);
+        setCanon(v.Uid,canon,name||canon);
+        setCanon(v.id,canon,name||canon);
+        setCanon(v.driverId,canon,name||canon);
+        setCanon(v.DriverId,canon,name||canon);
+        setCanon(v.dispatcherId,canon,name||canon);
+        setCanon(canon,canon,name||canon);
+        if(v.vehicleId){
+          [key,v.uid,v.id,v.driverId,v.dispatcherId,canon].filter(Boolean).forEach(function(id){
+            _driverVehicles[String(id)]=String(v.vehicleId);
+          });
+        }
+        if(v.lastLogin) _driverLastLogin[canon]=v.lastLogin;
+      }
+      // Company-scoped first so D001/D002 win before flat UID stubs
       if(uidLookup&&typeof uidLookup==='object'){
-        Object.values(uidLookup).forEach(function(ud){
-          if(!ud||typeof ud!=='object') return;
-          var numId=String(ud.id||ud.driverId||'').trim();
-          if(!numId) return;
-          _validDriverIds[numId]=true;
-          if(ud.vehicleId) _driverVehicles[numId]=String(ud.vehicleId);
-          if(ud.name&&!_drivers[numId]) _drivers[numId]=ud.name;
-          if(ud.lastLogin) _driverLastLogin[numId]=ud.lastLogin;
-        });
+        Object.entries(uidLookup).forEach(function(e){ ingestDriver(e[0],e[1],true); });
+      }
+      if(d&&typeof d==='object'){
+        Object.entries(d).forEach(function(e){ ingestDriver(e[0],e[1],false); });
       }
     }).catch(function(e){ console.warn('[rpt] driver prereq failed:',e&&(e.message||String(e))); }));
   }
@@ -13451,15 +13540,23 @@ function loadReport(){
     }
     if(useShifts){
       var byVehicle=(RTYPE==='shiftreports'||RTYPE==='carshifts');
-      return Promise.all([
-        window.adminRead('lastshifttime').catch(function(){return null;}),
-        window.adminRead('shiftLogs').catch(function(){return null;}),
-        window.adminRead('shiftLogs/'+(window.COMPANY_ID||'')).catch(function(){return null;}),
-        window.adminRead('attendance').catch(function(){return null;}),
-        window.adminRead('attendance/'+(window.COMPANY_ID||'')).catch(function(){return null;}),
-        window.adminRead('driverSessions').catch(function(){return null;}),
-        window.adminRead('driverSessions/'+(window.COMPANY_ID||'')).catch(function(){return null;})
-      ]).then(function(results){
+      var cid=String(window.COMPANY_ID||'');
+      // Prefer company-scoped shiftLogs. Root is only a fallback and is structurally
+      // guarded so cid keys can never appear as drivers (see flattenShiftLogs).
+      var shiftReads=cid
+        ? [
+            window.adminRead('lastshifttime').catch(function(){return null;}),
+            window.adminRead('shiftLogs/'+cid).catch(function(){return null;}),
+            window.adminRead('attendance/'+cid).catch(function(){return null;}),
+            window.adminRead('driverSessions/'+cid).catch(function(){return null;})
+          ]
+        : [
+            window.adminRead('lastshifttime').catch(function(){return null;}),
+            window.adminRead('shiftLogs').catch(function(){return null;}),
+            window.adminRead('attendance').catch(function(){return null;}),
+            window.adminRead('driverSessions').catch(function(){return null;})
+          ];
+      return Promise.all(shiftReads).then(function(results){
         try{
           var lastShiftData=results[0];
           var logsArr=results.slice(1);
