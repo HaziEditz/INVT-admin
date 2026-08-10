@@ -12786,16 +12786,16 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         Object.keys(v1).forEach(function(sk){
           var s=v1[sk];
           if(!s||typeof s!=='object') return;
-          var start=_parseTs(s.startTime||s.loginTime||s.start||s.StartTime||s.login);
-          var end=_parseTs(s.endTime||s.logoutTime||s.end||s.EndTime||s.logout||s.finishTime);
+          var start=_parseTs(s.startTime||s.loginTime||s.start||s.StartTime||s.login||s.shiftStartAt||s.startTs);
+          var end=_parseTs(s.endTime||s.logoutTime||s.end||s.EndTime||s.logout||s.finishTime||s.shiftEndAt||s.endTs);
           var vid=s.vehicleId||s.VehicleId||s.vehicle||'—';
           addSession(k1, vid, start, end);
         });
       } else {
         // k1 is a sessionKey, v1 is a session with driverId field
         var did=v1.driverId||v1.DriverId||v1.driver||k1;
-        var start=_parseTs(v1.startTime||v1.loginTime||v1.start||v1.StartTime);
-        var end=_parseTs(v1.endTime||v1.logoutTime||v1.end||v1.EndTime||v1.finishTime);
+        var start=_parseTs(v1.startTime||v1.loginTime||v1.start||v1.StartTime||v1.shiftStartAt||v1.startTs);
+        var end=_parseTs(v1.endTime||v1.logoutTime||v1.end||v1.EndTime||v1.finishTime||v1.shiftEndAt||v1.endTs);
         var vid=v1.vehicleId||v1.VehicleId||'—';
         addSession(did, vid, start, end);
       }
@@ -12836,7 +12836,8 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         if(found) vInfo=found;
       }
       var dateStr=s.startTs?new Date(s.startTs).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'}):(s.endTs?new Date(s.endTs).toLocaleDateString('en-NZ',{timeZone:NZ_TZ,day:'2-digit',month:'short',year:'numeric'}):'—');
-      var isActive=s.startTs>0&&!s.endTs;
+      var isOpen=s.startTs>0&&!s.endTs;
+      var isStale=isOpen && (Date.now()-s.startTs > 18*60*60*1000);
       rows.push({
         driverId:     driverId,
         driverName:   ss(_drivers[driverId],'Driver '+driverId),
@@ -12847,9 +12848,9 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
         makeModel:    ([vInfo.make,vInfo.model].filter(Boolean).join(' '))||'—',
         shiftDate:    dateStr,
         loginTime:    _fmtTs(s.startTs),
-        finishTime:   isActive?'Active':_fmtTs(s.endTs),
-        duration:     isActive?'Ongoing':_fmtDur(s.durationMin),
-        totalHours:   isActive?'Ongoing':totalHrsStr,
+        finishTime:   isStale?'Unclosed (stale)':(isOpen?'Active':_fmtTs(s.endTs)),
+        duration:     isStale?'Stale open':(isOpen?'Ongoing':_fmtDur(s.durationMin)),
+        totalHours:   isStale?'—':(isOpen?'Ongoing':totalHrsStr),
         _totalMin:    d.totalMinutes,
         _sessionMin:  s.durationMin||0,
         _ts:          s.startTs||s.endTs||0,
@@ -13724,7 +13725,7 @@ var DAILY_MAX_MIN  = 840;           // 14h elapsed window in minutes
 var DAILY_WARN_MIN = 780;           // 13h — warning
 var WEEKLY_MAX_MIN  = 4200;         // 70h real work in minutes
 var WEEKLY_WARN_MIN = 3900;         // 65h — warning
-var _compDriverNames={},_compVehicles={},_compDriverVeh={};
+var _compDriverNames={},_compVehicles={},_compDriverVeh={},_compCanon={};
 var _allCompRows=[];
 
 function fmtMins(m){
@@ -13822,8 +13823,12 @@ function calcCompliance(sessions){
   var weeklyWorkMin=0;
   for(var j=weeklyStartIdx;j<periods.length;j++){
     periods[j].sessions.forEach(function(s){
-      var st=s.startTs,en=s.endTs||(s.isActive?now:0);
-      if(!st||!en) return;
+      var st=s.startTs;
+      if(!st) return;
+      // Cap unclosed/stale sessions — never credit "work" from May→now.
+      var en=s.endTs;
+      if(!en && s.isActive) en=Math.min(now, st+STALE_MS);
+      if(!en) return;
       weeklyWorkMin+=Math.max(0,Math.round((en-st)/60000)-(s.breakMin||0));
     });
   }
@@ -13886,9 +13891,13 @@ function renderCards(byDriver){
       var wp=[];if(c.dailyMsg) wp.push(c.dailyMsg);if(c.weeklyMsg) wp.push(c.weeklyMsg);
       noteHtml='<div class="comp-note">'+wp.join('<br>')+'</div>';
     } else if(c.windowExpiredByRest&&!c.hasActive){
-      var sinceRest=Math.round((Date.now()-c.lastShiftEndTs)/60000);
-      noteHtml='<div class="comp-note"><span style="color:#16a34a;font-weight:600">&#x2714; Rested</span> — '
-        +fmtMins(sinceRest)+' since last shift. Ready for a new 14h window.</div>';
+      if(!c.lastShiftEndTs){
+        noteHtml='<div class="comp-note">No closed shift history for this driver key yet.</div>';
+      } else {
+        var sinceRest=Math.round((Date.now()-c.lastShiftEndTs)/60000);
+        noteHtml='<div class="comp-note"><span style="color:#16a34a;font-weight:600">&#x2714; Rested</span> — '
+          +fmtMins(sinceRest)+' since last shift. Ready for a new 14h window.</div>';
+      }
     } else if(c.hasActive){
       noteHtml='<div class="comp-note"><span style="color:#16a34a;font-weight:600">&#x25CF; On shift</span> since <b>'
         +fmtTs(c.activeStartTs)+'</b><br>Window: <b>'+fmtMins(c.dailyWindowRem)+' remaining</b></div>';
@@ -13950,20 +13959,24 @@ function loadCompliance(){
     window.adminRead('vehicles').catch(function(){return null;})
   ]).then(function(res){
     var shiftData=res[0],driverData=res[1],driversFlat=res[2],vehicleData=res[3];
-    _compDriverNames={};_compDriverVeh={};_compVehicles={};
+    _compDriverNames={};_compDriverVeh={};_compVehicles={};_compCanon={};
+    function setCanon(alias, canon){
+      if(alias==null||alias==='') return;
+      _compCanon[String(alias)]=String(canon);
+    }
     function ingestDriver(key,d,fromCompanyScoped){
       if(!d||typeof d!=='object') return;
-      // Flat /drivers tree is multi-company — require matching companyId when present.
       if(!fromCompanyScoped && d.companyId!=null && String(d.companyId)!==String(cid)) return;
       var name=[d.firstName||'',d.lastName||'',d.name||''].join(' ').trim()||d.email||d.dispatcherId||'';
       if(!name) return;
-      function put(id){ if(id!=null && String(id)!=='') _compDriverNames[String(id)]=name; }
-      put(key);
-      put(d.uid); put(d.Uid);
-      put(d.id); put(d.driverId); put(d.DriverId); put(d.dispatcherId);
+      var canon=String(d.id||d.driverId||d.dispatcherId||key);
+      function put(id){ if(id!=null && String(id)!==''){ _compDriverNames[String(id)]=name; setCanon(id, canon); } }
+      put(key); put(d.uid); put(d.Uid); put(d.id); put(d.driverId); put(d.DriverId); put(d.dispatcherId);
+      _compDriverNames[canon]=name;
+      setCanon(canon, canon);
       var vid=d.vehicleId||d.VehicleId||d.allocatedTaxi||'';
       if(vid){
-        [key,d.uid,d.id,d.driverId,d.dispatcherId].filter(Boolean).forEach(function(id){
+        [key,d.uid,d.id,d.driverId,d.dispatcherId,canon].filter(Boolean).forEach(function(id){
           _compDriverVeh[String(id)]=String(vid);
         });
       }
@@ -13989,14 +14002,20 @@ function loadCompliance(){
       Object.keys(shiftData).forEach(function(driverId){
         var shifts=shiftData[driverId];
         if(!shifts||typeof shifts!=='object') return;
-        if(!byDriver[driverId]) byDriver[driverId]=[];
+        var canon=_compCanon[driverId]||driverId;
+        if(!_compDriverNames[canon] && _compDriverNames[driverId]) _compDriverNames[canon]=_compDriverNames[driverId];
+        if(!byDriver[canon]) byDriver[canon]=[];
         Object.keys(shifts).forEach(function(shiftId){
           var s=shifts[shiftId];
           if(!s||typeof s!=='object') return;
-          var st=parseTs(s.startTime||s.loginTime||s.start);
-          var en=parseTs(s.endTime||s.logoutTime||s.end||s.finishTime);
-          var vid=String(s.vehicleId||s.VehicleId||_compDriverVeh[driverId]||'—');
-          var isActive=(s.status==='active')||(!en&&st>0);
+          var st=parseTs(s.startTime||s.loginTime||s.start||s.shiftStartAt||s.startTs);
+          var en=parseTs(s.endTime||s.logoutTime||s.end||s.finishTime||s.shiftEndAt||s.endTs);
+          var stLower=String(s.status||'').toLowerCase();
+          var isActive=false;
+          if(st && !en && stLower!=='closed' && stLower!=='completed'){
+            isActive=(stLower==='active')||(s.isActive===true)||(!stLower);
+          }
+          var vid=String(s.vehicleId||s.VehicleId||_compDriverVeh[canon]||_compDriverVeh[driverId]||'—');
           var breakMin=0;
           if(s.breaks&&typeof s.breaks==='object'){
             Object.values(s.breaks).forEach(function(b){
@@ -14007,9 +14026,11 @@ function loadCompliance(){
               if(bs&&be&&be>bs) breakMin+=Math.round((be-bs)/60000);
             });
           }
-          var storedMin=parseFloat(s.totalMinutes||0);
-          var netMin=storedMin>0?storedMin:((st&&(en||isActive))?Math.round(((en||Date.now())-st)/60000)-breakMin:0);
-          byDriver[driverId].push({shiftId:shiftId,driverId:driverId,vehicleId:vid,
+          breakMin+=parseFloat(s.breakMinutes||s.breakMin||0)||0;
+          var storedMin=parseFloat(s.totalMinutes||s.workedMinutes||0);
+          var endForNet=en||(isActive?Math.min(Date.now(), st+STALE_MS):0);
+          var netMin=storedMin>0?storedMin:((st&&endForNet)?Math.round((endForNet-st)/60000)-breakMin:0);
+          byDriver[canon].push({shiftId:shiftId,driverId:canon,sourceKey:driverId,vehicleId:vid,
             startTs:st,endTs:en,isActive:isActive,breakMin:Math.round(breakMin),netWorkMin:Math.max(0,netMin)});
         });
       });
@@ -14118,7 +14139,8 @@ function closeAllGhostShifts(){
         if(!isActive||!st||now-st<=STALE_MS) return;
         var capEnd=st+STALE_MS;
         promises.push(window.adminWrite('shiftLogs/'+cid+'/'+driverId+'/'+shiftId,'PATCH',{
-          endTime:capEnd,logoutTime:capEnd,shiftEndAt:capEnd,status:'closed',
+          endTime:capEnd,logoutTime:capEnd,shiftEndAt:capEnd,endTs:capEnd,
+          status:'closed', isActive:false,
           closedBy:'admin',closedReason:'ghost_shift_cleanup',updatedAt:now
         }).then(function(){closed++;}));
       });
