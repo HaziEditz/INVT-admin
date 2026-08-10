@@ -259,6 +259,33 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     );
   });
 
+  it('By Day per-driver sums multi-login sessions into one driver-day total', () => {
+    const dayTs = Date.parse('2026-08-11T14:00:00+12:00');
+    const rows = [
+      { driverId: 'D001', driverName: 'Abdullah Gul', _ts: dayTs, _sessionMin: 4, durationMin: 4, breakMin: 0, _breakMin: 0 },
+      { driverId: 'D001', driverName: 'Abdullah Gul', _ts: dayTs + 3600000, _sessionMin: 90, durationMin: 90, breakMin: 15, _breakMin: 15 },
+      { driverId: 'D001', driverName: 'Abdullah Gul', _ts: dayTs + 7200000, _sessionMin: 120, durationMin: 120, breakMin: 0, _breakMin: 0 },
+      { driverId: 'D002', driverName: 'Mustafa', _ts: dayTs, _sessionMin: 30, durationMin: 30, breakMin: 0, _breakMin: 0 },
+    ];
+    const byDay = groupSessionsByPeriod(rows, 'day', { perDriver: true, timeZone: 'Pacific/Auckland' });
+    assert.equal(byDay.length, 2, 'one row per driver for the day');
+    const d001 = byDay.find((g) => g.driverId === 'D001');
+    const d002 = byDay.find((g) => g.driverId === 'D002');
+    assert.ok(d001);
+    assert.ok(d002);
+    assert.equal(d001.sessions, 3);
+    assert.equal(d001.workMin, 214); // 4+90+120
+    assert.equal(d001.breakMin, 15);
+    assert.equal(d001.totalHrs, '3.6h');
+    assert.equal(d002.sessions, 1);
+    assert.equal(d002.workMin, 30);
+
+    const rangeTotals = sumFilteredPeriodTotals(rows);
+    assert.equal(rangeTotals.workMin, 244);
+    assert.equal(rangeTotals.workHours, 4.1);
+    assert.equal(rangeTotals.sessions, 4);
+  });
+
   it('attaches breakMin onto flattened sessions from source fields', () => {
     const byDriver = flattenShiftLogNodes(
       [

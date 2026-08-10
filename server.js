@@ -12922,6 +12922,9 @@ function flattenShiftLogs(logsArr, lastShiftData, byVehicle){
     var totalHrsStr=totalHrsNum>0?totalHrsNum.toFixed(1)+'h':'—';
     d.sessions.forEach(function(s){
       var vid=s.vehicleId||'—';
+      if((!vid||vid==='—') && _driverVehicles){
+        vid=_driverVehicles[driverId]||_driverVehicles[String(driverId).toUpperCase()]||'—';
+      }
       var vInfo=_vehicles[vid]||_vehicles[(vid||'').toUpperCase()]||_vehicles[(vid||'').toLowerCase()]||{};
       if(!vInfo.taxiNumber&&vid!=='—'){
         var vidLow=(vid||'').toLowerCase();
@@ -13073,37 +13076,45 @@ function getMonthKey(ts){
 
 function getGroupedRows(rows){
   if(!_isShiftRpt||_groupBy==='all') return null; // null = use raw rows
+  // Payroll-style: one row per driver per day/week/month (sums multi-login sessions).
   var grouped={};
   rows.forEach(function(r){
-    var key=_groupBy==='month'?getMonthKey(r._ts):(_groupBy==='day'?(r.shiftDate||'—'):getWeekKey(r._ts));
+    var period=_groupBy==='month'?getMonthKey(r._ts):(_groupBy==='day'?(r.shiftDate||'—'):getWeekKey(r._ts));
+    var did=r.driverId||'—';
+    var key=did+'|'+period;
     if(!grouped[key]){
       grouped[key]={
-        groupKey:key, sessions:0, totalSessionMin:0, totalBreakMin:0,
-        drivers:[], _drvSet:{}, _ts:0,
-        vehicleCount:0, _vSet:{}
+        groupKey:period, driverId:did, driverName:r.driverName||did,
+        sessions:0, totalSessionMin:0, totalBreakMin:0,
+        _vSet:{}, vehicleCount:0, _ts:0
       };
     }
     var g=grouped[key];
     g.sessions++;
     g.totalSessionMin+=r._sessionMin||0;
     g.totalBreakMin+=r._breakMin||0;
-    if(r.driverId&&!g._drvSet[r.driverId]){g._drvSet[r.driverId]=true;g.drivers.push(r.driverName||r.driverId);}
     if(r.vehicleId&&r.vehicleId!=='—'&&!g._vSet[r.vehicleId]){g._vSet[r.vehicleId]=true;g.vehicleCount++;}
     if((r._ts||0)>g._ts) g._ts=r._ts||0;
+    if(r.driverName) g.driverName=r.driverName;
   });
-  return Object.values(grouped).sort(function(a,b){return b._ts-a._ts;}).map(function(g){
+  return Object.values(grouped).sort(function(a,b){
+    if(b._ts!==a._ts) return b._ts-a._ts;
+    return String(a.driverName||'').localeCompare(String(b.driverName||''));
+  }).map(function(g){
     var hrs=g.totalSessionMin>0?(g.totalSessionMin/60).toFixed(1)+'h':'—';
     var brk=_fmtDur(g.totalBreakMin);
     var prefix=_groupBy==='week'?'Week of ':(_groupBy==='month'?'':'');
     return {
       groupKey:    prefix+g.groupKey,
-      drivers:     g.drivers.slice(0,3).join(', ')+(g.drivers.length>3?' +'+( g.drivers.length-3)+' more':''),
-      driverCount: g.drivers.length,
+      driverId:    g.driverId,
+      driverName:  g.driverName,
       sessions:    g.sessions,
       totalHrs:    hrs,
       totalBreak:  brk,
       vehicles:    g.vehicleCount||'—',
-      _ts:         g._ts
+      _ts:         g._ts,
+      _sessionMin: g.totalSessionMin,
+      _breakMin:   g.totalBreakMin
     };
   });
 }
@@ -13261,7 +13272,7 @@ function renderGroupedTable(rows){
   var thead=document.getElementById('rpt-thead');
   var tbody=document.getElementById('rpt-tbody');
   if(!thead||!tbody) return;
-  thead.innerHTML='<th>'+label+'</th><th>Drivers</th><th>Driver Count</th><th>Sessions</th><th>Hours Worked</th><th>Break Time</th>';
+  thead.innerHTML='<th>'+label+'</th><th>Driver</th><th>Driver ID</th><th>Sessions</th><th>Hours Worked</th><th>Break Time</th><th>Vehicles</th>';
   if(rows.length===0){
     tbody.innerHTML='';
     document.getElementById('rpt-table-wrap').style.display='none';
@@ -13275,11 +13286,12 @@ function renderGroupedTable(rows){
   tbody.innerHTML=rows.map(function(r){
     return '<tr>'
       +'<td><strong>'+r.groupKey+'</strong></td>'
-      +'<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.drivers+'">'+r.drivers+'</td>'
-      +'<td>'+r.driverCount+'</td>'
+      +'<td>'+(r.driverName||'—')+'</td>'
+      +'<td class="rpt-mono">'+(r.driverId||'—')+'</td>'
       +'<td>'+r.sessions+'</td>'
       +'<td><strong style="color:#2E7D32">'+r.totalHrs+'</strong></td>'
       +'<td>'+(r.totalBreak||'—')+'</td>'
+      +'<td>'+(r.vehicles||'—')+'</td>'
       +'</tr>';
   }).join('');
   document.getElementById('rpt-table-wrap').style.display='';
@@ -13287,7 +13299,7 @@ function renderGroupedTable(rows){
   document.getElementById('rpt-loading-box').style.display='none';
   var cb=document.getElementById('rpt-count-badge');
   if(cb){
-    var unit=_groupBy==='day'?'days':(_groupBy==='month'?'months':'weeks');
+    var unit=_groupBy==='day'?'driver-days':(_groupBy==='month'?'driver-months':'driver-weeks');
     cb.textContent=rows.length+' '+unit;cb.style.display='';
   }
 }
@@ -13403,9 +13415,10 @@ function loadReport(){
         setCanon(v.DriverId,canon,name||canon);
         setCanon(v.dispatcherId,canon,name||canon);
         setCanon(canon,canon,name||canon);
-        if(v.vehicleId){
+        if(v.vehicleId || v.VehicleId || v.allocatedTaxi || v.currentVehicleId){
+          var dVeh=String(v.vehicleId||v.VehicleId||v.currentVehicleId||v.allocatedTaxi);
           [key,v.uid,v.id,v.driverId,v.dispatcherId,canon].filter(Boolean).forEach(function(id){
-            _driverVehicles[String(id)]=String(v.vehicleId);
+            _driverVehicles[String(id)]=dVeh;
           });
         }
         if(v.lastLogin) _driverLastLogin[canon]=v.lastLogin;
@@ -13420,18 +13433,30 @@ function loadReport(){
     }).catch(function(e){ console.warn('[rpt] driver prereq failed:',e&&(e.message||String(e))); }));
   }
   if(needVehicles){
-    prereqs.push(window.adminRead('vehicles').then(function(d){
+    prereqs.push(Promise.all([
+      window.adminRead('vehicles').catch(function(){return null;}),
+      window.COMPANY_ID?window.adminRead('vehicles/'+window.COMPANY_ID).catch(function(){return null;}):Promise.resolve(null)
+    ]).then(function(pair){
       _vehicles={};
-      if(d&&typeof d==='object'){
-        Object.entries(d).forEach(function(e){
-          var k=e[0],v=e[1];
-          if(!v) return;
-          _vehicles[k]=v;
-          if(v.taxiNumber){ _vehicles[v.taxiNumber]=v; _vehicles[String(v.taxiNumber).toUpperCase()]=v; _vehicles[String(v.taxiNumber).toLowerCase()]=v; }
-          if(v.registration){ _vehicles[v.registration]=v; _vehicles[String(v.registration).toUpperCase()]=v; _vehicles[String(v.registration).toLowerCase()]=v; }
-          if(v.vehicleId){ _vehicles[v.vehicleId]=v; _vehicles[String(v.vehicleId).toUpperCase()]=v; _vehicles[String(v.vehicleId).toLowerCase()]=v; }
-        });
+      function indexVehicle(k,v){
+        if(!v||typeof v!=='object') return;
+        // Nested company registry node (vehicles/{cid}/{taxiNo}) — recurse
+        if(/^\\d+$/.test(String(k)) && !v.taxiNumber && !v.registration && !v.make && !v.vehicleId && !v.VehicleId){
+          Object.keys(v).forEach(function(ck){ indexVehicle(ck,v[ck]); });
+          return;
+        }
+        if(!v.taxiNumber && !v.registration && !v.make && !v.model && !v.vehicleType && !v.vehicleId && !v.VehicleId) return;
+        _vehicles[k]=v;
+        if(v.taxiNumber){ _vehicles[v.taxiNumber]=v; _vehicles[String(v.taxiNumber).toUpperCase()]=v; _vehicles[String(v.taxiNumber).toLowerCase()]=v; }
+        if(v.registration){ _vehicles[v.registration]=v; _vehicles[String(v.registration).toUpperCase()]=v; _vehicles[String(v.registration).toLowerCase()]=v; }
+        if(v.vehicleId){ _vehicles[v.vehicleId]=v; _vehicles[String(v.vehicleId).toUpperCase()]=v; _vehicles[String(v.vehicleId).toLowerCase()]=v; }
+        if(v.VehicleId){ _vehicles[v.VehicleId]=v; _vehicles[String(v.VehicleId).toUpperCase()]=v; _vehicles[String(v.VehicleId).toLowerCase()]=v; }
       }
+      [pair[0],pair[1]].forEach(function(d){
+        if(d&&typeof d==='object'){
+          Object.entries(d).forEach(function(e){ indexVehicle(e[0],e[1]); });
+        }
+      });
     }).catch(function(){}));
   }
 
