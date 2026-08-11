@@ -12832,15 +12832,18 @@ function _buildDayTimeline(sessions){
     var start=Number(s._startTs||0)||0;
     var end=Number(s._endTs||0)||0;
     if(!start||!end||end<=start) return;
-    var minutes=s._sessionMin!=null?Number(s._sessionMin):0;
+    // Online = stint wall (end − start). Never cumulative window workedMinutes.
+    var minutes=Math.round((end-start)/60000);
     if(!isFinite(minutes)||minutes<0) minutes=0;
-    usable.push({startTs:start,endTs:end,minutes:Math.round(minutes),hasSessionStart:!!s._hasSessionStart});
+    usable.push({startTs:start,endTs:end,minutes:minutes,hasSessionStart:!!s._hasSessionStart});
   });
   usable.sort(function(a,b){ return a.startTs!==b.startTs?a.startTs-b.startTs:a.endTs-b.endTs; });
   if(!usable.length){
     return {segments:[],spanStart:0,spanEnd:0,spanMin:0,onlineMin:0,offlineMin:0,offlineKnown:false,onlinePct:null,gapsReliable:false};
   }
-  var gapsReliable=usable.every(function(u){return u.hasSessionStart;});
+  var sessionStamped=0;
+  usable.forEach(function(u){ if(u.hasSessionStart) sessionStamped++; });
+  var gapsReliable=sessionStamped>=2;
   var segments=[], onlineMin=0;
   for(var i=0;i<usable.length;i++){
     var cur=usable[i];
@@ -12856,10 +12859,13 @@ function _buildDayTimeline(sessions){
   usable.forEach(function(s){ if(s.endTs>spanEnd) spanEnd=s.endTs; });
   var spanMin=Math.max(0,Math.round((spanEnd-spanStart)/60000));
   var multi=usable.length>=2;
-  var offlineMin=gapsReliable&&multi?Math.max(0,spanMin-onlineMin):0;
+  var offlineMin=0;
+  if(gapsReliable){
+    segments.forEach(function(seg){ if(seg.type==='offline') offlineMin+=seg.minutes; });
+  }
   var onlinePct=gapsReliable&&spanMin>0?Math.min(100,Math.round((100*onlineMin)/spanMin)):(!multi&&spanMin>0?100:null);
   if(!gapsReliable&&!multi&&spanMin>0) onlinePct=100;
-  return {segments:segments,spanStart:spanStart,spanEnd:spanEnd,spanMin:spanMin,onlineMin:onlineMin,offlineMin:offlineMin,offlineKnown:gapsReliable&&multi,onlinePct:onlinePct,gapsReliable:gapsReliable};
+  return {segments:segments,spanStart:spanStart,spanEnd:spanEnd,spanMin:spanMin,onlineMin:onlineMin,offlineMin:offlineMin,offlineKnown:gapsReliable&&offlineMin>0,onlinePct:onlinePct,gapsReliable:gapsReliable};
 }
 
 function _shiftLooksLikeSession(s){
@@ -13418,7 +13424,7 @@ function renderDayTimelineHtml(r){
   var head='Day span  '+_fmtTimeOnly(tl.spanStart)+' → '+_fmtTimeOnly(tl.spanEnd)+'  ('+_fmtDur(tl.spanMin)+')';
   var note='';
   if(!tl.gapsReliable){
-    note='<div class="rpt-day-tl-row" style="color:#78909c;font-size:12px">Offline gaps need sessionStartedAt on End Shift logs (rolling out). Until then, progressive ends that share a window are collapsed — no invented gaps.</div>';
+    note='<div class="rpt-day-tl-row" style="color:#78909c;font-size:12px">Offline gaps show once two or more End Shift logs include sessionStartedAt. Online minutes use each stint’s end − login (not cumulative window hours).</div>';
   }
   var rowsHtml=(tl.segments||[]).map(function(seg){
     var on=seg.type==='online';

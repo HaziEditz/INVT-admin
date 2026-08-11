@@ -374,8 +374,36 @@ describe('period totals with date range (Abdullah/Mustafa live fixtures)', () =>
     assert.equal(tl.segments.filter((x) => x.type === 'offline').length, 0);
     assert.equal(tl.segments.filter((x) => x.type === 'online').length, 2);
     assert.equal(tl.spanMin, 90);
+    // Online = end−start per stint (60 + 60), not cumulative workedMinutes
     assert.equal(tl.onlineMin, 120);
-    assert.equal(tl.offlineMin, 0); // clamped span - online
+    assert.equal(tl.offlineMin, 0);
+  });
+
+  it('buildDayTimeline: live-style inflated wm + legacy siblings still show 8h gap', () => {
+    const { buildDayTimeline, fmtDur } = require('../lib/shiftReportFlatten.js');
+    const windowOpen = Date.parse('2026-08-11T02:12:04+12:00');
+    const legacyEnd = Date.parse('2026-08-11T03:31:58+12:00');
+    const amSession = Date.parse('2026-08-11T04:28:11+12:00');
+    const amEnd = Date.parse('2026-08-11T04:29:32+12:00');
+    const pmSession = Date.parse('2026-08-11T12:43:10+12:00');
+    const pmEnd = Date.parse('2026-08-11T12:44:51+12:00');
+    const tl = buildDayTimeline([
+      // legacy progressive (no sessionStartedAt) — must not block gaps
+      { driverId: 'D001', _windowTs: windowOpen, _startTs: windowOpen, _endTs: legacyEnd, _sessionMin: 79, _hasSessionStart: false },
+      // morning session — inflated wm would be ~137
+      { driverId: 'D001', _windowTs: windowOpen, _startTs: amSession, _endTs: amEnd, _sessionMin: 137, _sessionTs: amSession, _hasSessionStart: true },
+      // afternoon — inflated wm 632 (full window wall) must NOT become online minutes
+      { driverId: 'D001', _windowTs: windowOpen, _startTs: pmSession, _endTs: pmEnd, _sessionMin: 632, _sessionTs: pmSession, _hasSessionStart: true },
+    ]);
+    assert.equal(tl.gapsReliable, true);
+    assert.equal(tl.offlineKnown, true);
+    const offline = tl.segments.filter((x) => x.type === 'offline');
+    assert.ok(offline.some((g) => g.minutes >= 480), 'expected ~8h offline gap, got ' + JSON.stringify(offline));
+    // Afternoon online is ~1–2m (end−session), not 632
+    const pmOnline = tl.segments.find((x) => x.type === 'online' && x.startTs === pmSession);
+    assert.ok(pmOnline);
+    assert.ok(pmOnline.minutes <= 5, 'pm online should be end−session, got ' + pmOnline.minutes);
+    assert.ok(tl.onlineMin < 14 * 60, 'online must stay under 14h, got ' + fmtDur(tl.onlineMin));
   });
 
   it('flatten: Login Time uses sessionStartedAt; progressive window takes max wm', () => {
