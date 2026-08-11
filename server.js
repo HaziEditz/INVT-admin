@@ -16895,10 +16895,15 @@ function saveTripEdits(resubmit) {
       toStatus: getTripStatus(t),
       note: fixComment || null
     };
-    var afterEdit = appendOwnerTripEvent(cid, key, editEv).catch(function(){});
+    var afterEdit = window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', { editedAt: editEv.at }).then(function() {
+      return appendOwnerTripEvent(cid, key, editEv);
+    }).catch(function() {
+      return appendOwnerTripEvent(cid, key, editEv).catch(function(){});
+    });
     if (!resubmit) {
       return afterEdit.then(function() {
         if (!_tripStatuses[key]) _tripStatuses[key] = {};
+        _tripStatuses[key].editedAt = editEv.at;
         if (!_tripStatuses[key].events) _tripStatuses[key].events = {};
         _tripStatuses[key].events['local_' + editEv.at] = editEv;
         alert('Trip fields saved.');
@@ -16911,6 +16916,7 @@ function saveTripEdits(resubmit) {
         submittedAt: Date.now(),
         resubmittedAt: Date.now(),
         resubmittedBy: cid,
+        editedAt: editEv.at,
         // Clear stale flag/reject metadata so council list doesn't keep showing Flagged chips.
         flagReasons: [],
         anomalyDetail: null,
@@ -16921,6 +16927,7 @@ function saveTripEdits(resubmit) {
     }).then(function() {
       if (!_tripStatuses[key]) _tripStatuses[key] = {};
       _tripStatuses[key].status = 'submitted';
+      _tripStatuses[key].editedAt = editEv.at;
       _tripStatuses[key].flagReasons = [];
       _tripStatuses[key].anomalyDetail = null;
       _tripStatuses[key].flaggedAt = null;
