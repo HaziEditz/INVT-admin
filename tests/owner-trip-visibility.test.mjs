@@ -151,6 +151,22 @@ test('server.js wires TM merge sources + shared detection', () => {
   assert.match(src, /Same detection as TM Trip History/);
 });
 
+test('owner TM Trip History has bulk pending submit (pending→submitted only)', () => {
+  const src = readFileSync(join(root, 'server.js'), 'utf8');
+  assert.match(src, /id="tm-bulk-bar"/);
+  assert.match(src, /id="tm-check-all"/);
+  assert.match(src, /Select all matching/);
+  assert.match(src, /submitSelectedPending/);
+  assert.match(src, /submitAllMatchingPending/);
+  assert.match(src, /class="tm-row-check"/);
+  assert.match(src, /function submitPendingKeys/);
+  assert.match(src, /status:\s*'submitted'/);
+  // Bulk path reuses approveTrip — no separate status machine
+  assert.match(src, /approveTrip\(key\)/);
+  assert.match(src, /Submit Selected/);
+  assert.match(src, /Submit All Matching Pending/);
+});
+
 test('server.js AccReport + BAB account visibility fixes', () => {
   const src = readFileSync(join(root, 'server.js'), 'utf8');
   // flatten paymentType fallback

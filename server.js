@@ -16348,6 +16348,14 @@ function tmTripsPage(companyId) {
       <i class="material-icons" style="font-size:15px">&#xE2C4;</i> Export CSV
     </button>
   </div>
+  <div id="tm-bulk-bar" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px;padding:8px 12px;background:#F8FAFC;border:1px solid #e2e8f0;border-radius:8px">
+    <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="tm-check-all" onchange="tmToggleAll(this.checked)"/> Select all matching
+    </label>
+    <button type="button" class="tm-approve-btn" style="padding:6px 12px" onclick="submitSelectedPending()">Submit Selected</button>
+    <button type="button" class="tm-approve-btn" style="padding:6px 12px;background:#1e40af;border-color:#1e40af;color:#fff" onclick="submitAllMatchingPending()">Submit All Matching Pending</button>
+    <span id="tm-bulk-hint" style="font-size:12px;color:#94a3b8"></span>
+  </div>
   <div class="tm-card">
     <div id="tm-trips-loading" style="text-align:center;padding:48px;color:#94a3b8;">
       <i class="material-icons" style="font-size:36px;display:block;margin-bottom:8px">&#xE8E5;</i>Loading trips…
@@ -16357,6 +16365,7 @@ function tmTripsPage(companyId) {
       <table class="tm-table">
         <thead>
           <tr>
+            <th style="width:36px"></th>
             <th>Booking ID</th>
             <th>Date</th>
             <th>Passenger</th>
@@ -16618,7 +16627,18 @@ function renderTrips(trips) {
   var wrap = document.getElementById('tm-trips-table-wrap');
   var empty = document.getElementById('tm-trips-empty');
   var totalsBar = document.getElementById('tm-totals-bar');
+  var bulkBar = document.getElementById('tm-bulk-bar');
+  var checkAll = document.getElementById('tm-check-all');
+  if (checkAll) checkAll.checked = false;
   document.getElementById('tm-count-label').textContent = trips.length + ' trip' + (trips.length !== 1 ? 's' : '');
+  var pendingMatching = trips.filter(function(t){ return getTripStatus(t) === 'pending'; });
+  if (bulkBar) {
+    bulkBar.style.display = pendingMatching.length ? 'flex' : 'none';
+    var hint = document.getElementById('tm-bulk-hint');
+    if (hint) hint.textContent = pendingMatching.length
+      ? pendingMatching.length + ' pending in current filter'
+      : '';
+  }
   if (!trips.length) {
     wrap.style.display = 'none'; empty.style.display = 'block'; totalsBar.style.display = 'none'; return;
   }
@@ -16648,7 +16668,11 @@ function renderTrips(trips) {
     var approveBtn = (st === 'pending')
       ? '<button class="tm-approve-btn" id="ab-' + t._key + '" onclick="event.stopPropagation();approveTrip(\\'' + t._key + '\\')" title="Approve and send to council">Approve</button>'
       : '';
+    var checkCell = (st === 'pending')
+      ? '<td onclick="event.stopPropagation()"><input type="checkbox" class="tm-row-check" value="' + String(t._key).replace(/"/g,'&quot;') + '"/></td>'
+      : '<td></td>';
     return '<tr onclick="openTripDetail(\\'' + t._key + '\\')">' +
+      checkCell +
       '<td style="font-family:monospace;font-size:12px;white-space:nowrap">' + (t.bookingId || t.BookingId || t._key || '—') + '</td>' +
       '<td>' + fmtDate(ms) + '<br><small style="color:#94a3b8">' + fmtTime(ms) + '</small></td>' +
       '<td style="font-weight:500">' + passenger + '</td>' +
@@ -16673,12 +16697,56 @@ function renderTrips(trips) {
     '<div class="tm-total-item"><div class="label">Hoist $ / Uses</div><div class="value" style="color:#1565C0">' + fmtMoney(totalHoist) + ' / ' + totalUses + '</div></div>' +
     '<div class="tm-total-item"><div class="label">Council claim (%/cap)</div><div class="value" style="color:#0d9488">' + fmtMoney(totalTm) + '</div></div>';
 }
+function tmSelectedPendingKeys() {
+  return Array.prototype.map.call(document.querySelectorAll('.tm-row-check:checked'), function(el) {
+    return el.value;
+  }).filter(function(k) {
+    var t = _tripsByKey[k];
+    return t && getTripStatus(t) === 'pending';
+  });
+}
+function tmToggleAll(on) {
+  document.querySelectorAll('.tm-row-check').forEach(function(el) { el.checked = !!on; });
+}
+function submitPendingKeys(keys) {
+  keys = (keys || []).filter(Boolean);
+  if (!keys.length) { alert('Select at least one pending trip.'); return Promise.resolve({ ok: 0 }); }
+  if (!confirm('Submit ' + keys.length + ' pending trip(s) to council?')) {
+    return Promise.resolve({ ok: 0, cancelled: true });
+  }
+  var left = keys.length, ok = 0, fail = 0;
+  return new Promise(function(resolve) {
+    keys.forEach(function(key) {
+      approveTrip(key).then(function(success) {
+        if (success) ok++; else fail++;
+        if (--left === 0) {
+          filterTrips();
+          if (fail) alert('Submitted ' + ok + ' trip(s); ' + fail + ' failed.');
+          resolve({ ok: ok, fail: fail });
+        }
+      });
+    });
+  });
+}
+function submitSelectedPending() {
+  return submitPendingKeys(tmSelectedPendingKeys());
+}
+function submitAllMatchingPending() {
+  var keys = (_filteredTrips || []).filter(function(t) {
+    return getTripStatus(t) === 'pending';
+  }).map(function(t) { return t._key; });
+  return submitPendingKeys(keys);
+}
 function approveTrip(key) {
   var cid = window.COMPANY_ID;
   var btn = document.getElementById('ab-' + key);
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   var t = _tripsByKey[key] || {};
   var st0 = _tripStatuses[key] || {};
+  if (getTripStatus(Object.assign({ _key: key }, t)) !== 'pending') {
+    if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+    return Promise.resolve(false);
+  }
   var councilId = st0.councilId || t.councilId || t.tmCouncilId || '';
   var now = Date.now();
   var update = {
@@ -16689,7 +16757,7 @@ function approveTrip(key) {
     submittedBy: cid
   };
   if (councilId) update.councilId = councilId;
-  window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', update).then(function() {
+  return window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', update).then(function() {
     if (!_tripStatuses[key]) _tripStatuses[key] = {};
     _tripStatuses[key].status = 'submitted';
     _tripStatuses[key].submittedAt = now;
@@ -16697,6 +16765,9 @@ function approveTrip(key) {
     var stCell = document.getElementById('st-' + key);
     if (stCell) stCell.innerHTML = statusBadge('submitted');
     if (btn) { btn.style.display = 'none'; }
+    document.querySelectorAll('.tm-row-check').forEach(function(el) {
+      if (el.value === key && el.parentNode) el.parentNode.innerHTML = '';
+    });
     var ev = {
       at: now,
       type: 'submitted',
@@ -16709,10 +16780,12 @@ function approveTrip(key) {
     return appendOwnerTripEvent(cid, key, ev).then(function() {
       if (!_tripStatuses[key].events) _tripStatuses[key].events = {};
       _tripStatuses[key].events['local_' + ev.at] = ev;
+      return true;
     });
   }).catch(function(e) {
     if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
     alert('Failed to approve: ' + e.message);
+    return false;
   });
 }
 function approveTripFromModal() {
