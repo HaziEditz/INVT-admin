@@ -16357,6 +16357,7 @@ function tmTripsPage(companyId) {
       <table class="tm-table">
         <thead>
           <tr>
+            <th>Booking ID</th>
             <th>Date</th>
             <th>Passenger</th>
             <th>Pickup</th>
@@ -16648,6 +16649,7 @@ function renderTrips(trips) {
       ? '<button class="tm-approve-btn" id="ab-' + t._key + '" onclick="event.stopPropagation();approveTrip(\\'' + t._key + '\\')" title="Approve and send to council">Approve</button>'
       : '';
     return '<tr onclick="openTripDetail(\\'' + t._key + '\\')">' +
+      '<td style="font-family:monospace;font-size:12px;white-space:nowrap">' + (t.bookingId || t.BookingId || t._key || '—') + '</td>' +
       '<td>' + fmtDate(ms) + '<br><small style="color:#94a3b8">' + fmtTime(ms) + '</small></td>' +
       '<td style="font-weight:500">' + passenger + '</td>' +
       '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (t.pickupAddress||t.from||'') + '">' + (t.pickupAddress || t.from || '—') + '</td>' +
@@ -16990,13 +16992,14 @@ function closeTripDetail() {
 function exportCsv() {
   var trips = _filteredTrips.length ? _filteredTrips : _allTrips;
   if (!trips.length) { alert('No trips to export.'); return; }
-  var cols = ['Date','Time','Passenger','Voucher No','Driver','Vehicle/AB No','Tariff','Pickup','Dropoff','Distance(km)','Duration','Flag Fall','Distance Cost','Waiting Cost','Meter Fare','Council claim (%/cap)','Hoist $','Hoist Uses','Passenger Pays','Status'];
+  var cols = ['Booking ID','Date','Time','Passenger','Voucher No','Driver','Vehicle/AB No','Tariff','Pickup','Dropoff','Distance(km)','Duration','Flag Fall','Distance Cost','Waiting Cost','Meter Fare','Council claim (%/cap)','Hoist $','Hoist Uses','Passenger Pays','Status'];
   var rows = [cols.join(',')];
   trips.forEach(function(t) {
     var st = getTripStatus(t);
     var ms = _tmTs(t);
     function esc(v) { var s = String(v||''); return (s.indexOf(',') > -1 || s.indexOf('\\n') > -1 || s.indexOf('"') > -1) ? '"' + s.replace(/"/g,'""') + '"' : s; }
     rows.push([
+      esc(t.bookingId || t.BookingId || t._key || ''),
       esc(fmtDate(ms)),
       esc(fmtTime(ms)),
       esc(t.tmCardName || t.tmPassengerName || t.passengerName || t.customerName),
