@@ -330,26 +330,27 @@ function dosRender(){
       ? '<span class="dos-bank" title="'+dosEsc((r.bankName||'')+' / '+(r.accountName||''))+'">'+dosEsc(r.accountNumber)+'</span>'
       : '<span class="dos-zero">—</span>';
     var markCard=r.cardLocked || !(r.cardOwedBeforeLock>0)
-      ? '<button class="dos-btn" disabled>'+(r.cardLocked?'Card paid':'Card')+'</button>'
+      ? '<button class="dos-btn" disabled>'+(r.cardLocked?'Card paid':'No card')+'</button>'
       : '<button class="dos-btn primary" onclick="dosMarkCardPaid(\''+dosEsc(r.driverId)+'\')">Mark Card</button>';
     var markTm=r.tmLocked || !(r.tmOwedBeforeLock>0)
-      ? '<button class="dos-btn" disabled>'+(r.tmLocked?'TM paid':'TM')+'</button>'
+      ? '<button class="dos-btn" disabled>'+(r.tmLocked?'TM paid':'No TM')+'</button>'
       : '<button class="dos-btn primary" onclick="dosMarkTmPaid(\''+dosEsc(r.driverId)+'\')">Mark TM</button>';
     var t=r.tmDetail||dosEmptyTmDetail();
     var tmMain=t.trips?dosFormatPayWithCount(r.tmLocked?t.paid:t.owed, t.trips):'$0.00';
     var tmSub=t.trips?('Sub '+money(t.subsidy)+' · Hoist '+money(t.hoist)+(t.councilPct!=null?' · '+t.councilPct+'%':'')):'';
+    function lockedNote(before){ return ' <span class="dos-sub" style="color:#2E7D32">('+money(before)+' locked)</span>'; }
     return '<tr>'+
-      '<td><b>'+dosEsc(r.driverName)+'</b><div class="dos-sub">'+dosEsc(r.driverId)+'</div></td>'+
+      '<td class="sticky-driver"><b>'+dosEsc(r.driverName)+'</b><div class="dos-sub">'+dosEsc(r.driverId)+'</div></td>'+
       '<td>'+dosFmtDur(r.workMinutes)+'<div class="dos-sub">'+dosFmtDur(r.breakMinutes)+' brk</div></td>'+
       '<td>Done '+r.outcomes.completed+' · Canc '+r.outcomes.cancelled+' · Rej '+r.outcomes.rejected+' · NS '+r.outcomes.no_show+'<div class="dos-sub">Tot '+r.outcomes.total+'</div></td>'+
-      '<td>'+(r.sources.dispatch||0)+'</td>'+
-      '<td>'+(r.sources.passenger_app||0)+'</td>'+
-      '<td>'+(r.sources.website||0)+'</td>'+
-      '<td>'+(r.sources.food||0)+'</td>'+
-      '<td>'+(r.sources.freight||0)+'</td>'+
-      '<td>'+(r.sources.hail||0)+'</td>'+
-      '<td>'+(r.sources.other||0)+'</td>'+
-      '<td>'+(r.sources.unknown||0)+'</td>'+
+      '<td class="num">'+(r.sources.dispatch||0)+'</td>'+
+      '<td class="num">'+(r.sources.passenger_app||0)+'</td>'+
+      '<td class="num">'+(r.sources.website||0)+'</td>'+
+      '<td class="num">'+(r.sources.food||0)+'</td>'+
+      '<td class="num">'+(r.sources.freight||0)+'</td>'+
+      '<td class="num">'+(r.sources.hail||0)+'</td>'+
+      '<td class="num">'+(r.sources.other||0)+'</td>'+
+      '<td class="num">'+(r.sources.unknown||0)+'</td>'+
       '<td>'+dosEsc(r.vehicles.join(', ')||'—')+'</td>'+
       '<td class="dos-money dos-cash">'+dosFormatPayWithCount(r.cashHeld, r.pay.cash.count)+'</td>'+
       '<td class="dos-money">'+dosFormatPayWithCount(r.cardLocked?0:r.pay.card.owed, r.pay.card.count)+'</td>'+
@@ -357,11 +358,9 @@ function dosRender(){
       '<td class="dos-money">'+tmMain+(tmSub?'<div class="dos-sub">'+tmSub+'</div>':'')+'</td>'+
       '<td class="dos-money">'+dosFormatPayWithCount(r.pay.account.gross, r.pay.account.count)+'</td>'+
       '<td class="dos-money">'+dosFormatPayWithCount(r.tmLocked?0:r.pay.hoist.owed, (r.pay.hoist.uses||r.pay.hoist.count))+'</td>'+
-      '<td class="dos-money '+(r.cardOwed?'dos-owed':'dos-zero')+'">'+money(r.cardOwed)+
-        (r.cardLocked?' <span class="dos-sub" style="color:#2E7D32">('+money(r.cardOwedBeforeLock)+')</span>':'')+'</td>'+
-      '<td class="dos-money '+(r.tmOwed?'dos-owed':'dos-zero')+'">'+money(r.tmOwed)+
-        (r.tmLocked?' <span class="dos-sub" style="color:#2E7D32">('+money(r.tmOwedBeforeLock)+')</span>':'')+'</td>'+
-      '<td class="dos-money '+(r.owedTotal?'dos-owed':'dos-zero')+'">'+money(r.owedTotal)+'</td>'+
+      '<td class="dos-money col-owed '+(r.cardOwed?'dos-owed':'dos-zero')+'">'+money(r.cardOwed)+(r.cardLocked?lockedNote(r.cardOwedBeforeLock):'')+'</td>'+
+      '<td class="dos-money col-owed '+(r.tmOwed?'dos-owed':'dos-zero')+'">'+money(r.tmOwed)+(r.tmLocked?lockedNote(r.tmOwedBeforeLock):'')+'</td>'+
+      '<td class="dos-money col-owed '+(r.owedTotal?'dos-owed':'dos-zero')+'">'+money(r.owedTotal)+'</td>'+
       '<td><span class="dos-pill '+r.status+'">'+dosStatusLabel(r)+'</span></td>'+
       '<td>'+bank+'</td>'+
       '<td style="white-space:nowrap"><button class="dos-btn" onclick="dosOpenDetail(\''+dosEsc(r.driverId)+'\')">Detail</button> '+markCard+' '+markTm+'</td>'+

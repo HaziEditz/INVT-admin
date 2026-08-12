@@ -57,7 +57,20 @@ const cssBlock = `<style>
 .dos-stat .v.paid{color:#2E7D32}
 .dos-stat .l{font-size:10px;color:#9e9e9e;text-transform:uppercase;letter-spacing:.4px;margin-top:3px;font-weight:700}
 .dos-tbl-wrap{overflow-x:auto;max-height:640px;overflow-y:auto}
-.dos-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:1400px}
+.dos-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:1280px}
+.dos-tbl thead tr.dos-grp th{background:#00695C;color:#fff;border-bottom:1px solid #004D40;text-align:center;font-size:10px;letter-spacing:.04em;text-transform:uppercase;padding:6px 8px;cursor:default}
+.dos-tbl thead tr.dos-grp th.g-src{background:#455A64}
+.dos-tbl thead tr.dos-grp th.g-pay{background:#37474F}
+.dos-tbl thead tr.dos-grp th.g-owed{background:#E65100}
+.dos-tbl thead tr.dos-subh th{background:#F1F8F7;font-size:10px;color:#546e7a;border-bottom:2px solid #e3ecf7;text-align:center;padding:6px 6px}
+.dos-tbl td.num,.dos-tbl th.num{text-align:center;font-variant-numeric:tabular-nums}
+.dos-tbl td.money,.dos-tbl th.money-h{text-align:right}
+.dos-tbl td.col-owed{background:#FFF8F3}
+.dos-tbl tbody tr:hover td.col-owed{background:#FFECB3}
+.dos-tbl td.sticky-driver,.dos-tbl th.sticky-driver{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 0 #eee}
+.dos-tbl thead th.sticky-driver{z-index:3;background:#F8FAFF}
+.dos-tbl thead tr.dos-grp th.sticky-driver{background:#00695C;z-index:4}
+.build-stamp{display:inline-block;margin-left:8px;font-size:10px;font-weight:700;color:rgba(255,255,255,.95);background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:2px 6px;vertical-align:middle}
 .dos-tbl thead th{position:sticky;top:0;z-index:2;background:#F8FAFF;color:#546e7a;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:9px 8px;border-bottom:2px solid #e3ecf7;white-space:nowrap;cursor:pointer}
 .dos-tbl td{padding:8px;border-bottom:1px solid #f5f5f5;vertical-align:middle;color:#333}
 .dos-tbl tbody tr:hover{background:#F3F7FF}

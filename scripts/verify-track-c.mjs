@@ -19,6 +19,10 @@ const checks = {
   sa_markTm: sa.includes('dosMarkTmPaid'),
   sa_independent: /independent/i.test(sa),
   sa_noCombinedWrite: !/_fbPost\('driverSettlements\//.test(sa),
+  owner_layoutGrp: /dos-grp|g-owed/.test(html),
+  owner_buildStamp: /Track C/.test(html),
+  sa_layoutGrp: sa.includes('g-owed') && sa.includes('dos-build'),
+  sa_buildStamp: sa.includes('track-c-v2-layout'),
 };
 console.log(JSON.stringify(checks, null, 2));
 if (Object.values(checks).some((v) => !v)) process.exit(1);

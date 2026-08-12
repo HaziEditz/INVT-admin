@@ -12,7 +12,7 @@
     <div class="rpt-toolbar">
       <div class="rpt-toolbar-title">
         <i class="material-icons">&#xE227;</i>
-        <h3>Driver Ops &amp; Payment Summary</h3>
+        <h3>Driver Ops &amp; Payment Summary <span class="build-stamp" id="dos-build-stamp">Track C · Card/TM split</span></h3>
       </div>
       <div class="rpt-toolbar-meta">Period: <b id="dos-period-label">—</b></div>
       <div class="rpt-toolbar-actions">
@@ -80,31 +80,36 @@
       <div class="dos-tbl-wrap">
         <table class="dos-tbl">
           <thead>
-            <tr>
-              <th onclick="dosSort('driverName')">Driver</th>
-              <th onclick="dosSort('workHours')">Hours</th>
-              <th>Jobs</th>
-              <th title="Dispatch">Disp</th>
-              <th title="Passenger app">App</th>
-              <th title="Website">Web</th>
-              <th title="Food">Food</th>
-              <th title="Freight">Frt</th>
-              <th title="Driver app / hail / queue">Hail</th>
-              <th title="Recognised source not in Disp/App/Web/Food/Frt/Hail">Other</th>
-              <th title="Missing source / bookingSource field">Unk</th>
-              <th>Vehicles</th>
-              <th onclick="dosSort('cashHeld')">Cash held</th>
-              <th>Card</th>
-              <th>EFTPOS</th>
-              <th>TM</th>
-              <th>Account</th>
-              <th>Hoist</th>
-              <th onclick="dosSort('cardOwed')">Card owes</th>
-              <th onclick="dosSort('tmOwed')">TM owes</th>
-              <th onclick="dosSort('owedTotal')">Total unpaid</th>
-              <th>Status</th>
-              <th>Bank</th>
-              <th></th>
+            <tr class="dos-grp">
+              <th class="sticky-driver" rowspan="2" onclick="dosSort('driverName')">Driver</th>
+              <th rowspan="2" onclick="dosSort('workHours')">Hours</th>
+              <th rowspan="2">Jobs</th>
+              <th class="g-src" colspan="8">Sources</th>
+              <th rowspan="2">Vehicles</th>
+              <th class="g-pay" colspan="6">Payments</th>
+              <th class="g-owed" colspan="3">Unpaid</th>
+              <th rowspan="2">Status</th>
+              <th rowspan="2">Bank</th>
+              <th rowspan="2">Actions</th>
+            </tr>
+            <tr class="dos-subh">
+              <th class="num" title="Dispatch">Disp</th>
+              <th class="num" title="Passenger app">App</th>
+              <th class="num" title="Website">Web</th>
+              <th class="num" title="Food">Food</th>
+              <th class="num" title="Freight">Frt</th>
+              <th class="num" title="Hail / queue">Hail</th>
+              <th class="num" title="Other source">Oth</th>
+              <th class="num" title="Unknown source">Unk</th>
+              <th class="money-h" onclick="dosSort('cashHeld')">Cash</th>
+              <th class="money-h">Card</th>
+              <th class="money-h">EFTPOS</th>
+              <th class="money-h">TM</th>
+              <th class="money-h">Account</th>
+              <th class="money-h">Hoist</th>
+              <th class="money-h" onclick="dosSort('cardOwed')">Card</th>
+              <th class="money-h" onclick="dosSort('tmOwed')">TM</th>
+              <th class="money-h" onclick="dosSort('owedTotal')">Total</th>
             </tr>
           </thead>
           <tbody id="dos-tbody"></tbody>
