@@ -11,7 +11,7 @@ import {
   settlementPath,
 } from '../lib/driverOpsSummary.js';
 
-test('cash owes $0; card applies company+driver %; EFTPOS owes $0 like cash', () => {
+test('cash owes $0; card applies company+driver %; EFTPOS and Account/ACC owe $0 in BW Mark Paid', () => {
   assert.equal(companyOwesDriver(100, 'Cash').owed, 0);
   const card = companyOwesDriver(100, 'Card', { companyPercent: 10, driverPercent: 2 });
   assert.equal(card.bucket, 'card');
@@ -22,11 +22,19 @@ test('cash owes $0; card applies company+driver %; EFTPOS owes $0 like cash', ()
   assert.equal(eft.owed, 0);
   assert.equal(eft.commission, 0);
   assert.equal(eft.gross, 50);
+  const acc = companyOwesDriver(40, 'Account');
+  assert.equal(acc.bucket, 'account');
+  assert.equal(acc.owed, 0);
+  assert.equal(acc.gross, 40);
+  const accType = companyOwesDriver(25, 'ACC');
+  assert.equal(accType.bucket, 'account');
+  assert.equal(accType.owed, 0);
 });
 
-test('TM and Account owe full fare', () => {
+test('TM owes full fare; Account tracked but not BW-owed', () => {
   assert.equal(companyOwesDriver(80, 'Total Mobility').owed, 80);
-  assert.equal(companyOwesDriver(80, 'Account').owed, 80);
+  assert.equal(companyOwesDriver(80, 'Account').owed, 0);
+  assert.equal(companyOwesDriver(80, 'Account').gross, 80);
   assert.equal(classifyPaymentMethod('Business Account'), 'account');
 });
 
@@ -73,6 +81,8 @@ test('buildDriverSummaryRow totals owed and zeros when locked', () => {
     { jobstatus: 'Completed', PaymentType: 'Cash', TotalFare: 20, vehicleId: '201' },
     { jobstatus: 'Completed', PaymentType: 'Card', TotalFare: 100, source: 'dispatch' },
     { jobstatus: 'Completed', PaymentType: 'EFTPOS', TotalFare: 40 },
+    { jobstatus: 'Completed', PaymentType: 'Account', TotalFare: 60 },
+    { jobstatus: 'Completed', PaymentType: 'ACC', TotalFare: 15 },
     { jobstatus: 'Cancelled', PaymentType: 'Card', TotalFare: 50 },
   ];
   const open = buildDriverSummaryRow({
@@ -87,9 +97,12 @@ test('buildDriverSummaryRow totals owed and zeros when locked', () => {
   assert.equal(open.pay.eftpos.gross, 40);
   assert.equal(open.pay.eftpos.count, 1);
   assert.equal(open.pay.eftpos.owed, 0);
-  // Card 90 owed only — EFTPOS must not inflate unpaid
+  assert.equal(open.pay.account.gross, 75);
+  assert.equal(open.pay.account.count, 2);
+  assert.equal(open.pay.account.owed, 0);
+  // Card 90 owed only — EFTPOS + Account/ACC must not inflate BW unpaid
   assert.equal(open.owedTotal, 90);
-  assert.equal(open.outcomes.completed, 3);
+  assert.equal(open.outcomes.completed, 5);
   assert.equal(open.outcomes.cancelled, 1);
   assert.equal(open.workHours, 2.1);
   assert.deepEqual(open.vehicles, ['201']);
@@ -104,6 +117,36 @@ test('buildDriverSummaryRow totals owed and zeros when locked', () => {
   assert.equal(paid.status, 'paid');
   assert.equal(paid.owedTotal, 0);
   assert.equal(paid.owedBeforeLock, 90);
+});
+
+test('PLATFORM_OWED_BUCKETS keeps hoist with TM; Account is tracked-not-owed', async () => {
+  const {
+    PLATFORM_OWED_BUCKETS,
+    TRACKED_NOT_PLATFORM_OWED,
+    isPlatformOwedBucket,
+    buildDriverSummaryRow,
+  } = await import('../lib/driverOpsSummary.js');
+  assert.deepEqual([...PLATFORM_OWED_BUCKETS], ['card', 'tm', 'hoist']);
+  assert.ok(TRACKED_NOT_PLATFORM_OWED.includes('account'));
+  assert.equal(isPlatformOwedBucket('hoist'), true);
+  assert.equal(isPlatformOwedBucket('account'), false);
+  const row = buildDriverSummaryRow({
+    driverId: 'd1',
+    driverName: 'Sam',
+    jobs: [
+      {
+        jobstatus: 'Completed',
+        PaymentType: 'Total Mobility',
+        TotalFare: 40,
+        tmSubsidyHoist: 10,
+        hoistUses: 1,
+      },
+    ],
+  });
+  assert.equal(row.pay.tm.owed, 40);
+  assert.equal(row.pay.hoist.owed, 10);
+  assert.equal(row.pay.hoist.count, 1);
+  assert.equal(row.owedTotal, 50);
 });
 
 test('settlementPath shape', () => {
