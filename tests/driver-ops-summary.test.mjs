@@ -11,7 +11,7 @@ import {
   settlementPath,
 } from '../lib/driverOpsSummary.js';
 
-test('cash owes $0; card applies company+driver %', () => {
+test('cash owes $0; card applies company+driver %; EFTPOS owes $0 like cash', () => {
   assert.equal(companyOwesDriver(100, 'Cash').owed, 0);
   const card = companyOwesDriver(100, 'Card', { companyPercent: 10, driverPercent: 2 });
   assert.equal(card.bucket, 'card');
@@ -19,7 +19,9 @@ test('cash owes $0; card applies company+driver %', () => {
   assert.equal(card.commission, 12);
   const eft = companyOwesDriver(50, 'EFTPOS', { companyPercent: 10, driverPercent: 0 });
   assert.equal(eft.bucket, 'eftpos');
-  assert.equal(eft.owed, 45);
+  assert.equal(eft.owed, 0);
+  assert.equal(eft.commission, 0);
+  assert.equal(eft.gross, 50);
 });
 
 test('TM and Account owe full fare', () => {
@@ -70,6 +72,7 @@ test('buildDriverSummaryRow totals owed and zeros when locked', () => {
   const jobs = [
     { jobstatus: 'Completed', PaymentType: 'Cash', TotalFare: 20, vehicleId: '201' },
     { jobstatus: 'Completed', PaymentType: 'Card', TotalFare: 100, source: 'dispatch' },
+    { jobstatus: 'Completed', PaymentType: 'EFTPOS', TotalFare: 40 },
     { jobstatus: 'Cancelled', PaymentType: 'Card', TotalFare: 50 },
   ];
   const open = buildDriverSummaryRow({
@@ -81,8 +84,12 @@ test('buildDriverSummaryRow totals owed and zeros when locked', () => {
     cardSettings: { companyPercent: 10, driverPercent: 0 },
   });
   assert.equal(open.cashHeld, 20);
+  assert.equal(open.pay.eftpos.gross, 40);
+  assert.equal(open.pay.eftpos.count, 1);
+  assert.equal(open.pay.eftpos.owed, 0);
+  // Card 90 owed only — EFTPOS must not inflate unpaid
   assert.equal(open.owedTotal, 90);
-  assert.equal(open.outcomes.completed, 2);
+  assert.equal(open.outcomes.completed, 3);
   assert.equal(open.outcomes.cancelled, 1);
   assert.equal(open.workHours, 2.1);
   assert.deepEqual(open.vehicles, ['201']);

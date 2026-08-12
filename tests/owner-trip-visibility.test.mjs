@@ -226,6 +226,12 @@ test('sidebar Payments section links Card EFTPOS Cash to Closed Jobs filters', (
   assert.match(src, /if\(_rptPayQ==='card'\)/);
   assert.match(src, /if\(_rptPayQ==='eftpos'\) return pm\.indexOf\('eftpos'\)/);
   assert.match(src, /if\(_rptPayQ==='cash'\) return pm\.indexOf\('cash'\)/);
+  // EFTPOS is not BookaWaka card processing — no commission / net-payout model
+  assert.match(src, /if \(s\.indexOf\('eftpos'\) !== -1\) return false;/);
+  assert.doesNotMatch(
+    src,
+    /return s\.indexOf\('card'\) !== -1 \|\| s\.indexOf\('stripe'\) !== -1 \|\| s\.indexOf\('eftpos'\)/,
+  );
   // Active nav prefers ?pay= deep-links over bare Closed Jobs
   assert.match(src, /hasPayFilter/);
   assert.match(src, /Bare Closed Jobs link stays inactive/);

@@ -459,10 +459,12 @@ const FIREBASE_SCRIPTS = `
     var s = String(pm || '').toLowerCase().replace(/[\s_-]/g, '');
     if (!s || s === '—' || s === '-') return false;
     if (s.indexOf('cash') !== -1) return false;
+    // EFTPOS = driver Verifone — not BookaWaka card processing; no commission / net-payout model.
+    if (s.indexOf('eftpos') !== -1) return false;
     if (s.indexOf('account') !== -1 || s === 'acc') return false;
     if (s.indexOf('mobility') !== -1 || s === 'tm') return false;
     if (s.indexOf('gift') !== -1) return false;
-    return s.indexOf('card') !== -1 || s.indexOf('stripe') !== -1 || s.indexOf('eftpos') !== -1
+    return s.indexOf('card') !== -1 || s.indexOf('stripe') !== -1
       || s.indexOf('visa') !== -1 || s.indexOf('master') !== -1 || s.indexOf('amex') !== -1
       || s.indexOf('debit') !== -1 || s.indexOf('credit') !== -1;
   };
