@@ -1,0 +1,143 @@
+
+<div class="dos-wrap">
+  <div class="dos-hint">
+    <b>What you owe drivers (BookaWaka settlement):</b> Card and TM/Hoist are <b>independent</b> Mark Paid streams — lock Card for a period without locking TM (and vice versa). Net after card commission is unpaid until you Mark Card Paid; TM+Hoist until you Mark TM Paid.<br>
+    <b>Tracked, not BookaWaka-owed:</b> Cash (held by driver) · EFTPOS (Verifone → company bank) · Account/ACC (see Account / ACC Settlements).
+    Each still shows total × count for records.<br>
+    <b>Jobs legend:</b> Done = completed · Canc = cancelled · Rej = rejected · <b>NS = No Show</b> · Tot = total.<br>
+    <b>Sources:</b> Disp = dispatch · App = passenger app · Web = website · Food · Frt = freight · Hail = driver app / street hail / queue · Other = recognised but unmapped · Unk = missing source field.
+  </div>
+
+  <div class="rpt-panel">
+    <div class="rpt-toolbar">
+      <div class="rpt-toolbar-title">
+        <i class="material-icons">&#xE227;</i>
+        <h3>Driver Ops &amp; Payment Summary</h3>
+      </div>
+      <div class="rpt-toolbar-meta">Period: <b id="dos-period-label">—</b></div>
+      <div class="rpt-toolbar-actions">
+        <button class="rpt-btn rpt-btn-white" onclick="dosLoad()"><i class="material-icons">&#xE5D5;</i> Refresh</button>
+        <button class="rpt-btn rpt-btn-ghost" onclick="dosExportCsv()"><i class="material-icons">&#xE2C4;</i> CSV</button>
+      </div>
+    </div>
+
+    <div class="rpt-filter-panel">
+      <div class="rpt-filter-grid">
+        <div class="rpt-fi">
+          <label>Period</label>
+          <select id="dos-mode" onchange="dosOnModeChange()">
+            <option value="month" selected>Month</option>
+            <option value="week">Week</option>
+            <option value="day">Day</option>
+            <option value="range">Custom range</option>
+          </select>
+        </div>
+        <div class="rpt-fi" id="dos-month-wrap">
+          <label>Month</label>
+          <input type="month" id="dos-month" onchange="dosLoad()"/>
+        </div>
+        <div class="rpt-fi" id="dos-day-wrap" style="display:none">
+          <label>Date</label>
+          <input type="date" id="dos-day" onchange="dosLoad()"/>
+        </div>
+        <div class="rpt-fi" id="dos-week-wrap" style="display:none">
+          <label>Week of</label>
+          <input type="date" id="dos-week" onchange="dosLoad()"/>
+        </div>
+        <div class="rpt-fi" id="dos-range-wrap" style="display:none">
+          <label>From</label>
+          <input type="date" id="dos-range-from" onchange="dosLoad()"/>
+        </div>
+        <div class="rpt-fi" id="dos-range-to-wrap" style="display:none">
+          <label>To</label>
+          <input type="date" id="dos-range-to" onchange="dosLoad()"/>
+        </div>
+        <div class="rpt-fi">
+          <label>Driver</label>
+          <select id="dos-driver-filter" onchange="dosRender()">
+            <option value="">All drivers</option>
+          </select>
+        </div>
+        <div class="rpt-fi">
+          <label>Status</label>
+          <select id="dos-status-filter" onchange="dosRender()">
+            <option value="">All</option>
+            <option value="card_open">Card unpaid</option>
+            <option value="tm_open">TM unpaid</option>
+            <option value="open">Any unpaid</option>
+            <option value="partial">Partial</option>
+            <option value="paid">Fully paid</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="dos-loading" class="rpt-state-box"><div class="rpt-spinner"></div><p>Loading driver ops…</p></div>
+    <div id="dos-empty" class="rpt-state-box" style="display:none"><i class="material-icons">&#xE8B6;</i><p>No driver activity in this period.</p></div>
+
+    <div id="dos-main" style="display:none">
+      <div class="dos-stats" id="dos-stats"></div>
+      <div class="dos-tbl-wrap">
+        <table class="dos-tbl">
+          <thead>
+            <tr>
+              <th onclick="dosSort('driverName')">Driver</th>
+              <th onclick="dosSort('workHours')">Hours</th>
+              <th>Jobs</th>
+              <th title="Dispatch">Disp</th>
+              <th title="Passenger app">App</th>
+              <th title="Website">Web</th>
+              <th title="Food">Food</th>
+              <th title="Freight">Frt</th>
+              <th title="Driver app / hail / queue">Hail</th>
+              <th title="Recognised source not in Disp/App/Web/Food/Frt/Hail">Other</th>
+              <th title="Missing source / bookingSource field">Unk</th>
+              <th>Vehicles</th>
+              <th onclick="dosSort('cashHeld')">Cash held</th>
+              <th>Card</th>
+              <th>EFTPOS</th>
+              <th>TM</th>
+              <th>Account</th>
+              <th>Hoist</th>
+              <th onclick="dosSort('cardOwed')">Card owes</th>
+              <th onclick="dosSort('tmOwed')">TM owes</th>
+              <th onclick="dosSort('owedTotal')">Total unpaid</th>
+              <th>Status</th>
+              <th>Bank</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="dos-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="rpt-panel dos-disp">
+    <div class="rpt-toolbar">
+      <div class="rpt-toolbar-title">
+        <i class="material-icons">&#xE0B7;</i>
+        <h3>Dispatcher activity (same period)</h3>
+      </div>
+    </div>
+    <div style="padding:12px 18px;font-size:12px;color:#607d8b;line-height:1.5">
+      Shift <b>hours</b> for dispatchers are not stored historically (only live heartbeats). This list counts jobs that name a dispatcher in the period.
+    </div>
+    <div class="dos-tbl-wrap" style="max-height:280px">
+      <table class="dos-tbl" style="min-width:0">
+        <thead><tr><th>Dispatcher</th><th>Jobs handled</th><th>Completed</th><th>Cancelled</th></tr></thead>
+        <tbody id="dos-disp-tbody"><tr><td colspan="4" style="color:#9e9e9e">Load a period to see activity.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="dos-ov" id="dos-detail-ov" onclick="if(event.target===this)dosCloseDetail()">
+  <div class="dos-modal">
+    <div class="dos-modal-h">
+      <h3 id="dos-detail-title">Driver detail</h3>
+      <button class="rpt-btn rpt-btn-ghost" onclick="dosCloseDetail()">Close</button>
+    </div>
+    <div class="dos-modal-b" id="dos-detail-body"></div>
+  </div>
+</div>
