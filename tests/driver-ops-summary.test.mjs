@@ -306,6 +306,7 @@ test('TM subsidy owed: cash-remainder + hoist uses subsidy not hoist-only', () =
   const tm = lines.find((l) => l.bucket === 'tm');
   const hoist = lines.find((l) => l.bucket === 'hoist');
   assert.equal(cash.owed, 0);
+  assert.equal(cash.gross, 5.27);
   assert.equal(tm.owed, 9.79);
   assert.equal(hoist.owed, 11);
   const row = buildDriverSummaryRow({
@@ -442,6 +443,7 @@ test('TM subsidy owed: cash-remainder no hoist still contributes subsidy', () =>
     tmPassengerPays: 5.29,
   });
   assert.equal(lines.find((l) => l.bucket === 'cash').owed, 0);
+  assert.equal(lines.find((l) => l.bucket === 'cash').gross, 5.29);
   assert.equal(lines.find((l) => l.bucket === 'tm').owed, 9.82);
   assert.equal(lines.some((l) => l.bucket === 'hoist'), false);
   const row = buildDriverSummaryRow({
@@ -458,9 +460,36 @@ test('TM subsidy owed: cash-remainder no hoist still contributes subsidy', () =>
     ],
   });
   assert.equal(row.tmOwed, 9.82);
+  assert.equal(row.pay.cash.gross, 5.29);
   assert.equal(row.pay.hoist.owed, 0);
   assert.equal(row.tmDetail.councilPct, 65);
   assert.equal(row.tmDetail.passengerPct, 35);
+});
+
+test('TM Cash remainder gross is passengerPays not full fare (live 8692608131)', () => {
+  // fare $15.27, subsidy $9.93, passenger $5.34 — Cash bucket must show $5.34 not $15.27
+  const job = {
+    jobstatus: 'Completed',
+    PaymentType: 'Cash',
+    TotalFare: 15.27,
+    isTotalMobility: true,
+    tmSubsidyFare: 9.93,
+    tmPassengerPays: 5.34,
+    tmCouncilPays: 9.93,
+  };
+  const lines = jobPaymentLines(job);
+  const cash = lines.find((l) => l.bucket === 'cash');
+  const tm = lines.find((l) => l.bucket === 'tm');
+  assert.equal(cash.gross, 5.34);
+  assert.equal(cash.owed, 0);
+  assert.equal(tm.gross, 9.93);
+  assert.equal(tm.owed, 9.93);
+  assert.notEqual(cash.gross, 15.27);
+  const row = buildDriverSummaryRow({ driverId: 'D001', jobs: [job] });
+  assert.equal(row.pay.cash.gross, 5.34);
+  assert.equal(row.cashHeld, 5.34);
+  assert.equal(row.tmDetail.passengerPays, 5.34);
+  assert.equal(row.tmDetail.subsidy, 9.93);
 });
 
 test('TM subsidy owed: PaymentType===TM uses subsidy not full fare', () => {
