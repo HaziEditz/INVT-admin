@@ -237,6 +237,7 @@ const PAGE_META = {
   'tm_batches.aspx':             { title: 'TM Claim Batches',        icon: '&#xE8E5;',  section: 'Total Mobility' },
   'drivercompliance.aspx':       { title: 'Driver Compliance',       icon: '&#xE8D5;',  section: 'Reports' },
   'driveropssummary.aspx':       { title: 'Driver Ops & Payments',   icon: '&#xE227;',  section: 'Reports' },
+  'accountdriversettlements.aspx': { title: 'Account / ACC Settlements', icon: '&#xE8A1;',  section: 'Accounts' },
   'businessaccounts.aspx':          { title: 'Business Accounts',          icon: '&#xE8A1;',  section: 'Accounts' },
   'businessaccountbilling.aspx':    { title: 'Business Account Billing',   icon: '&#xE8C7;',  section: 'Accounts' },
   'accclients.aspx':                { title: 'ACC Clients',                 icon: '&#xE7FB;',  section: 'Accounts' },
@@ -1785,6 +1786,7 @@ function sidebarHTML() {
       <ul>
         <li><a href="BusinessAccounts.aspx">Business Accounts</a></li>
         <li><a href="BusinessAccountBilling.aspx">Monthly Invoicing</a></li>
+        <li><a href="AccountDriverSettlements.aspx">Account / ACC Settlements</a></li>
         <li><a href="AccClients.aspx">ACC Clients</a></li>
         <li><a href="AccBilling.aspx">ACC Billing</a></li>
       </ul>
@@ -13810,8 +13812,9 @@ function loadReport(){
           });
         } else if(RTYPE==='accreport'){
           flat=flat.filter(function(r){
-            var pm=(r.paymentMethod||r.payMethod||r.paymentType||'').toLowerCase().replace(/[_\\s-]/g,'');
-            return pm==='account'||pm.indexOf('account')!==-1;
+            var pm=(r.paymentMethod||r.payMethod||r.paymentType||r.PaymentType||r.PaymentMethod||'').toLowerCase().replace(/[_\\s-]/g,'');
+            // Include pure ACC (pm==='acc') as well as Account / Business Account.
+            return pm==='account'||pm==='acc'||pm.indexOf('account')!==-1;
           });
         } else if(RTYPE==='totalmobility'){
           flat=flat.filter(function(r){
@@ -14633,6 +14636,10 @@ bootCompliance();
 
 function driverOpsSummaryPage() {
   return require('./pages/driverOpsSummary')(pageWrap, commonHead, commonScripts);
+}
+
+function accountDriverSettlementsPage() {
+  return require('./pages/accountDriverSettlements')(pageWrap, commonHead, commonScripts);
 }
 
 // ── Business Accounts ────────────────────────────────────────────────────────
@@ -22933,6 +22940,10 @@ const server = http.createServer((req, res) => {
     if (lname === 'driveropssummary.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
       res.end(withSa(withCid(driverOpsSummaryPage(), cid), isSA)); return;
+    }
+    if (lname === 'accountdriversettlements.aspx') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
+      res.end(withSa(withCid(accountDriverSettlementsPage(), cid), isSA)); return;
     }
     if (lname === 'businessaccounts.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
