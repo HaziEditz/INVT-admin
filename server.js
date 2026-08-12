@@ -15751,7 +15751,7 @@ function babLoad(){
 
     function isAccountJob(j){
       var pm=(j.paymentMethod||j.PaymentMethod||j.payment||j.payType||j.paymentType||j.PaymentType||'').toLowerCase().replace(/[_\\s-]/g,'');
-      return pm==='account'||pm.indexOf('account')!==-1;
+      return pm==='account'||pm==='acc'||pm.indexOf('account')!==-1;
     }
 
     function resolveAcct(j){
