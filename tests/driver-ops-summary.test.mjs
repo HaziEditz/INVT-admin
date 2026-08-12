@@ -42,10 +42,13 @@ test('jobPaymentLines adds hoist bucket', () => {
   const lines = jobPaymentLines({
     TotalFare: 40,
     PaymentType: 'Total Mobility',
+    tmSubsidyFare: 25,
     tmSubsidyHoist: 15,
     hoistUses: 2,
   });
   assert.equal(lines.length, 2);
+  assert.equal(lines[0].bucket, 'tm');
+  assert.equal(lines[0].owed, 25);
   assert.equal(lines[1].bucket, 'hoist');
   assert.equal(lines[1].owed, 15);
   assert.equal(lines[1].uses, 2);
@@ -142,17 +145,18 @@ test('PLATFORM_OWED_BUCKETS keeps hoist with TM; Account is tracked-not-owed', a
         jobstatus: 'Completed',
         PaymentType: 'Total Mobility',
         TotalFare: 40,
+        tmSubsidyFare: 30,
         tmSubsidyHoist: 10,
         hoistUses: 1,
       },
     ],
   });
-  assert.equal(row.pay.tm.owed, 40);
+  assert.equal(row.pay.tm.owed, 30);
   assert.equal(row.pay.hoist.owed, 10);
   assert.equal(row.pay.hoist.count, 1);
-  assert.equal(row.tmOwed, 50);
+  assert.equal(row.tmOwed, 40);
   assert.equal(row.cardOwed, 0);
-  assert.equal(row.owedTotal, 50);
+  assert.equal(row.owedTotal, 40);
 });
 
 test('settlementPath shape', () => {
@@ -185,6 +189,7 @@ test('Track C: card lock and tm lock are independent; legacy locks both', () => 
       jobstatus: 'Completed',
       PaymentType: 'Total Mobility',
       TotalFare: 40,
+      tmSubsidyFare: 30,
       tmSubsidyHoist: 10,
       hoistUses: 1,
     },
@@ -197,8 +202,8 @@ test('Track C: card lock and tm lock are independent; legacy locks both', () => 
     cardSettings: cs,
   });
   assert.equal(open.cardOwedBeforeLock, 90);
-  assert.equal(open.tmOwedBeforeLock, 50);
-  assert.equal(open.owedTotal, 140);
+  assert.equal(open.tmOwedBeforeLock, 40);
+  assert.equal(open.owedTotal, 130);
   assert.equal(open.status, 'open');
   assert.equal(open.cardLocked, false);
   assert.equal(open.tmLocked, false);
@@ -213,10 +218,10 @@ test('Track C: card lock and tm lock are independent; legacy locks both', () => 
   assert.equal(cardOnly.cardLocked, true);
   assert.equal(cardOnly.tmLocked, false);
   assert.equal(cardOnly.cardOwed, 0);
-  assert.equal(cardOnly.tmOwed, 50);
-  assert.equal(cardOnly.owedTotal, 50);
+  assert.equal(cardOnly.tmOwed, 40);
+  assert.equal(cardOnly.owedTotal, 40);
   assert.equal(cardOnly.status, 'partial');
-  assert.equal(cardOnly.tmDetail.owed, 50);
+  assert.equal(cardOnly.tmDetail.owed, 40);
   assert.equal(cardOnly.locked, false);
 
   const tmOnly = buildDriverSummaryRow({
@@ -224,7 +229,7 @@ test('Track C: card lock and tm lock are independent; legacy locks both', () => 
     driverName: 'Sam',
     jobs,
     cardSettings: cs,
-    tmSettlement: { status: 'paid', locked: true, amountPaid: 50 },
+    tmSettlement: { status: 'paid', locked: true, amountPaid: 40 },
   });
   assert.equal(tmOnly.cardLocked, false);
   assert.equal(tmOnly.tmLocked, true);
@@ -233,7 +238,7 @@ test('Track C: card lock and tm lock are independent; legacy locks both', () => 
   assert.equal(tmOnly.owedTotal, 90);
   assert.equal(tmOnly.status, 'partial');
   assert.equal(tmOnly.tmDetail.owed, 0);
-  assert.equal(tmOnly.tmDetail.paid, 50);
+  assert.equal(tmOnly.tmDetail.paid, 40);
 
   const both = buildDriverSummaryRow({
     driverId: 'd1',
@@ -252,7 +257,7 @@ test('Track C: card lock and tm lock are independent; legacy locks both', () => 
     driverName: 'Sam',
     jobs,
     cardSettings: cs,
-    settlement: { status: 'paid', locked: true, amountPaid: 140 },
+    settlement: { status: 'paid', locked: true, amountPaid: 130 },
   });
   assert.equal(legacy.cardLocked, true);
   assert.equal(legacy.tmLocked, true);
@@ -271,11 +276,12 @@ test('isTmJob detects economics flags even when PaymentType is Cash', async () =
     TotalFare: 40,
     PaymentType: 'Card',
     isTotalMobility: true,
+    tmSubsidyFare: 26,
     tmSubsidyHoist: 10,
     hoistUses: 1,
   });
-  assert.equal(lines[0].bucket, 'tm');
-  assert.equal(lines[1].bucket, 'hoist');
+  assert.equal(lines.some((l) => l.bucket === 'tm' && l.owed === 26), true);
+  assert.equal(lines.some((l) => l.bucket === 'hoist' && l.owed === 10), true);
   assert.equal(formatPayWithCount(55, 5), '$55.00 ×5');
   assert.equal(formatPayWithCount(0, 0), '$0.00');
   assert.equal(normalizeJobSource({ source: 'Driver App hail' }), 'hail');
@@ -283,6 +289,109 @@ test('isTmJob detects economics flags even when PaymentType is Cash', async () =
   const range = periodBounds('range', Date.now(), '2026-08-01', '2026-08-10');
   assert.equal(range.mode, 'range');
   assert.match(range.key, /^R2026-08-01/);
+});
+
+test('TM subsidy owed: cash-remainder + hoist uses subsidy not hoist-only', () => {
+  const lines = jobPaymentLines({
+    jobstatus: 'Completed',
+    PaymentType: 'Cash',
+    TotalFare: 26.06,
+    tmUsed: true,
+    tmSubsidyFare: 9.79,
+    tmSubsidyHoist: 11,
+    tmPassengerPays: 5.27,
+    hoistUses: 1,
+  });
+  const cash = lines.find((l) => l.bucket === 'cash');
+  const tm = lines.find((l) => l.bucket === 'tm');
+  const hoist = lines.find((l) => l.bucket === 'hoist');
+  assert.equal(cash.owed, 0);
+  assert.equal(tm.owed, 9.79);
+  assert.equal(hoist.owed, 11);
+  const row = buildDriverSummaryRow({
+    driverId: 'D001',
+    driverName: 'D001',
+    jobs: [
+      {
+        jobstatus: 'Completed',
+        PaymentType: 'Cash',
+        TotalFare: 26.06,
+        tmUsed: true,
+        tmSubsidyFare: 9.79,
+        tmSubsidyHoist: 11,
+        tmPassengerPays: 5.27,
+        hoistUses: 1,
+      },
+    ],
+  });
+  assert.equal(row.pay.tm.owed, 9.79);
+  assert.equal(row.pay.hoist.owed, 11);
+  assert.equal(row.tmOwed, 20.79);
+  assert.equal(row.tmDetail.subsidy, 9.79);
+  assert.equal(row.tmDetail.councilPct, 65);
+  assert.equal(row.tmDetail.passengerPct, 35);
+});
+
+test('TM subsidy owed: cash-remainder no hoist still contributes subsidy', () => {
+  const lines = jobPaymentLines({
+    PaymentType: 'Cash',
+    TotalFare: 15.11,
+    tmUsed: true,
+    tmSubsidyFare: 9.82,
+    tmPassengerPays: 5.29,
+  });
+  assert.equal(lines.find((l) => l.bucket === 'cash').owed, 0);
+  assert.equal(lines.find((l) => l.bucket === 'tm').owed, 9.82);
+  assert.equal(lines.some((l) => l.bucket === 'hoist'), false);
+  const row = buildDriverSummaryRow({
+    driverId: 'D001',
+    jobs: [
+      {
+        jobstatus: 'Completed',
+        PaymentType: 'Cash',
+        TotalFare: 15.11,
+        tmUsed: true,
+        tmSubsidyFare: 9.82,
+        tmPassengerPays: 5.29,
+      },
+    ],
+  });
+  assert.equal(row.tmOwed, 9.82);
+  assert.equal(row.pay.hoist.owed, 0);
+  assert.equal(row.tmDetail.councilPct, 65);
+  assert.equal(row.tmDetail.passengerPct, 35);
+});
+
+test('TM subsidy owed: PaymentType===TM uses subsidy not full fare', () => {
+  const lines = jobPaymentLines({
+    PaymentType: 'TM',
+    TotalFare: 32.02,
+    tmSubsidyFare: 20.81,
+    tmPassengerPays: 11.21,
+  });
+  assert.equal(lines.find((l) => l.bucket === 'tm').owed, 20.81);
+  assert.ok(lines.every((l) => l.owed !== 32.02));
+  const derived = jobPaymentLines({
+    PaymentType: 'Total Mobility',
+    TotalFare: 40,
+    tmPassengerPays: 14,
+  });
+  assert.equal(derived.find((l) => l.bucket === 'tm').owed, 26);
+  const row = buildDriverSummaryRow({
+    driverId: 'd1',
+    jobs: [
+      {
+        jobstatus: 'Completed',
+        PaymentType: 'TM',
+        TotalFare: 32.02,
+        tmSubsidyFare: 20.81,
+        tmPassengerPays: 11.21,
+      },
+    ],
+  });
+  assert.equal(row.tmOwed, 20.81);
+  assert.equal(row.tmDetail.fare, 32.02);
+  assert.equal(row.tmDetail.subsidy, 20.81);
 });
 
 test('aggregateDriverShiftMinutes prefers workedMinutes and collapses progressive siblings', async () => {

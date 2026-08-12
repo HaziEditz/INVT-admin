@@ -337,7 +337,10 @@ function dosRender(){
       : '<button class="dos-btn primary" onclick="dosMarkTmPaid(\''+dosEsc(r.driverId)+'\')">Mark TM</button>';
     var t=r.tmDetail||dosEmptyTmDetail();
     var tmMain=t.trips?dosFormatPayWithCount(r.tmLocked?t.paid:t.owed, t.trips):'$0.00';
-    var tmSub=t.trips?('Sub '+money(t.subsidy)+' · Hoist '+money(t.hoist)+(t.councilPct!=null?' · '+t.councilPct+'%':'')):'';
+    var tmPctBits=[];
+    if(t.councilPct!=null) tmPctBits.push('Council '+t.councilPct+'%');
+    if(t.passengerPct!=null) tmPctBits.push('Pax '+t.passengerPct+'%');
+    var tmSub=t.trips?('Sub '+money(t.subsidy)+' · Hoist '+money(t.hoist)+(tmPctBits.length?' · '+tmPctBits.join(' / '):'')+(t.passengerPays?' · Pax '+money(t.passengerPays):'')):'';
     function lockedNote(before){ return ' <span class="dos-sub" style="color:#2E7D32">('+money(before)+' locked)</span>'; }
     return '<tr>'+
       '<td class="sticky-driver"><b>'+dosEsc(r.driverName)+'</b><div class="dos-sub">'+dosEsc(r.driverId)+'</div></td>'+
@@ -399,7 +402,7 @@ function dosOpenDetail(driverId){
     '<div><div class="k">TM fare</div><div class="val">'+money(t.fare)+'</div></div>'+
     '<div><div class="k">Council subsidy</div><div class="val">'+money(t.subsidy)+(t.councilPct!=null?' ('+t.councilPct+'%)':'')+'</div></div>'+
     '<div><div class="k">TM hoist</div><div class="val">'+money(t.hoist)+(t.hoistUses?' ×'+t.hoistUses:'')+'</div></div>'+
-    '<div><div class="k">Pax pays</div><div class="val">'+money(t.passengerPays)+'</div></div>'+
+    '<div><div class="k">Pax pays</div><div class="val">'+money(t.passengerPays)+(t.passengerPct!=null?' ('+t.passengerPct+'%)':'')+'</div></div>'+
     '<div><div class="k">TM owed / paid</div><div class="val"><span style="color:#E65100">'+money(t.owed)+'</span> / <span style="color:#2E7D32">'+money(t.paid)+'</span></div></div>'+
   '</div>';
   html+='<table class="dos-tbl" style="min-width:0"><thead><tr><th>When</th><th>Booking</th><th>Pay</th><th>Fare</th><th>Owed</th><th>Status</th><th>Source</th></tr></thead><tbody>';
@@ -407,12 +410,13 @@ function dosOpenDetail(driverId){
   list.forEach(function(j){
     var fare=parseFloat(j.TotalFare||j.totalFare||j.Fare||j.fare||0);
     var pm=j.PaymentType||j.paymentType||j.PaymentMethod||'';
-    var main=dosJobPaymentLines(j,_dosCardSettings)[0];
+    var lines=dosJobPaymentLines(j,_dosCardSettings);
+    var lineOwed=lines.reduce(function(a,l){return a+(l.owed||0);},0);
     var ts=dosJobTs(j);
     var isCompleted=dosNormalizeJobOutcome(j.jobstatus||j.status)==='completed';
     html+='<tr><td>'+(ts?new Date(ts).toLocaleString('en-NZ'):'—')+'</td>'+
       '<td>'+dosEsc(j.bookingId||'')+'</td><td>'+dosEsc(pm||'—')+'</td>'+
-      '<td class="dos-money">'+money(fare)+'</td><td class="dos-money">'+(isCompleted?money(main.owed):'—')+'</td>'+
+      '<td class="dos-money">'+money(fare)+'</td><td class="dos-money">'+(isCompleted?money(lineOwed):'—')+'</td>'+
       '<td>'+dosEsc(j.jobstatus||j.status||'')+'</td><td>'+dosEsc(dosNormalizeJobSource(j))+'</td></tr>';
   });
   html+='</tbody></table>';
