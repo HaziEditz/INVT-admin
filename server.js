@@ -16364,6 +16364,9 @@ function tmTripsPage(companyId) {
     <input type="text" id="tm-search" class="tm-select" placeholder="Search job / passenger / driver / card…" oninput="filterTrips()" style="min-width:220px"/>
     <span id="tm-count-label" style="font-size:13px;color:#94a3b8;"></span>
     <div style="flex:1"></div>
+    <button type="button" class="tm-csv-btn" onclick="openManualTmEntry()" style="background:#1565C0;border-color:#1565C0">
+      <i class="material-icons" style="font-size:15px">&#xE145;</i> Add Manual Trip
+    </button>
     <button class="tm-csv-btn" onclick="exportCsv()">
       <i class="material-icons" style="font-size:15px">&#xE2C4;</i> Export CSV
     </button>
@@ -16435,6 +16438,49 @@ function tmTripsPage(companyId) {
       </div>
     </div>
   </div>
+</div>
+
+<!-- Manual TM Trip Entry Modal -->
+<div class="tmd-overlay" id="manual-tm-overlay" onclick="if(event.target===this)closeManualTmEntry()">
+  <div class="tmd-modal" style="max-width:720px">
+    <div class="tmd-head">
+      <h3><i class="material-icons" style="vertical-align:middle;font-size:18px;margin-right:6px">&#xE145;</i>Add Manual TM Trip</h3>
+      <button class="tmd-close" onclick="closeManualTmEntry()">&#xD7;</button>
+    </div>
+    <div class="tmd-body" id="manual-tm-body">
+      <p style="font-size:12px;color:#64748b;margin:0 0 12px">Creates a completed TM job marked <strong>Manually added by company</strong>. It enters the same pending → submit → anomaly → approve → claim pipeline. GPS/route fraud checks are skipped; fare and card rules still run.</p>
+      <div class="tmd-grid" id="manual-tm-form">
+        <div class="tmd-field"><label>Date *</label><input type="date" id="mt-date" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>Time *</label><input type="time" id="mt-time" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>Meter fare ($) *</label><input type="number" step="0.01" min="0" id="mt-fare" oninput="mtRecalc()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>Distance (km)</label><input type="number" step="0.01" min="0" id="mt-distance" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field" style="grid-column:1/-1"><label>Pickup address *</label><input type="text" id="mt-pickup" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field" style="grid-column:1/-1"><label>Dropoff address *</label><input type="text" id="mt-dropoff" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>Driver *</label><select id="mt-driver" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"><option value="">Loading…</option></select></div>
+        <div class="tmd-field"><label>Vehicle *</label><select id="mt-vehicle" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"><option value="">Loading…</option></select></div>
+        <div class="tmd-field"><label>Cardholder name *</label><input type="text" id="mt-cardname" placeholder="First Last" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>TM card / voucher # *</label><input type="text" id="mt-card" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>Card expiry (MM/YY)</label><input type="text" id="mt-expiry" placeholder="MM/YY" maxlength="5" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>Hoist uses</label><input type="number" min="0" step="1" id="mt-hoist" value="0" oninput="mtRecalc()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>
+        <div class="tmd-field"><label>Passenger remainder</label><select id="mt-pay" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"><option value="Cash">Cash</option><option value="EFTPOS">EFTPOS</option><option value="Account">Account</option></select></div>
+        <div class="tmd-field"><label>Council</label><select id="mt-council" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"><option value="">Loading…</option></select></div>
+        <div class="tmd-field" style="grid-column:1/-1;background:#F1F8E9;border-radius:6px;padding:10px 12px">
+          <div style="font-size:11px;font-weight:700;color:#558B2F;margin-bottom:6px">FARE BREAKDOWN (from company TM settings)</div>
+          <div id="mt-breakdown" style="font-size:13px;color:#333">Enter fare to preview subsidy / hoist / passenger share.</div>
+        </div>
+      </div>
+      <div id="mt-err" style="display:none;margin-top:10px;padding:8px 10px;background:#FFEBEE;color:#B71C1C;border-radius:6px;font-size:12px"></div>
+    </div>
+    <div class="tmd-foot">
+      <div class="tmd-status-row" style="font-size:12px;color:#64748b">Writes completedJobs + tmTripStatus (pending)</div>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="tmd-approve-big" id="mt-save-btn" onclick="saveManualTmEntry()" style="background:#1565C0">
+          <i class="material-icons" style="font-size:16px">&#xE161;</i> Save Manual Trip
+        </button>
+        <button class="md-btn" onclick="closeManualTmEntry()">Cancel</button>
+      </div>
+    </div>
+  </div>
 </div>`;
 
   const js = `<script>
@@ -16443,6 +16489,10 @@ var _tripStatuses = {};
 var _tripsByKey = {};
 var _currentDetailKey = null;
 var _filteredTrips = [];
+var _mtTmConfig = null;
+var _mtDrivers = [];
+var _mtVehicles = [];
+var _mtCouncils = [];
 
 // Normalise timestamp — Firebase records use completedAt_ISO (ISO string) not numeric timestamp
 function _tmTs(t) {
@@ -16453,6 +16503,34 @@ function _tmTs(t) {
 }
 function _tmHoistPays(t) {
   return parseFloat(t.tmSubsidyHoist != null ? t.tmSubsidyHoist : (t.hoistTotal != null ? t.hoistTotal : (t.hoistCost || 0))) || 0;
+}
+function resolveTripCategory(t) {
+  t = t || {};
+  var explicit = String(t.tmTripCategory || t.tripCategory || '').trim();
+  if (explicit) return explicit;
+  if (t.manuallyAddedByCompany === true || t.manuallyAddedByCompany === 'true') return 'Manually added by company';
+  var raw = String(t.source || t.bookingSource || t.BookingSource || t.Source || t.via || '').toLowerCase().trim();
+  if (!raw) return '';
+  if (raw.indexOf('manual_owner') >= 0) return 'Manually added by company';
+  if (raw.indexOf('hail') >= 0 || raw.indexOf('driverapp') >= 0 || raw.indexOf('driver_app') >= 0 ||
+      raw.indexOf('driver-app') >= 0 || raw.indexOf('street') >= 0 || raw === 'queue' || raw.indexOf('driverqueue') >= 0) {
+    return 'Hail';
+  }
+  if (raw.indexOf('dispatch') >= 0 || raw.indexOf('console') >= 0) return 'Dispatch';
+  if (raw.indexOf('web') >= 0) return 'Website';
+  if (raw.indexOf('passenger') >= 0 || raw.indexOf('rider') >= 0 || raw.indexOf('pax') >= 0 || raw.indexOf('app') >= 0) return 'Passenger app';
+  if (raw.indexOf('food') >= 0) return 'Food';
+  if (raw.indexOf('freight') >= 0 || raw.indexOf('parcel') >= 0) return 'Freight';
+  if (raw === 'driver_complete') return '';
+  return raw.replace(/_/g, ' ');
+}
+function isManualOwnerTrip(t) {
+  t = t || {};
+  if (t.manuallyAddedByCompany === true || t.manuallyAddedByCompany === 'true') return true;
+  return String(t.source || '').toLowerCase().indexOf('manual_owner') >= 0;
+}
+function manualOwnerBadge() {
+  return '<span style="display:inline-block;margin-left:4px;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;background:#E3F2FD;color:#1565C0" title="Manually added by company">Manual</span>';
 }
 /** Meter %/cap claim only — never includes flat hoist. */
 function _tmMeterClaim(t) {
@@ -16576,7 +16654,8 @@ function formatOwnerEventLabel(e) {
   var labels = {
     submitted:'Submitted to council', flagged:'Flagged', returned:'Returned to company',
     owner_edited:'Edited by owner', resubmitted:'Resubmitted', approved:'Approved',
-    rejected:'Rejected', archived:'Archived', restored:'Restored', council_edited:'Edited by council'
+    rejected:'Rejected', archived:'Archived', restored:'Restored', council_edited:'Edited by council',
+    manual_owner_created:'Manually added by company'
   };
   var line = labels[e.type] || e.type || 'Event';
   if (e.reasons && e.reasons.length) line += ' (' + e.reasons.join(', ') + ')';
@@ -16693,7 +16772,7 @@ function renderTrips(trips) {
       : '<td></td>';
     return '<tr onclick="openTripDetail(\\'' + t._key + '\\')">' +
       checkCell +
-      '<td style="font-family:monospace;font-size:12px;white-space:nowrap">' + (t.bookingId || t.BookingId || t._key || '—') + '</td>' +
+      '<td style="font-family:monospace;font-size:12px;white-space:nowrap">' + (t.bookingId || t.BookingId || t._key || '—') + (isManualOwnerTrip(t) ? manualOwnerBadge() : '') + '</td>' +
       '<td>' + fmtDate(ms) + '<br><small style="color:#94a3b8">' + fmtTime(ms) + '</small></td>' +
       '<td style="font-weight:500">' + passenger + '</td>' +
       '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (t.pickupAddress||t.from||'') + '">' + (t.pickupAddress || t.from || '—') + '</td>' +
@@ -16860,12 +16939,13 @@ function openTripDetail(key) {
         row('Time', fmtTime(ms)) +
         row('Passenger (cardholder)', cardholder) +
         row('Voucher No.', t.tmCardNumber || t.tmVoucherNo || t.voucherNumber) +
-        row('Trip Category', t.tmTripCategory || t.tripCategory) +
+        row('Trip Category', resolveTripCategory(t) || null) +
         row('Driver', t.driverName || t.driver) +
         row('Vehicle / AB No.', t.vehicleId || t.vehiclePlate || t.vehicle) +
         row('Tariff', t.tariffName || t.vehicleType || t.carType) +
         row('Council', t.council || t.councilId) +
       '</div>' +
+      (isManualOwnerTrip(t) ? '<div style="margin-top:10px;padding:8px 12px;border-radius:6px;background:#E3F2FD;border-left:4px solid #1565C0;font-size:13px;color:#0D47A1"><strong>Manually added by company</strong></div>' : '') +
     '</div>' +
     '<div class="tmd-section">' +
       '<div class="tmd-section-title">Route</div>' +
@@ -16910,7 +16990,7 @@ function openTripDetail(key) {
       '<div class="tmd-field"><label>Distance km</label><input id="te-distanceKm" type="number" step="0.01" value="' + escAttr(t.distanceKm || t.distance || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Duration</label><input id="te-durationLabel" value="' + escAttr(t.durationLabel || t.duration || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Payment method</label><input id="te-paymentMethod" value="' + escAttr(t.paymentType || t.paymentMethod || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
-      '<div class="tmd-field"><label>Trip category</label><input id="te-tmTripCategory" value="' + escAttr(t.tmTripCategory || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
+      '<div class="tmd-field"><label>Trip category</label><input id="te-tmTripCategory" value="' + escAttr(resolveTripCategory(t) || t.tmTripCategory || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Driver</label><input id="te-driverName" value="' + escAttr(t.driverName || t.driver || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field"><label>Vehicle / cab</label><input id="te-vehicleId" value="' + escAttr(t.vehicleId || t.vehicle || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px"/></div>' +
       '<div class="tmd-field" style="grid-column:1/-1"><label>Fix comment <span style="color:#C62828">(required to resubmit)</span></label>' +
@@ -17246,6 +17326,247 @@ function loadTrips() {
 }
 window._fbOnLogin = function() { loadTrips(); };
 if (window.COMPANY_ID) loadTrips();
+
+function mtMoney(n){ return '$' + (Math.round((Number(n)||0)*100)/100).toFixed(2); }
+function mtCalcSubsidy(fare, cfg) {
+  cfg = cfg || {};
+  fare = Math.max(0, parseFloat(fare) || 0);
+  var pct = Math.max(0, parseFloat(cfg.councilSubsidyPercent != null ? cfg.councilSubsidyPercent : (cfg.councilPercent != null ? cfg.councilPercent : cfg.subsidyPercent)) || 0);
+  var capRaw = parseFloat(cfg.councilCapAmount != null ? cfg.councilCapAmount : (cfg.capAmount != null ? cfg.capAmount : cfg.subsidyCap));
+  var cap = (isFinite(capRaw) && capRaw > 0) ? capRaw : 0;
+  var pctAmount = fare * pct / 100;
+  var subsidy = Math.round((cap > 0 ? Math.min(pctAmount, cap) : pctAmount) * 100) / 100;
+  return { subsidy: subsidy, passengerPays: Math.round(Math.max(0, fare - subsidy) * 100) / 100, pct: pct };
+}
+function mtRecalc() {
+  var fare = parseFloat(document.getElementById('mt-fare').value) || 0;
+  var uses = Math.max(0, parseInt(document.getElementById('mt-hoist').value, 10) || 0);
+  var cfg = _mtTmConfig || {};
+  var rate = Math.max(0, parseFloat(cfg.hoistCostPerUnit != null ? cfg.hoistCostPerUnit : (cfg.hoistUnitCost != null ? cfg.hoistUnitCost : cfg.hoistRatePerUse)) || 0);
+  var hoist = Math.round(uses * rate * 100) / 100;
+  var split = mtCalcSubsidy(fare, cfg);
+  var el = document.getElementById('mt-breakdown');
+  if (!el) return;
+  if (!(fare > 0) && !uses) {
+    el.textContent = 'Enter fare to preview subsidy / hoist / passenger share.';
+    return;
+  }
+  el.innerHTML =
+    'Meter Fare ' + mtMoney(fare) +
+    ' · Line 1 subsidy ' + mtMoney(split.subsidy) + (split.pct ? ' (' + split.pct + '%)' : '') +
+    ' · Line 2 hoist ' + mtMoney(hoist) + (uses ? ' ×' + uses : '') +
+    ' · Council total ' + mtMoney(split.subsidy + hoist) +
+    ' · Passenger pays ' + mtMoney(split.passengerPays);
+}
+function aucklandLocalToMs(ymd, hm) {
+  var want = String(ymd) + 'T' + String(hm || '12:00').slice(0, 5);
+  var guess = Date.parse(want + ':00+12:00');
+  if (!isFinite(guess)) guess = Date.now();
+  var tz = window.COMPANY_TZ || 'Pacific/Auckland';
+  for (var i = 0; i < 6; i++) {
+    var parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(new Date(guess));
+    function gp(t){ var p = parts.find(function(x){ return x.type === t; }); return p ? p.value : '00'; }
+    var h = gp('hour'); if (h === '24') h = '00';
+    var got = gp('year') + '-' + gp('month') + '-' + gp('day') + 'T' + h + ':' + gp('minute');
+    if (got === want) return guess;
+    var diff = (Date.parse(want + 'Z') - Date.parse(got + 'Z')) / 60000;
+    if (!isFinite(diff)) break;
+    guess += diff * 60000;
+  }
+  return guess;
+}
+function closeManualTmEntry() {
+  var ov = document.getElementById('manual-tm-overlay');
+  if (ov) ov.classList.remove('open');
+}
+function openManualTmEntry() {
+  var ov = document.getElementById('manual-tm-overlay');
+  if (!ov) return;
+  var err = document.getElementById('mt-err');
+  if (err) { err.style.display = 'none'; err.textContent = ''; }
+  var today = new Date().toLocaleDateString('en-CA', { timeZone: window.COMPANY_TZ || 'Pacific/Auckland' });
+  var nowT = new Date().toLocaleTimeString('en-GB', { timeZone: window.COMPANY_TZ || 'Pacific/Auckland', hour: '2-digit', minute: '2-digit', hour12: false });
+  document.getElementById('mt-date').value = today;
+  document.getElementById('mt-time').value = nowT === '24:00' ? '00:00' : nowT;
+  ['mt-fare','mt-distance','mt-pickup','mt-dropoff','mt-cardname','mt-card','mt-expiry'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('mt-hoist').value = '0';
+  document.getElementById('mt-pay').value = 'Cash';
+  ov.classList.add('open');
+  mtLoadLookups().then(function(){ mtRecalc(); });
+}
+function mtDriverLabel(d, key) {
+  return String(d.fullName || d.displayName || d.name || d.driverName || d.email || key || 'Driver').trim();
+}
+function mtLoadLookups() {
+  var cid = window.COMPANY_ID;
+  if (!cid) return Promise.resolve();
+  return Promise.all([
+    window.adminRead('companySettings/' + cid + '/tmConfig').catch(function(){ return {}; }),
+    window.adminRead('drivers/' + cid).catch(function(){ return {}; }),
+    window.adminRead('vehicles/' + cid).catch(function(){ return {}; }),
+    window.adminRead('tmCompanyAccess/' + cid).catch(function(){ return {}; })
+  ]).then(function(res) {
+    _mtTmConfig = res[0] || {};
+    var drivers = res[1] || {};
+    var vehicles = res[2] || {};
+    var access = res[3] || {};
+    _mtDrivers = [];
+    Object.keys(drivers).forEach(function(k) {
+      var d = drivers[k];
+      if (!d || typeof d !== 'object') return;
+      if (d.fullName || d.displayName || d.name || d.email || d.driverName) {
+        _mtDrivers.push({ id: k, name: mtDriverLabel(d, k), raw: d });
+      }
+    });
+    _mtDrivers.sort(function(a,b){ return a.name.localeCompare(b.name); });
+    var dsel = document.getElementById('mt-driver');
+    dsel.innerHTML = '<option value="">Select driver…</option>' + _mtDrivers.map(function(d){
+      return '<option value="' + String(d.id).replace(/"/g,'&quot;') + '">' + String(d.name).replace(/</g,'&lt;') + '</option>';
+    }).join('');
+    _mtVehicles = [];
+    Object.keys(vehicles).forEach(function(k) {
+      var v = vehicles[k];
+      if (!v || typeof v !== 'object') {
+        _mtVehicles.push({ id: k, label: k });
+        return;
+      }
+      var label = v.vehicleNo || v.taxiNumber || v.plate || v.reg || k;
+      _mtVehicles.push({ id: k, label: String(label) });
+    });
+    _mtVehicles.sort(function(a,b){ return String(a.label).localeCompare(String(b.label)); });
+    var vsel = document.getElementById('mt-vehicle');
+    vsel.innerHTML = '<option value="">Select vehicle…</option>' + _mtVehicles.map(function(v){
+      return '<option value="' + String(v.id).replace(/"/g,'&quot;') + '">' + String(v.label).replace(/</g,'&lt;') + '</option>';
+    }).join('');
+    _mtCouncils = [];
+    Object.keys(access).forEach(function(councilId) {
+      var raw = access[councilId];
+      var approved = raw === true || raw === 'approved' || (raw && typeof raw === 'object' && raw.approved === true);
+      if (approved) _mtCouncils.push(councilId);
+    });
+    if (!_mtCouncils.length && _mtTmConfig && _mtTmConfig.sourceCouncilId) {
+      _mtCouncils.push(String(_mtTmConfig.sourceCouncilId));
+    }
+    var csel = document.getElementById('mt-council');
+    csel.innerHTML = (_mtCouncils.length ? '' : '<option value="">No approved council</option>') +
+      _mtCouncils.map(function(id, i){
+        return '<option value="' + String(id).replace(/"/g,'&quot;') + '"' + (i === 0 ? ' selected' : '') + '>' + String(id).replace(/</g,'&lt;') + '</option>';
+      }).join('');
+    var pct = parseFloat(_mtTmConfig.councilSubsidyPercent || _mtTmConfig.councilPercent || 0) || 0;
+    if (pct <= 0) {
+      var err = document.getElementById('mt-err');
+      err.style.display = 'block';
+      err.textContent = 'Company TM subsidy % is not configured (companySettings/.../tmConfig). Configure council TM rates before adding manual trips.';
+    }
+  });
+}
+function saveManualTmEntry() {
+  var cid = window.COMPANY_ID;
+  var err = document.getElementById('mt-err');
+  function fail(msg){ err.style.display = 'block'; err.textContent = msg; return; }
+  if (!cid) return fail('No company id');
+  var date = document.getElementById('mt-date').value;
+  var time = document.getElementById('mt-time').value;
+  var fare = parseFloat(document.getElementById('mt-fare').value);
+  var pickup = String(document.getElementById('mt-pickup').value || '').trim();
+  var dropoff = String(document.getElementById('mt-dropoff').value || '').trim();
+  var driverId = document.getElementById('mt-driver').value;
+  var vehicleId = document.getElementById('mt-vehicle').value;
+  var cardName = String(document.getElementById('mt-cardname').value || '').trim();
+  var card = String(document.getElementById('mt-card').value || '').trim();
+  var expiry = String(document.getElementById('mt-expiry').value || '').trim();
+  var hoistUses = Math.max(0, parseInt(document.getElementById('mt-hoist').value, 10) || 0);
+  var pay = document.getElementById('mt-pay').value || 'Cash';
+  var councilId = document.getElementById('mt-council').value;
+  var distanceRaw = document.getElementById('mt-distance').value;
+  if (!date || !time) return fail('Date and time are required.');
+  if (!(fare > 0)) return fail('Meter fare must be greater than 0.');
+  if (!pickup || !dropoff) return fail('Pickup and dropoff addresses are required.');
+  if (!driverId) return fail('Select a driver.');
+  if (!vehicleId) return fail('Select a vehicle.');
+  if (!cardName || cardName.split(/\\s+/).filter(Boolean).length < 2) return fail('Cardholder name needs first and last name.');
+  if (!card) return fail('TM card / voucher number is required.');
+  if (!councilId) return fail('Select an approved council.');
+  var cfg = _mtTmConfig || {};
+  var pct = parseFloat(cfg.councilSubsidyPercent || cfg.councilPercent || 0) || 0;
+  if (pct <= 0) return fail('TM subsidy % is not configured for this company.');
+  var split = mtCalcSubsidy(fare, cfg);
+  if (split.subsidy <= 0) return fail('Computed subsidy is $0 — check TM settings.');
+  var rate = Math.max(0, parseFloat(cfg.hoistCostPerUnit != null ? cfg.hoistCostPerUnit : (cfg.hoistUnitCost != null ? cfg.hoistUnitCost : cfg.hoistRatePerUse)) || 0);
+  var hoistTotal = Math.round(hoistUses * rate * 100) / 100;
+  var driver = _mtDrivers.find(function(d){ return d.id === driverId; });
+  var vehicle = _mtVehicles.find(function(v){ return v.id === vehicleId; });
+  var completedAt = aucklandLocalToMs(date, time);
+  var now = Date.now();
+  var bookingId = 'M' + now;
+  var addedBy = window.OWNER_EMAIL || window.ADMIN_EMAIL || 'owner';
+  var vehLabel = (vehicle && vehicle.label) || vehicleId;
+  var job = {
+    bookingId: bookingId, jobId: bookingId, id: bookingId, companyId: cid,
+    isTotalMobility: true, tmUsed: true,
+    source: 'manual_owner', manuallyAddedByCompany: true,
+    manuallyAddedAt: now, manuallyAddedBy: addedBy,
+    tmTripCategory: 'Manually added by company',
+    status: 'completed', jobstatus: 'completed',
+    completedAt: completedAt, completedAt_ISO: new Date(completedAt).toISOString(),
+    startedAt: completedAt, startedAt_ISO: new Date(completedAt).toISOString(),
+    pickupAddress: pickup, dropAddress: dropoff, pickup: pickup, dropoff: dropoff,
+    driverName: driver ? driver.name : driverId, driverId: driverId,
+    vehicleId: vehLabel, vehicle: vehLabel,
+    fare: fare, totalFare: fare, tmMeterFare: fare,
+    tmTotalFare: Math.round((fare + hoistTotal) * 100) / 100,
+    tmPaymentType: 'total_mobility', paymentCategory: 'total_mobility',
+    paymentType: pay, paymentMethod: pay, tmRemainderPaymentType: pay,
+    tmCouncilPays: split.subsidy, tmPassengerPays: split.passengerPays,
+    tmSubsidy: split.subsidy, councilPays: split.subsidy, passengerPays: split.passengerPays,
+    tmSubsidyFare: split.subsidy, tmSubsidyHoist: hoistTotal,
+    hoistTotal: hoistTotal, hoistCount: hoistUses, tmHoistCount: hoistUses,
+    tmCardNumber: card, tmCardName: cardName, tmVoucherNo: card,
+    passengerName: cardName, councilId: councilId, tmCouncilId: councilId,
+    tmSubsidyPercent: pct
+  };
+  if (expiry) job.tmCardExpiry = expiry;
+  if (distanceRaw !== '' && distanceRaw != null) {
+    job.distanceKm = parseFloat(distanceRaw) || 0;
+    job.distance = job.distanceKm;
+  }
+  if (hoistUses > 0) {
+    job.tmHoists = [];
+    for (var i = 0; i < hoistUses; i++) {
+      job.tmHoists.push({ cardNumber: card, cardExpiry: expiry || undefined, cardName: cardName, amount: rate });
+    }
+  }
+  var st = {
+    status: 'pending', councilId: councilId, companyId: cid,
+    submittedAt: now, source: 'manual_owner',
+    manuallyAddedByCompany: true, manuallyAddedAt: now, manuallyAddedBy: addedBy,
+    isTotalMobility: true, tmCardNumber: card,
+    tmCouncilPays: split.subsidy, tmPassengerPays: split.passengerPays,
+    events: {}
+  };
+  st.events['-e' + now + '_manual'] = {
+    at: now, type: 'manual_owner_created', by: addedBy,
+    note: 'Manually added by company', toStatus: 'pending'
+  };
+  var btn = document.getElementById('mt-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  window.adminWrite('completedJobs/' + cid + '/' + bookingId, 'PUT', job).then(function() {
+    return window.adminWrite('tmTripStatus/' + cid + '/' + bookingId, 'PUT', st);
+  }).then(function() {
+    closeManualTmEntry();
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="material-icons" style="font-size:16px">&#xE161;</i> Save Manual Trip'; }
+    alert('Manual TM trip ' + bookingId + ' saved as pending. Submit it when ready for council review.');
+    loadTrips();
+  }).catch(function(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="material-icons" style="font-size:16px">&#xE161;</i> Save Manual Trip'; }
+    fail('Save failed: ' + (e && e.message ? e.message : e));
+  });
+}
 <\/script>`;
   return pageWrap(commonHead('TM Trip History', css), body, commonScripts(js));
 }

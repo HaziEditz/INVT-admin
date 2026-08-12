@@ -67,9 +67,11 @@ test('normalizeJobSource maps channels', () => {
   assert.equal(normalizeJobSource({ Source: 'WebBooking' }), 'website');
   assert.equal(normalizeJobSource({ serviceType: 'food' }), 'food');
   assert.equal(normalizeJobSource({ source: 'queue' }), 'hail');
+  assert.equal(normalizeJobSource({ source: 'hail' }), 'hail');
   assert.equal(normalizeJobSource({ source: '' }), 'unknown');
   assert.equal(normalizeJobSource({}), 'unknown');
   assert.equal(normalizeJobSource({ source: 'manual_radio' }), 'other');
+  assert.equal(normalizeJobSource({ source: 'manual_owner' }), 'other');
 });
 
 test('periodBounds month/week/day produce stable keys', () => {
