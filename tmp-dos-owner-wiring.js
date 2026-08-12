@@ -363,6 +363,7 @@ function dosRender(){
       '<td class="num">'+(r.sources.food||0)+'</td>'+
       '<td class="num">'+(r.sources.freight||0)+'</td>'+
       '<td class="num">'+(r.sources.hail||0)+'</td>'+
+      '<td class="num">'+(r.sources.manual||0)+'</td>'+
       '<td class="num">'+(r.sources.other||0)+'</td>'+
       '<td class="num">'+(r.sources.unknown||0)+'</td>'+
       '<td>'+dosEsc(r.vehicles.join(', ')||'—')+'</td>'+
@@ -397,7 +398,10 @@ function dosOpenDetail(driverId){
   if(!r) return;
   document.getElementById('dos-detail-title').textContent=r.driverName+' — '+(_dosPeriod&&_dosPeriod.label||'');
   var t=r.tmDetail||dosEmptyTmDetail();
-  var srcBits=Object.keys(r.sources).filter(function(k){return r.sources[k];}).map(function(k){return k.replace(/_/g,' ')+': '+r.sources[k];}).join(' · ');
+  var srcBits=Object.keys(r.sources).filter(function(k){return r.sources[k];}).map(function(k){
+    var label=k==='manual'?'manual':k==='passenger_app'?'passenger app':k.replace(/_/g,' ');
+    return label+': '+r.sources[k];
+  }).join(' · ');
   var html='<div class="dos-kv">'+
     '<div><div class="k">Hours / breaks</div><div class="val">'+dosFmtDur(r.workMinutes)+' / '+dosFmtDur(r.breakMinutes)+'</div></div>'+
     '<div><div class="k">Company owes</div><div class="val" style="color:#E65100">'+money(r.owedTotal)+'</div></div>'+
@@ -475,7 +479,7 @@ function dosMarkTmPaid(driverId){ dosMarkStreamPaid(driverId, 'tm'); }
 
 function dosExportCsv(){
   var rows=dosFiltered();
-  var headers=['Driver','DriverId','Period','Hours','BreakMin','Done','Cancelled','Rejected','NoShow','JobsTotal','Disp','App','Web','Food','Frt','Hail','Other','Unknown','Vehicles','CashHeld','CashCount','CardOwed','CardCount','EftposGross','EftposCount','TmTrips','TmFare','TmSubsidy','TmHoist','TmHoistUses','TmPassengerPays','TmOwed','TmPaid','AccountGross','AccountCount','HoistOwed','HoistCount','CardStreamOwed','TmStreamOwed','OwedTotal','CardStatus','TmStatus','Status','BankName','AccountName','AccountNumber'];
+  var headers=['Driver','DriverId','Period','Hours','BreakMin','Done','Cancelled','Rejected','NoShow','JobsTotal','Disp','App','Web','Food','Frt','Hail','Man','Other','Unknown','Vehicles','CashHeld','CashCount','CardOwed','CardCount','EftposGross','EftposCount','TmTrips','TmFare','TmSubsidy','TmHoist','TmHoistUses','TmPassengerPays','TmOwed','TmPaid','AccountGross','AccountCount','HoistOwed','HoistCount','CardStreamOwed','TmStreamOwed','OwedTotal','CardStatus','TmStatus','Status','BankName','AccountName','AccountNumber'];
   var lines=[headers.join(',')];
   rows.forEach(function(r){
     function q(v){ v=String(v==null?'':v); if(/[",\\n]/.test(v)) return '"'+v.replace(/"/g,'""')+'"'; return v; }
@@ -484,7 +488,7 @@ function dosExportCsv(){
       r.driverName,r.driverId,_dosPeriod&&_dosPeriod.label,(r.workMinutes/60).toFixed(1),r.breakMinutes,
       r.outcomes.completed,r.outcomes.cancelled,r.outcomes.rejected,r.outcomes.no_show,r.outcomes.total,
       r.sources.dispatch||0,r.sources.passenger_app||0,r.sources.website||0,r.sources.food||0,r.sources.freight||0,r.sources.hail||0,
-      r.sources.other||0,r.sources.unknown||0,
+      r.sources.manual||0,r.sources.other||0,r.sources.unknown||0,
       r.vehicles.join(' '),r.cashHeld.toFixed(2),r.pay.cash.count,r.pay.card.owed.toFixed(2),r.pay.card.count,
       r.pay.eftpos.gross.toFixed(2),r.pay.eftpos.count,
       t.trips,t.fare.toFixed(2),t.subsidy.toFixed(2),t.hoist.toFixed(2),t.hoistUses,t.passengerPays.toFixed(2),t.owed.toFixed(2),t.paid.toFixed(2),

@@ -71,7 +71,43 @@ test('normalizeJobSource maps channels', () => {
   assert.equal(normalizeJobSource({ source: '' }), 'unknown');
   assert.equal(normalizeJobSource({}), 'unknown');
   assert.equal(normalizeJobSource({ source: 'manual_radio' }), 'other');
-  assert.equal(normalizeJobSource({ source: 'manual_owner' }), 'other');
+  assert.equal(normalizeJobSource({ source: 'manual_owner' }), 'manual');
+  assert.equal(normalizeJobSource({ manuallyAddedByCompany: true, source: 'hail' }), 'manual');
+  assert.equal(normalizeJobSource({ source: 'freight' }), 'freight');
+  assert.equal(normalizeJobSource({ serviceType: 'freight', source: 'manual_owner' }), 'manual');
+});
+
+test('buildDriverSummaryRow counts manual source separately from freight/hail', () => {
+  const row = buildDriverSummaryRow({
+    driverId: 'D1',
+    driverName: 'D1',
+    jobs: [
+      {
+        jobstatus: 'Completed',
+        source: 'hail',
+        PaymentType: 'Cash',
+        TotalFare: 15.27,
+        tmUsed: true,
+        tmSubsidyFare: 9.93,
+        tmPassengerPays: 5.34,
+      },
+      {
+        jobstatus: 'Completed',
+        source: 'manual_owner',
+        manuallyAddedByCompany: true,
+        PaymentType: 'Cash',
+        TotalFare: 18.5,
+        tmUsed: true,
+        tmSubsidyFare: 12.03,
+        tmPassengerPays: 6.47,
+      },
+    ],
+  });
+  assert.equal(row.sources.hail, 1);
+  assert.equal(row.sources.manual, 1);
+  assert.equal(row.sources.freight, 0);
+  assert.equal(row.sources.other, 0);
+  assert.equal(row.tmDetail.trips, 2);
 });
 
 test('periodBounds month/week/day produce stable keys', () => {

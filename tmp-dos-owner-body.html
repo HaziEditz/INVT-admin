@@ -5,7 +5,7 @@
     <b>Tracked, not BookaWaka-owed:</b> Cash (held by driver) · EFTPOS (Verifone → company bank) · Account/ACC (see Account / ACC Settlements).
     Each still shows total × count for records.<br>
     <b>Jobs legend:</b> Done = completed · Canc = cancelled · Rej = rejected · <b>NS = No Show</b> · Tot = total.<br>
-    <b>Sources:</b> Disp = dispatch · App = passenger app · Web = website · Food · Frt = freight · Hail = driver app / street hail / queue · Other = recognised but unmapped · Unk = missing source field.
+    <b>Sources:</b> Disp = dispatch · App = passenger app · Web = website · Food · Frt = freight · Hail = driver app / street hail / queue · Man = manually added by company · Other = recognised but unmapped · Unk = missing source field.
   </div>
 
   <div class="rpt-panel">
@@ -84,7 +84,7 @@
               <th class="sticky-driver" rowspan="2" onclick="dosSort('driverName')">Driver</th>
               <th rowspan="2" onclick="dosSort('workHours')">Hours</th>
               <th rowspan="2">Jobs</th>
-              <th class="g-src" colspan="8">Sources</th>
+              <th class="g-src" colspan="9">Sources</th>
               <th rowspan="2">Vehicles</th>
               <th class="g-pay" colspan="6">Payments</th>
               <th class="g-owed" colspan="3">Unpaid</th>
@@ -99,6 +99,7 @@
               <th class="num" title="Food">Food</th>
               <th class="num" title="Freight">Frt</th>
               <th class="num" title="Hail / queue">Hail</th>
+              <th class="num" title="Manually added by company">Man</th>
               <th class="num" title="Other source">Oth</th>
               <th class="num" title="Unknown source">Unk</th>
               <th class="money-h" onclick="dosSort('cashHeld')">Cash</th>
