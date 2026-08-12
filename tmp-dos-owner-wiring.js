@@ -84,52 +84,65 @@ function dosCurrentPeriod(){
   if(wv) ref=new Date(wv+'T12:00:00').getTime();
   return dosPeriodBounds('week', ref);
 }
+function dosJobBookingId(job, fallbackKey){
+  var id=String((job&&(job.bookingId||job.BookingId||job.jobId||job.JobId||job.BookingID||job.id))||'').trim();
+  if(id) return id;
+  return String(fallbackKey||'').trim();
+}
 function dosMergeJobSources(results){
   var merged={};
+  function ensure(bid, did){
+    if(!merged[bid]) merged[bid]={};
+    if(!merged[bid][did]) merged[bid][did]={};
+    return merged[bid][did];
+  }
   function addNested(data){
     if(!data||typeof data!=='object') return;
-    Object.keys(data).forEach(function(bid){
-      if(!merged[bid]) merged[bid]={};
-      var drivers=data[bid];
-      if(drivers&&typeof drivers==='object') Object.assign(merged[bid], drivers);
+    Object.keys(data).forEach(function(key){
+      var drivers=data[key];
+      if(!drivers||typeof drivers!=='object') return;
+      Object.keys(drivers).forEach(function(did){
+        var job=drivers[did];
+        if(!job||typeof job!=='object') return;
+        var bid=dosJobBookingId(job, key);
+        var d=String(job.driverId||job.DriverId||job.driverid||did||'').trim();
+        if(!bid||!d) return;
+        Object.assign(ensure(bid, d), job);
+        if(!ensure(bid,d).bookingId&&!ensure(bid,d).BookingId) ensure(bid,d).bookingId=bid;
+      });
     });
   }
   function addFlat(data){
     if(!data||typeof data!=='object') return;
-    Object.keys(data).forEach(function(bid){
-      var job=data[bid];
+    Object.keys(data).forEach(function(key){
+      var job=data[key];
       if(!job||typeof job!=='object') return;
+      var vals=Object.values(job);
+      var isFlat=vals.length>0&&vals.every(function(v){return v===null||typeof v!=='object';});
+      var looksJob=job.totalFare!=null||job.TotalFare!=null||job.fare!=null||job.driverId||job.DriverId||
+        job.paymentType||job.PaymentType||job.isTotalMobility||job.completedAt!=null;
+      if(!isFlat&&!looksJob){
+        Object.keys(job).forEach(function(did){
+          var inner=job[did];
+          if(!inner||typeof inner!=='object') return;
+          var bid=dosJobBookingId(inner, key);
+          var d=String(inner.driverId||inner.DriverId||did||'').trim();
+          if(!bid||!d) return;
+          Object.assign(ensure(bid, d), inner);
+          if(!ensure(bid,d).bookingId) ensure(bid,d).bookingId=bid;
+        });
+        return;
+      }
+      var bid=dosJobBookingId(job, key);
       var did=String(job.driverId||job.DriverId||job.driverid||'').trim();
-      if(!did) return;
-      if(!merged[bid]) merged[bid]={};
-      if(!merged[bid][did]) merged[bid][did]={};
-      Object.assign(merged[bid][did], job);
+      if(!bid||!did) return;
+      Object.assign(ensure(bid, did), job);
+      if(!ensure(bid,did).bookingId&&!ensure(bid,did).BookingId) ensure(bid,did).bookingId=bid;
     });
   }
   addNested(results[0]);
   addFlat(results[1]); addFlat(results[2]);
-  if(results[3]&&typeof results[3]==='object'){
-    Object.keys(results[3]).forEach(function(bid){
-      var job=results[3][bid];
-      if(!job||typeof job!=='object') return;
-      if(!merged[bid]) merged[bid]={};
-      var vals=Object.values(job);
-      var isFlat=vals.length>0&&vals.every(function(v){return v===null||typeof v!=='object';});
-      if(isFlat){
-        var did=String(job.driverId||job.DriverId||job.driverid||'').trim();
-        if(!did) return;
-        if(!merged[bid][did]) merged[bid][did]={};
-        Object.assign(merged[bid][did], job);
-      } else {
-        Object.keys(job).forEach(function(did){
-          var j=job[did];
-          if(!j||typeof j!=='object') return;
-          if(!merged[bid][did]) merged[bid][did]={};
-          Object.assign(merged[bid][did], j);
-        });
-      }
-    });
-  }
+  if(results[3]) addFlat(results[3]);
   return merged;
 }
 

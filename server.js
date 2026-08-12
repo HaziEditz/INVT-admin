@@ -237,11 +237,11 @@ const PAGE_META = {
   'tm_batches.aspx':             { title: 'TM Claim Batches',        icon: '&#xE8E5;',  section: 'Total Mobility' },
   'drivercompliance.aspx':       { title: 'Driver Compliance',       icon: '&#xE8D5;',  section: 'Reports' },
   'driveropssummary.aspx':       { title: 'Driver Ops & Payments',   icon: '&#xE227;',  section: 'Reports' },
-  'accountdriversettlements.aspx': { title: 'Account / ACC Settlements', icon: '&#xE8A1;',  section: 'Accounts' },
   'businessaccounts.aspx':          { title: 'Business Accounts',          icon: '&#xE8A1;',  section: 'Accounts' },
   'businessaccountbilling.aspx':    { title: 'Business Account Billing',   icon: '&#xE8C7;',  section: 'Accounts' },
   'accclients.aspx':                { title: 'ACC Clients',                 icon: '&#xE7FB;',  section: 'Accounts' },
   'accbilling.aspx':                { title: 'ACC Billing',                 icon: '&#xE8C7;',  section: 'Accounts' },
+  'accountdriversettlements.aspx':  { title: 'Account / ACC Driver Pay',    icon: '&#xE8A1;',  section: 'Accounts' },
 };
 
 const FIREBASE_SCRIPTS = `
@@ -1786,9 +1786,9 @@ function sidebarHTML() {
       <ul>
         <li><a href="BusinessAccounts.aspx">Business Accounts</a></li>
         <li><a href="BusinessAccountBilling.aspx">Monthly Invoicing</a></li>
-        <li><a href="AccountDriverSettlements.aspx">Account / ACC Settlements</a></li>
         <li><a href="AccClients.aspx">ACC Clients</a></li>
         <li><a href="AccBilling.aspx">ACC Billing</a></li>
+        <li><a href="AccountDriverSettlements.aspx">Account / ACC Driver Pay</a></li>
       </ul>
     </li>
     <li class="current_section" title="Payments"><a><span class="menu_icon"><i class="material-icons">&#xE870;</i></span><span class="menu_title">Payments</span></a>
@@ -13711,40 +13711,51 @@ function loadReport(){
             if(drivers&&typeof drivers==='object') Object.assign(merged[bid],drivers);
           });
         });
-        // Second pass: completedJobs, closedJobs, pendingjobs (keyed by bookingId / push key)
+        // Second pass: completedJobs, closedJobs, pendingjobs
+        // Always key by job.bookingId (never closedJobs push keys — those triple-count).
         [results[1],results[2],results[4]].forEach(function(data){
           if(!data||typeof data!=='object') return;
-          Object.keys(data).forEach(function(bid){
-            // These are {bookingId: {fields}} — wrap in a driver-keyed structure so flattenJoback handles them
-            var job=data[bid];
+          Object.keys(data).forEach(function(key){
+            var job=data[key];
             if(!job||typeof job!=='object') return;
+            var bid=String(job.bookingId||job.BookingId||job.jobId||job.JobId||key).trim();
             var did=String(job.driverId||job.DriverId||job.driverid||bid);
+            if(!bid) return;
             if(!merged[bid]) merged[bid]={};
             if(!merged[bid][did]) merged[bid][did]={};
             Object.assign(merged[bid][did],job);
+            if(!merged[bid][did].bookingId&&!merged[bid][did].BookingId) merged[bid][did].bookingId=bid;
           });
         });
         // Third pass: allbookings/{cid} (highest priority — richest data)
         // Handles both flat {bookingId:{fields}} and nested {bookingId:{driverId:{fields}}}
         if(results[3]&&typeof results[3]==='object'){
-          Object.keys(results[3]).forEach(function(bid){
-            var job=results[3][bid];
+          Object.keys(results[3]).forEach(function(key){
+            var job=results[3][key];
             if(!job||typeof job!=='object') return;
-            if(!merged[bid]) merged[bid]={};
+            if(!merged[key] && !(job.bookingId||job.BookingId)){
+              // may still be booking-keyed
+            }
             var vals=Object.values(job);
             var isFlat=vals.length>0&&vals.every(function(v){return v===null||typeof v!=='object';});
             if(isFlat){
-              // Flat: {bookingId:{fields}}
+              var bid=String(job.bookingId||job.BookingId||job.jobId||job.JobId||key).trim();
               var did=String(job.driverId||job.DriverId||job.driverid||bid);
+              if(!bid) return;
+              if(!merged[bid]) merged[bid]={};
               if(!merged[bid][did]) merged[bid][did]={};
               Object.assign(merged[bid][did],job);
+              if(!merged[bid][did].bookingId) merged[bid][did].bookingId=bid;
             } else {
-              // Nested: {bookingId:{driverId:{fields}}}
               Object.keys(job).forEach(function(did){
                 var j=job[did];
                 if(!j||typeof j!=='object') return;
+                var bid=String(j.bookingId||j.BookingId||key).trim();
+                if(!bid) return;
+                if(!merged[bid]) merged[bid]={};
                 if(!merged[bid][did]) merged[bid][did]={};
                 Object.assign(merged[bid][did],j);
+                if(!merged[bid][did].bookingId) merged[bid][did].bookingId=bid;
               });
             }
           });
