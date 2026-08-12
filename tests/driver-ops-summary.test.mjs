@@ -332,6 +332,107 @@ test('TM subsidy owed: cash-remainder + hoist uses subsidy not hoist-only', () =
   assert.equal(row.tmDetail.passengerPct, 35);
 });
 
+test('TM % display: all nominal trips keep dollar-effective 65/35', () => {
+  const jobs = [
+    {
+      jobstatus: 'Completed',
+      PaymentType: 'Cash',
+      tmUsed: true,
+      TotalFare: 15.11,
+      tmSubsidyFare: 9.82,
+      tmPassengerPays: 5.29,
+    },
+    {
+      jobstatus: 'Completed',
+      PaymentType: 'Cash',
+      tmUsed: true,
+      TotalFare: 15.02,
+      tmSubsidyFare: 9.76,
+      tmPassengerPays: 5.26,
+    },
+  ];
+  const row = buildDriverSummaryRow({ driverId: 'D001', jobs });
+  assert.equal(row.tmDetail.subsidy, 19.58);
+  assert.equal(row.tmDetail.passengerPays, 10.55);
+  assert.equal(row.tmDetail.councilPct, 65);
+  assert.equal(row.tmDetail.passengerPct, 35);
+  assert.equal(row.tmDetail.councilPct + row.tmDetail.passengerPct, 100);
+});
+
+test('TM % display: zero-subsidy trips use dollar-effective, not inflated pax avg', () => {
+  const jobs = [
+    // Zero subsidy — old unweighted avg would pull Pax toward 100%
+    {
+      jobstatus: 'Completed',
+      PaymentType: 'Cash',
+      tmUsed: true,
+      TotalFare: 5.55,
+      tmSubsidyFare: 0,
+      tmPassengerPays: 5.55,
+    },
+    {
+      jobstatus: 'Completed',
+      PaymentType: 'Cash',
+      tmUsed: true,
+      TotalFare: 15.11,
+      tmSubsidyFare: 9.82,
+      tmPassengerPays: 5.29,
+    },
+    {
+      jobstatus: 'Completed',
+      PaymentType: 'Cash',
+      tmUsed: true,
+      TotalFare: 15.02,
+      tmSubsidyFare: 9.76,
+      tmPassengerPays: 5.26,
+    },
+  ];
+  const row = buildDriverSummaryRow({ driverId: 'D001', jobs });
+  const sub = 0 + 9.82 + 9.76;
+  const pax = 5.55 + 5.29 + 5.26;
+  const expectedCouncil = Math.round((sub / (sub + pax)) * 1000) / 10;
+  const expectedPax = Math.round((100 - expectedCouncil) * 10) / 10;
+  assert.equal(row.tmDetail.subsidy, sub);
+  assert.equal(row.tmDetail.passengerPays, pax);
+  assert.equal(row.tmDetail.councilPct, expectedCouncil);
+  assert.equal(row.tmDetail.passengerPct, expectedPax);
+  assert.equal(row.tmDetail.councilPct + row.tmDetail.passengerPct, 100);
+  // Old bug: unweighted mean of {100, 35, 35} ≈ 56.7 — must not appear
+  assert.notEqual(row.tmDetail.passengerPct, 56.7);
+  assert.ok(row.tmDetail.passengerPct < 50);
+});
+
+test('TM % display: matches Sub/(Sub+Pax) example dollars (excludes hoist)', () => {
+  const row = buildDriverSummaryRow({
+    driverId: 'D001',
+    jobs: [
+      {
+        jobstatus: 'Completed',
+        PaymentType: 'Cash',
+        tmUsed: true,
+        TotalFare: 640.29 + 361.42,
+        tmSubsidyFare: 640.29,
+        tmPassengerPays: 361.42,
+      },
+      {
+        jobstatus: 'Completed',
+        PaymentType: 'Cash',
+        tmUsed: true,
+        TotalFare: 55,
+        tmSubsidyFare: 0,
+        tmSubsidyHoist: 55,
+        tmPassengerPays: 0,
+        hoistUses: 5,
+      },
+    ],
+  });
+  assert.equal(row.tmDetail.subsidy, 640.29);
+  assert.equal(row.tmDetail.passengerPays, 361.42);
+  assert.equal(row.tmDetail.hoist, 55);
+  assert.equal(row.tmDetail.councilPct, 63.9);
+  assert.equal(row.tmDetail.passengerPct, 36.1);
+});
+
 test('TM subsidy owed: cash-remainder no hoist still contributes subsidy', () => {
   const lines = jobPaymentLines({
     PaymentType: 'Cash',
