@@ -20,7 +20,12 @@ const re = /<script(\b[^>]*)>([\s\S]*?)<\/script>/gi;
 let m;
 while ((m = re.exec(html))) scripts.push(m[2]);
 
-const dos = scripts.find((s) => s.includes('function dosLoad') && s.includes('function dosMoney'));
+const dos = scripts.find(
+  (s) =>
+    s.includes('function dosLoad') &&
+    (s.includes('function dosMoney') || s.includes('function money')) &&
+    s.includes('workedMinutes'),
+);
 if (!dos) {
   console.error('FAIL: dos script block not found inside <script>');
   process.exit(1);
@@ -28,7 +33,7 @@ if (!dos) {
 
 // Bare function outside script?
 const stripped = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-if (/function\s+dosMoney/.test(stripped) || /function\s+dosLoad/.test(stripped)) {
+if (/function\s+dosLoad/.test(stripped)) {
   console.error('FAIL: dos functions appear outside <script> (would render as text)');
   process.exit(1);
 }

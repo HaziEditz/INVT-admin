@@ -101,3 +101,57 @@ test('settlementPath shape', () => {
     'driverSettlements/860869/2026-08/drv1',
   );
 });
+
+test('isTmJob detects economics flags even when PaymentType is Cash', async () => {
+  const { isTmJob, jobPaymentLines, formatPayWithCount, normalizeJobSource, periodBounds } =
+    await import('../lib/driverOpsSummary.js');
+  assert.equal(isTmJob({ isTotalMobility: true, PaymentType: 'Cash' }), true);
+  assert.equal(isTmJob({ tmSubsidyFare: 12, PaymentType: 'Card' }), true);
+  assert.equal(isTmJob({ PaymentType: 'Cash' }), false);
+  const lines = jobPaymentLines({
+    TotalFare: 40,
+    PaymentType: 'Card',
+    isTotalMobility: true,
+    tmSubsidyHoist: 10,
+    hoistUses: 1,
+  });
+  assert.equal(lines[0].bucket, 'tm');
+  assert.equal(lines[1].bucket, 'hoist');
+  assert.equal(formatPayWithCount(55, 5), '$55.00 ×5');
+  assert.equal(formatPayWithCount(0, 0), '$0.00');
+  assert.equal(normalizeJobSource({ source: 'Driver App hail' }), 'hail');
+  assert.equal(normalizeJobSource({ source: 'passenger_app' }), 'passenger_app');
+  const range = periodBounds('range', Date.now(), '2026-08-01', '2026-08-10');
+  assert.equal(range.mode, 'range');
+  assert.match(range.key, /^R2026-08-01/);
+});
+
+test('aggregateDriverShiftMinutes prefers workedMinutes and collapses progressive siblings', async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { aggregateDriverShiftMinutes } = require('../lib/shiftReportFlatten.js');
+  const fromMs = Date.parse('2026-08-01T00:00:00+12:00');
+  const toMs = Date.parse('2026-08-31T23:59:59+12:00');
+  const windowTs = Date.parse('2026-08-05T08:00:00+12:00');
+  const end1 = Date.parse('2026-08-05T12:00:00+12:00');
+  const end2 = Date.parse('2026-08-05T16:00:00+12:00');
+  const shiftLogs = {
+    D001: {
+      s1: { shiftStartAt: windowTs, endTime: end1, workedMinutes: 120, driverId: 'D001' },
+      s2: { shiftStartAt: windowTs, endTime: end2, workedMinutes: 240, driverId: 'D001' },
+    },
+  };
+  const driversCid = {
+    D001: { id: 'D001', firstName: 'Test', lastName: 'Driver', dispatcherId: 'D001' },
+  };
+  const agg = aggregateDriverShiftMinutes({
+    companyId: '860869',
+    fromMs,
+    toMs,
+    driversRoot: null,
+    driversCid,
+    shiftLogs,
+  });
+  // Progressive siblings: take max 240, never sum 120+240
+  assert.equal(agg.byDriver.D001.workMinutes, 240);
+});
