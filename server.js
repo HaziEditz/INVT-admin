@@ -16367,6 +16367,11 @@ function tmTripsPage(companyId) {
       <option value="paid">Paid</option>
       <option value="archived">Archived</option>
     </select>
+    <select id="tm-driver-filter" class="tm-select" onchange="filterTrips()" title="Driver">
+      <option value="">All Drivers</option>
+    </select>
+    <input type="date" id="tm-from-filter" class="tm-select" onchange="filterTrips()" title="From (NZ date)"/>
+    <input type="date" id="tm-to-filter" class="tm-select" onchange="filterTrips()" title="To (NZ date)"/>
     <input type="text" id="tm-search" class="tm-select" placeholder="Search job / passenger / driver / card…" oninput="filterTrips()" style="min-width:220px"/>
     <span id="tm-count-label" style="font-size:13px;color:#94a3b8;"></span>
     <div style="flex:1"></div>
@@ -16710,10 +16715,39 @@ function populateMonthFilter(trips) {
     sel.appendChild(o);
   });
 }
+function populateDriverFilter(trips) {
+  var sel = document.getElementById('tm-driver-filter');
+  if (!sel) return;
+  var old = sel.value;
+  var map = {};
+  (trips || []).forEach(function(t) {
+    var name = String(t.driverName || t.driver || '').trim();
+    var id = String(t.driverId || t.DriverId || t.driverUid || '').trim();
+    var key = id || name;
+    if (!key) return;
+    if (!map[key]) map[key] = name || ('Driver ' + key);
+  });
+  var keys = Object.keys(map).sort(function(a, b) {
+    return String(map[a]).localeCompare(String(map[b]));
+  });
+  sel.innerHTML = '<option value="">All Drivers</option>';
+  keys.forEach(function(k) {
+    var o = document.createElement('option');
+    o.value = k;
+    o.textContent = map[k] + (k !== map[k] ? ' (' + k + ')' : '');
+    if (k === old) o.selected = true;
+    sel.appendChild(o);
+  });
+}
 function filterTrips() {
   var monthKey = document.getElementById('tm-month-filter').value;
   var statusKey = (document.getElementById('tm-status-filter') && document.getElementById('tm-status-filter').value) || '';
+  var driverKey = (document.getElementById('tm-driver-filter') && document.getElementById('tm-driver-filter').value) || '';
+  var fromYmd = (document.getElementById('tm-from-filter') && document.getElementById('tm-from-filter').value) || '';
+  var toYmd = (document.getElementById('tm-to-filter') && document.getElementById('tm-to-filter').value) || '';
   var q = (document.getElementById('tm-search') && document.getElementById('tm-search').value) || '';
+  var fromMs = fromYmd && window._tzDayStart ? window._tzDayStart(fromYmd, NZ_TZ) : 0;
+  var toMs = toYmd && window._tzDayEnd ? window._tzDayEnd(toYmd, NZ_TZ) : 0;
   _filteredTrips = _allTrips.filter(function(t) {
     if (monthKey) {
       var ms = _tmTs(t); if (!ms) return false;
@@ -16721,6 +16755,17 @@ function filterTrips() {
     }
     if (statusKey) {
       if (getTripStatus(t) !== statusKey) return false;
+    }
+    if (driverKey) {
+      var did = String(t.driverId || t.DriverId || t.driverUid || '').trim();
+      var dname = String(t.driverName || t.driver || '').trim();
+      if (did !== driverKey && dname !== driverKey) return false;
+    }
+    if (fromMs || toMs) {
+      var tms = _tmTs(t);
+      if (!tms) return false;
+      if (fromMs && tms < fromMs) return false;
+      if (toMs && tms > toMs) return false;
     }
     if (!ownerTripMatchesSearch(t, q)) return false;
     return true;
@@ -17340,6 +17385,7 @@ function loadTrips() {
     trips.forEach(function(t){ _tripsByKey[t._key] = t; });
     loadEl.style.display = 'none';
     populateMonthFilter(trips);
+    populateDriverFilter(trips);
     filterTrips();
   }).catch(function(e) {
     loadEl.innerHTML = '<span style="color:#dc2626">Failed to load trips: ' + e.message + '</span>';
