@@ -16749,6 +16749,7 @@ function renderTrips(trips) {
   }
   wrap.style.display = 'block'; empty.style.display = 'none';
   var totalFare = 0, totalTm = 0, totalHoist = 0, totalUses = 0;
+  var zeroClaimFare = 0, zeroClaimN = 0;
   tbody.innerHTML = trips.map(function(t) {
     var ms = _tmTs(t);
     var fare = parseFloat(t.totalFare || t.fare || 0);
@@ -16757,6 +16758,7 @@ function renderTrips(trips) {
     var hoistAmt = _tmHoistPays(t);
     var uses = _tmHoistUses(t);
     totalFare += fare; totalTm += tmAmt; totalHoist += hoistAmt; totalUses += uses;
+    if (!(tmAmt > 0.009) && fare > 0.009) { zeroClaimFare += fare; zeroClaimN++; }
     var st = getTripStatus(t);
     var passenger = t.tmPassengerName || t.passengerName || t.customerName || '—';
     var dropoff = t.dropAddress || t.dropoffAddress || t.to || '—';
@@ -16796,17 +16798,21 @@ function renderTrips(trips) {
       '</tr>';
   }).join('');
   var councilTotal = totalTm + totalHoist;
+  // Meter base = gross − hoist − $0-claim stub fares (the dollars %/cap actually applies to).
+  var meterBase = Math.max(0, +(totalFare - totalHoist - zeroClaimFare).toFixed(2));
+  var grossHint = 'includes hoist' + (zeroClaimN ? ' + ' + zeroClaimN + ' zero-claim trip' + (zeroClaimN === 1 ? '' : 's') : '') + ' — %/cap applies to Meter base, not this number';
   totalsBar.style.display = 'flex';
-  // Mirror trip-detail / DOS Fare Breakdown: meter claim and hoist are separate lines; council total = both.
   totalsBar.innerHTML =
     '<div class="tm-total-item"><div class="label">Trip Count</div><div class="value">' + trips.length + '</div></div>' +
-    '<div class="tm-total-item"><div class="label">Total Fare</div><div class="value">' + fmtMoney(totalFare) + '</div>' +
-      '<div class="hint">Includes hoist portion of fare</div></div>' +
+    '<div class="tm-total-item"><div class="label">Gross fare (meter + hoist)</div><div class="value">' + fmtMoney(totalFare) + '</div>' +
+      '<div class="hint">' + grossHint + '</div></div>' +
+    '<div class="tm-total-item"><div class="label">Meter base (%/cap applies here)</div><div class="value" style="color:#065f46">' + fmtMoney(meterBase) + '</div>' +
+      '<div class="hint">Gross − hoist' + (zeroClaimN ? ' − zero-claim stubs' : '') + '</div></div>' +
     '<div class="tm-totals-sep" aria-hidden="true"></div>' +
     '<div class="tm-total-item"><div class="label">Line 1 — Meter subsidy (%/cap)</div><div class="value" style="color:#0d9488">' + fmtMoney(totalTm) + '</div>' +
-      '<div class="hint">Excludes hoist · not fare × config %</div></div>' +
+      '<div class="hint">Applied to Meter base · excludes hoist</div></div>' +
     '<div class="tm-total-item tm-total-hoist"><div class="label">Line 2 — Hoist (separate)</div><div class="value">' + fmtMoney(totalHoist) + ' / ' + totalUses + ' use' + (totalUses === 1 ? '' : 's') + '</div>' +
-      '<div class="hint">Not included in Line 1</div></div>' +
+      '<div class="hint">Not in Meter base or Line 1</div></div>' +
     '<div class="tm-total-item tm-total-council"><div class="label">Council total (meter + hoist)</div><div class="value">' + fmtMoney(councilTotal) + '</div>' +
       '<div class="hint">Line 1 + Line 2</div></div>';
 }
@@ -16976,7 +16982,8 @@ function openTripDetail(key) {
         row('Flag Fall', fmtMoney(t.flagFallAmount || t.flagFall)) +
         row('Distance Cost', fmtMoney(t.distanceCost)) +
         row('Waiting Cost', fmtMoney(t.waitingCost || t.WaitingCost)) +
-        row('Meter Fare (total)', fmtMoney(t.totalFare || t.fare || t.tmMeterFare)) +
+        row('Gross fare (meter + hoist)', fmtMoney(t.totalFare || t.fare || t.tmMeterFare)) +
+        row('Meter base (%/cap applies here)', fmtMoney(Math.max(0, Math.round(((parseFloat(t.totalFare || t.fare || t.tmMeterFare) || 0) - _tmHoistPays(t)) * 100) / 100))) +
         row('Line 1 — Meter subsidy (%/cap)', fmtMoney(_tmMeterClaim(t))) +
         row('Line 2 — Hoist (council, separate)', '<strong style="color:#1565C0">' + fmtMoney(_tmHoistPays(t)) + '</strong>' + (_tmHoistUses(t) ? ' · ' + _tmHoistUses(t) + ' use(s)' : '')) +
         (_tmHoistLines(t) ? '<div class="tmd-field" style="grid-column:1/-1"><label>Hoist detail</label><span style="font-size:12px;color:#64748b">' + _tmHoistLines(t) + '</span></div>' : '') +
@@ -17757,17 +17764,25 @@ function renderBatContent() {
     var cname = COUNCIL_NAMES[councilId] || councilId;
     html += '<div class="tm-section-head">' + cname + '</div>';
     html += '<div class="tm-card">';
-    html += '<table class="tm-table"><thead><tr><th>Period</th><th>Trips</th><th>Total Fare</th><th>TM Claim Amount</th><th>Submitted</th><th>Paid</th><th>Status</th><th>Proof</th></tr></thead><tbody>';
+    html += '<table class="tm-table"><thead><tr><th>Period</th><th>Trips</th><th>Gross fare (meter + hoist)</th><th>Claim (meter %/cap)</th><th>Submitted</th><th>Paid</th><th>Status</th><th>Proof</th></tr></thead><tbody>';
     html += rows.map(function(row) {
       var b = row.b;
       var subDate = b.submittedAt ? new Date(b.submittedAt).toLocaleDateString('en-NZ', {timeZone: NZ_TZ, day:'2-digit', month:'short', year:'numeric'}) : '—';
       var paidDate = b.paidAt ? new Date(b.paidAt).toLocaleDateString('en-NZ', {timeZone: NZ_TZ, day:'2-digit', month:'short', year:'numeric'}) : '—';
       if (b.payRef || b.paidRef) paidDate += '<div style="font-size:11px;color:#64748b;font-family:monospace">' + String(b.payRef || b.paidRef) + '</div>';
+      var gross = parseFloat(b.totalFare || 0) || 0;
+      var claim = parseFloat(b.tmAmount || b.claimAmount || b.totalSubsidy || b.paidAmount || 0) || 0;
+      var hoistBat = parseFloat(b.totalHoist || b.hoistTotal || b.hoistAmount || 0) || 0;
+      var meterBaseBat = hoistBat > 0 ? Math.max(0, +(gross - hoistBat).toFixed(2)) : null;
       return '<tr>' +
         '<td style="font-weight:600">' + fmtMonth(row.ym) + '</td>' +
         '<td>' + (b.tripCount || b.count || b.totalTrips || '—') + '</td>' +
-        '<td>' + fmtMoney(b.totalFare) + '</td>' +
-        '<td style="font-weight:700;color:#0d9488">' + fmtMoney(b.tmAmount || b.claimAmount || b.totalSubsidy || b.paidAmount) + '</td>' +
+        '<td>' + fmtMoney(gross) +
+          '<div style="font-size:10px;color:#64748b;margin-top:2px;font-weight:500">includes hoist when present — %/cap is not on this number</div>' +
+          (meterBaseBat != null ? '<div style="font-size:10px;color:#065f46;margin-top:2px">Meter base (~%/cap): ' + fmtMoney(meterBaseBat) + '</div>' : '') +
+        '</td>' +
+        '<td style="font-weight:700;color:#0d9488">' + fmtMoney(claim) +
+          '<div style="font-size:10px;color:#64748b;margin-top:2px;font-weight:500">meter %/cap only · hoist separate if billed</div></td>' +
         '<td>' + subDate + '</td>' +
         '<td>' + paidDate + '</td>' +
         '<td>' + batchBadge(b.status) + '</td>' +
