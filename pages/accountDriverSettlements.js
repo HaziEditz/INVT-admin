@@ -1,13 +1,12 @@
 /**
- * Account/ACC driver unpaid tracker (Track B).
+ * Account / ACC Driver Pay — Track B company-ledger unpaid tracking.
  * Mark Paid locks accountDriverSettlements/{cid}/{periodKey}/{driverId}.
- * Isolated from BookaWaka driverSettlements (Card/TM/Hoist).
+ * Does NOT touch driverSettlements (BookaWaka Card/TM Mark Paid).
  */
 module.exports = function accountDriverSettlementsPage(pageWrap, commonHead, commonScripts) {
   const css = `<style>
-.ads-wrap{max-width:1400px;margin:0 auto}
 .rpt-panel{background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;border:1px solid #e8e8e8}
-.rpt-toolbar{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid #f0f0f0;background:linear-gradient(135deg,#1565C0 0%,#1E88E5 100%)}
+.rpt-toolbar{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid #f0f0f0;background:linear-gradient(135deg,#00695C 0%,#00897B 100%)}
 .rpt-toolbar-title{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
 .rpt-toolbar-title .material-icons{color:rgba(255,255,255,.85);font-size:20px}
 .rpt-toolbar-title h3{margin:0;font-size:15px;font-weight:600;color:#fff}
@@ -23,17 +22,19 @@ module.exports = function accountDriverSettlementsPage(pageWrap, commonHead, com
 .rpt-fi label{font-size:10px;font-weight:700;color:#9e9e9e;text-transform:uppercase;letter-spacing:.5px}
 .rpt-fi input,.rpt-fi select{padding:5px 10px;border:1px solid #e0e0e0;border-radius:5px;font-size:12px;height:32px;background:#fff}
 .rpt-state-box{text-align:center;padding:52px 20px;color:#bdbdbd}
-.rpt-spinner{display:inline-block;width:32px;height:32px;border:3px solid #e0e0e0;border-top-color:#1565C0;border-radius:50%;animation:ads-spin .8s linear infinite;margin-bottom:12px}
+.rpt-spinner{display:inline-block;width:32px;height:32px;border:3px solid #e0e0e0;border-top-color:#00695C;border-radius:50%;animation:ads-spin .8s linear infinite;margin-bottom:12px}
 @keyframes ads-spin{to{transform:rotate(360deg)}}
-.ads-hint{background:#E3F2FD;border:1px solid #90CAF9;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#1565C0;line-height:1.55}
-.ads-hint b{color:#0D47A1}
+.ads-wrap{max-width:1400px;margin:0 auto}
+.ads-hint{background:#E0F2F1;border:1px solid #B2DFDB;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#00695C;line-height:1.55}
+.ads-hint b{color:#004D40}
 .ads-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:14px 18px;border-bottom:1px solid #f0f0f0}
 .ads-stat{background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 12px}
-.ads-stat .v{font-size:20px;font-weight:800;color:#1565C0;line-height:1.1}
-.ads-stat .v.owed{color:#E65100}.ads-stat .v.paid{color:#2E7D32}
+.ads-stat .v{font-size:20px;font-weight:800;color:#00695C;line-height:1.1}
+.ads-stat .v.owed{color:#E65100}
+.ads-stat .v.paid{color:#2E7D32}
 .ads-stat .l{font-size:10px;color:#9e9e9e;text-transform:uppercase;letter-spacing:.4px;margin-top:3px;font-weight:700}
 .ads-tbl-wrap{overflow-x:auto;max-height:640px;overflow-y:auto}
-.ads-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:980px}
+.ads-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:1100px}
 .ads-tbl thead th{position:sticky;top:0;z-index:2;background:#F8FAFF;color:#546e7a;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:9px 8px;border-bottom:2px solid #e3ecf7;white-space:nowrap;cursor:pointer}
 .ads-tbl td{padding:8px;border-bottom:1px solid #f5f5f5;vertical-align:middle;color:#333}
 .ads-tbl tbody tr:hover{background:#F3F7FF}
@@ -41,38 +42,40 @@ module.exports = function accountDriverSettlementsPage(pageWrap, commonHead, com
 .ads-owed{color:#E65100}.ads-zero{color:#bdbdbd}
 .ads-sub{font-size:10px;color:#90a4ae;margin-top:2px;font-weight:500}
 .ads-pill{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
-.ads-pill.open{background:#FFF3E0;color:#E65100}.ads-pill.paid{background:#E8F5E9;color:#2E7D32}
+.ads-pill.open{background:#FFF3E0;color:#E65100}
+.ads-pill.paid{background:#E8F5E9;color:#2E7D32}
 .ads-btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:5px;border:1px solid #e0e0e0;background:#fff;font-size:11px;font-weight:600;cursor:pointer;color:#37474f}
-.ads-btn:hover{border-color:#1565C0;color:#1565C0}
-.ads-btn.primary{background:#1565C0;color:#fff;border-color:#1565C0}
-.ads-btn.primary:hover{background:#0D47A1}
+.ads-btn:hover{border-color:#00695C;color:#00695C}
+.ads-btn.primary{background:#00695C;color:#fff;border-color:#00695C}
+.ads-btn.primary:hover{background:#004D40}
 .ads-btn:disabled{opacity:.45;cursor:not-allowed}
-.ads-bank{font-size:11px;color:#546e7a;font-family:monospace}
 .ads-ov{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;align-items:flex-start;justify-content:center;overflow-y:auto;padding:28px 16px}
 .ads-ov.show{display:flex}
 .ads-modal{background:#fff;border-radius:14px;width:780px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.22);margin:auto;overflow:hidden}
-.ads-modal-h{padding:14px 18px;background:linear-gradient(135deg,#1565C0,#1E88E5);color:#fff;display:flex;justify-content:space-between;align-items:center}
+.ads-modal-h{padding:14px 18px;background:linear-gradient(135deg,#00695C,#00897B);color:#fff;display:flex;justify-content:space-between;align-items:center}
 .ads-modal-h h3{margin:0;font-size:15px}
-.ads-modal-b{padding:16px 18px}
+.ads-modal-b{padding:16px 18px;max-height:72vh;overflow-y:auto}
 .ads-kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-bottom:14px}
 .ads-kv .k{font-size:10px;font-weight:700;color:#9e9e9e;text-transform:uppercase}
 .ads-kv .val{font-size:13px;font-weight:600;color:#212121}
 .ads-note{font-size:11px;color:#78909c;margin-top:10px;line-height:1.5}
+.ads-bank{font-size:11px;color:#546e7a;font-family:monospace}
 </style>`;
 
   const body = `
 <div class="ads-wrap">
   <div class="ads-hint">
-    <b>Account / ACC driver payouts:</b> When jobs are paid on Account or ACC, the company collects from the client later and pays the driver the full fare.
-    Use this page to track unpaid driver amounts for a period and <b>Mark Paid</b> when you have transferred them.
-    This ledger is <b>separate</b> from BookaWaka Driver Ops (Card / TM / Hoist) and does not change that Mark Paid math.
+    <b>Account / ACC driver payout tracking (company-own ledger):</b>
+    This page tracks what <b>your company</b> owes drivers for Account, ACC, Business Account, and corporate jobs.
+    It is <b>not</b> BookaWaka Card/TM settlement — those locks live under <code>driverSettlements</code>.
+    Mark Paid here writes separate locks at <code>accountDriverSettlements/{company}/{period}/{driver}</code>.
   </div>
 
   <div class="rpt-panel">
     <div class="rpt-toolbar">
       <div class="rpt-toolbar-title">
         <i class="material-icons">&#xE8A1;</i>
-        <h3>Account / ACC Driver Settlements</h3>
+        <h3>Account / ACC Driver Pay</h3>
       </div>
       <div class="rpt-toolbar-meta">Period: <b id="ads-period-label">—</b></div>
       <div class="rpt-toolbar-actions">
@@ -129,8 +132,8 @@ module.exports = function accountDriverSettlementsPage(pageWrap, commonHead, com
       </div>
     </div>
 
-    <div id="ads-loading" class="rpt-state-box"><div class="rpt-spinner"></div><p>Loading Account / ACC jobs…</p></div>
-    <div id="ads-empty" class="rpt-state-box" style="display:none"><i class="material-icons">&#xE8B6;</i><p>No Account / ACC driver jobs in this period.</p></div>
+    <div id="ads-loading" class="rpt-state-box"><div class="rpt-spinner"></div><p>Loading Account / ACC settlements…</p></div>
+    <div id="ads-empty" class="rpt-state-box" style="display:none"><i class="material-icons">&#xE8B6;</i><p>No Account / ACC driver activity in this period.</p></div>
 
     <div id="ads-main" style="display:none">
       <div class="ads-stats" id="ads-stats"></div>
@@ -140,10 +143,10 @@ module.exports = function accountDriverSettlementsPage(pageWrap, commonHead, com
             <tr>
               <th onclick="adsSort('driverName')">Driver</th>
               <th onclick="adsSort('completedCount')">Completed</th>
-              <th>Outcomes</th>
-              <th>Account refs</th>
+              <th onclick="adsSort('owedBeforeLock')">Account / ACC total</th>
+              <th>Canc / Rej / NS</th>
               <th>Vehicles</th>
-              <th onclick="adsSort('owedTotal')">Company owes</th>
+              <th>Account refs</th>
               <th>Status</th>
               <th>Bank</th>
               <th></th>
@@ -167,20 +170,23 @@ module.exports = function accountDriverSettlementsPage(pageWrap, commonHead, com
 </div>
 `;
 
+  // Must wrap in <script> — commonScripts appends extraJs after a closed </script>.
   const js = `<script>
+/* Mirrored from lib/companyLedgerSettlements.js + DOS period/identity helpers (browser CJS). */
 var _adsRows = [];
 var _adsPeriod = null;
-var _adsSortKey = 'owedTotal';
+var _adsSortKey = 'owedBeforeLock';
 var _adsSortDir = -1;
 var _adsDriversMeta = {};
 
 function adsEsc(s){
   return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function adsMoney(n){
+function money(n){
   n = Math.round((parseFloat(n)||0)*100)/100;
   return '$' + n.toFixed(2);
 }
+
 function adsParseTs(v){
   if(v==null||v==='') return 0;
   if(typeof v==='number'){
@@ -196,25 +202,19 @@ function adsJobTs(j){
   return adsParseTs(j.completedAt||j.CompletedAt||j.endTime||j.EndTime||j.finishTime||
     j.timestamp||j.Timestamp||j.createdAt||j.CreatedAt||j.jobDate||j.JobDate||j.dateTime||j.DateTime);
 }
-function adsIsCompanyKey(k, companyId){
-  var s=String(k||'');
-  if(!s) return false;
-  if(companyId!=null && String(companyId)!=='' && s===String(companyId)) return true;
-  return /^\\d+$/.test(s);
-}
-function adsIsLegacyDriverId(id){ return /^D\\d+/i.test(String(id||'').trim()); }
-function adsClassifyPm(pm){
+function adsClassifyPaymentMethod(pm){
   var s=String(pm||'').toLowerCase().replace(/[\\s_-]/g,'');
-  if(!s) return 'other';
-  if(s.indexOf('account')>=0||s==='acc'||s.indexOf('business')>=0||s.indexOf('corporate')>=0) return 'account';
+  if(!s||s==='\\u2014'||s==='-') return 'other';
   if(s.indexOf('cash')>=0) return 'cash';
-  if(s.indexOf('eftpos')>=0) return 'eftpos';
   if(s.indexOf('mobility')>=0||s==='tm'||s.indexOf('totalmobility')>=0) return 'tm';
-  if(s.indexOf('card')>=0||s.indexOf('stripe')>=0||s.indexOf('visa')>=0||s.indexOf('master')>=0) return 'card';
+  if(s.indexOf('account')>=0||s==='acc'||s.indexOf('business')>=0||s.indexOf('corporate')>=0) return 'account';
+  if(s.indexOf('eftpos')>=0) return 'eftpos';
+  if(s.indexOf('card')>=0||s.indexOf('stripe')>=0||s.indexOf('visa')>=0||s.indexOf('master')>=0||s.indexOf('amex')>=0||
+     s.indexOf('debit')>=0||s.indexOf('credit')>=0||s.indexOf('tap')>=0||s.indexOf('nfc')>=0||s.indexOf('taptopay')>=0) return 'card';
   return 'other';
 }
-function adsIsAccountPm(pm){ return adsClassifyPm(pm)==='account'; }
-function adsNormalizeOutcome(status){
+function adsIsAccountPayment(pm){ return adsClassifyPaymentMethod(pm)==='account'; }
+function adsNormalizeJobOutcome(status){
   var s=String(status||'').toLowerCase().replace(/[\\s_-]/g,'');
   if(!s) return 'other';
   if(s.indexOf('complete')>=0||s==='closed'||s==='done'||s==='finished') return 'completed';
@@ -223,8 +223,32 @@ function adsNormalizeOutcome(status){
   if(s.indexOf('noshow')>=0||s==='ns') return 'no_show';
   return 'other';
 }
-function adsFormatPay(amt, count){
-  var n=Math.round((parseFloat(amt)||0)*100)/100;
+function adsJobFare(job){
+  var full=parseFloat(job.TotalFare||job.totalFare||job.Fare||job.fare||job.RideCost||job.EstimatedFare||0)||0;
+  var isTm=job.isTotalMobility===true||job.tmUsed===true||
+    job.tmPaymentType==='total_mobility'||job.paymentCategory==='total_mobility'||
+    (job.tmSubsidyFare!=null&&job.tmSubsidyFare!=='')||
+    (job.tmSubsidy!=null&&job.tmSubsidy!=='')||
+    (job.tmCouncilPays!=null&&job.tmCouncilPays!=='')||
+    (job.councilPays!=null&&job.councilPays!=='')||
+    !!(job.tmCardNumber||job.tmVoucherNo);
+  if(!isTm) return full;
+  var pax=parseFloat(job.tmPassengerPays||job.passengerPays||job.patientPays||0)||0;
+  if(pax>0) return Math.round(pax*100)/100;
+  var hoist=parseFloat(job.tmSubsidyHoist||job.hoistFare||job.HoistFare||job.hoistAmount||0)||0;
+  var sub=0;
+  if(job.tmSubsidyFare!=null&&job.tmSubsidyFare!=='') sub=parseFloat(job.tmSubsidyFare)||0;
+  else {
+    var combined=parseFloat(job.tmSubsidy||job.tmCouncilPays||job.councilPays||0)||0;
+    sub=hoist>0?Math.max(0,combined-hoist):combined;
+  }
+  return Math.max(0, Math.round((full-hoist-sub)*100)/100);
+}
+function adsJobPaymentMethod(job){
+  return job.PaymentType||job.paymentType||job.PaymentMethod||job.paymentMethod||'';
+}
+function adsFormatPayWithCount(owedOrGross, count){
+  var n=Math.round((parseFloat(owedOrGross)||0)*100)/100;
   var c=parseInt(count,10)||0;
   var m='$'+n.toFixed(2);
   return c>0?(m+' \\u00d7'+c):m;
@@ -240,7 +264,10 @@ function adsPeriodBounds(mode, refMs, rangeFromYmd, rangeToYmd){
     if(fromParts.length===3 && fromParts[0] && toParts.length===3 && toParts[0]){
       var fromMs=sod(fromParts[0],fromParts[1]-1,fromParts[2]);
       var toMs=eod(toParts[0],toParts[1]-1,toParts[2]);
-      if(toMs<fromMs){ var tmp=fromMs; fromMs=sod(toParts[0],toParts[1]-1,toParts[2]); toMs=eod(fromParts[0],fromParts[1]-1,fromParts[2]); }
+      if(toMs<fromMs){
+        fromMs=sod(toParts[0],toParts[1]-1,toParts[2]);
+        toMs=eod(fromParts[0],fromParts[1]-1,fromParts[2]);
+      }
       var fromLabel=new Date(fromMs).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
       var toLabel=new Date(toMs).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
       return {mode:'range', fromMs:fromMs, toMs:toMs, key:'R'+rangeFromYmd+'_'+(rangeToYmd||rangeFromYmd),
@@ -264,52 +291,45 @@ function adsPeriodBounds(mode, refMs, rangeFromYmd, rangeToYmd){
   return {mode:'month', fromMs:sod(y,m,1), toMs:eod(y,m,last), key:y+'-'+String(m+1).padStart(2,'0'),
     label:d.toLocaleDateString('en-NZ',{month:'long',year:'numeric'})};
 }
-function adsBuildRow(opts){
-  var jobs=opts.jobs||[];
-  var settlement=opts.settlement||null;
-  var ledgerJobs=[];
-  var gross=0, completedCount=0, cancelled=0, rejected=0, noShow=0, otherOut=0;
-  var vehicles={}, accountRefs={};
-  jobs.forEach(function(job){
-    var pm=job.PaymentType||job.paymentType||job.PaymentMethod||job.paymentMethod||'';
-    if(!adsIsAccountPm(pm)) return;
-    ledgerJobs.push(job);
-    var outcome=adsNormalizeOutcome(job.jobstatus||job.JobStatus||job.status||job.Status||'');
-    if(outcome==='cancelled') cancelled++;
-    else if(outcome==='rejected') rejected++;
-    else if(outcome==='no_show') noShow++;
-    else if(outcome!=='completed') otherOut++;
-    var veh=String(job.vehicleId||job.VehicleId||job.taxiNumber||job.TaxiNumber||job.carNumber||'').trim();
-    if(veh) vehicles[veh]=(vehicles[veh]||0)+1;
-    var ref=String(job.accountNumber||job.AccountNumber||job.accountCode||job.AccountCode||job.accountId||job.AccountId||job.accClientId||'').trim();
-    if(ref) accountRefs[ref]=(accountRefs[ref]||0)+1;
-    if(outcome!=='completed') return;
-    completedCount++;
-    gross += parseFloat(job.TotalFare||job.totalFare||job.Fare||job.fare||job.RideCost||job.EstimatedFare||0)||0;
+
+function adsLooksLikeDriverBucket(v){
+  if(!v||typeof v!=='object'||Array.isArray(v)) return false;
+  var vals=Object.values(v);
+  if(!vals.length) return false;
+  return vals.some(function(child){
+    return child&&typeof child==='object'&&!Array.isArray(child)&&
+      !!(child.name||child.email||child.firstName||child.driverId||child.dispatcherId||child.uid);
   });
-  gross=Math.round(gross*100)/100;
-  var locked=!!(settlement&&(settlement.locked||settlement.status==='paid'));
-  return {
-    driverId:String(opts.driverId||''),
-    driverName:String(opts.driverName||opts.driverId||'Driver'),
-    jobs:ledgerJobs, jobCount:ledgerJobs.length, completedCount:completedCount,
-    cancelled:cancelled, rejected:rejected, noShow:noShow, otherOutcomes:otherOut,
-    gross:gross, owedTotal:locked?0:gross, owedBeforeLock:gross,
-    status:locked?'paid':'open', locked:locked, settlement:settlement,
-    vehicles:Object.keys(vehicles).sort(), accountRefs:Object.keys(accountRefs).sort(),
-    bankName:opts.bankName||'', accountName:opts.accountName||'', accountNumber:opts.accountNumber||'',
-    formatAmount:adsFormatPay(locked?0:gross, completedCount)
-  };
 }
-function adsResolveDriverId(rawId, canonMap, companyId){
-  if(rawId==null||rawId===''||rawId==='0') return null;
-  var id=String(rawId);
-  if(adsIsCompanyKey(id, companyId)) return null;
-  if(canonMap && canonMap[id]) return canonMap[id];
-  return id;
+function adsIsCompanyKey(k, companyId){
+  var s=String(k||'');
+  if(!s) return false;
+  if(companyId!=null && String(companyId)!=='' && s===String(companyId)) return true;
+  return /^\\d+$/.test(s);
 }
-function adsBuildCanon(driversRoot, driversCid, companyId){
-  var canon={}, names={};
+function adsIsLegacyDriverId(id){ return /^D\\d+/i.test(String(id||'').trim()); }
+function adsPreferCanonId(v, fallbackKey, existingCanon){
+  if(!v||typeof v!=='object') return String(fallbackKey||'');
+  var candidates=[v.dispatcherId, v.id, v.driverId, v.DriverId, fallbackKey];
+  for(var i=0;i<candidates.length;i++){
+    var c=candidates[i];
+    if(c!=null && String(c).trim()!=='' && adsIsLegacyDriverId(c)) return String(c).trim();
+  }
+  if(existingCanon){
+    var aliases=[v.uid, v.Uid, fallbackKey, v.fleetKey].filter(Boolean).map(String);
+    for(var a=0;a<aliases.length;a++){
+      var prev=existingCanon[aliases[a]];
+      if(prev && adsIsLegacyDriverId(prev)) return prev;
+    }
+  }
+  for(var j=0;j<candidates.length;j++){
+    var c2=candidates[j];
+    if(c2!=null && String(c2).trim()!=='') return String(c2).trim();
+  }
+  return String(fallbackKey||'');
+}
+function adsBuildDriverCanon(driversRoot, driversCid, companyId){
+  var canon={}, names={}, valid={};
   function setCanon(alias, canonId, name){
     if(alias==null||alias==='') return;
     var a=String(alias);
@@ -319,40 +339,93 @@ function adsBuildCanon(driversRoot, driversCid, companyId){
     if(canon[a] && adsIsLegacyDriverId(canon[a]) && !adsIsLegacyDriverId(c)) return;
     canon[a]=c;
     if(name){ names[a]=name; names[c]=name; }
+    valid[c]=true;
   }
   function ingest(key, d, fromCompanyScoped){
     if(!d||typeof d!=='object') return;
-    if(adsIsCompanyKey(key, companyId) && d && typeof d==='object' && !d.name && !d.email){
+    if(adsIsCompanyKey(key, companyId) && adsLooksLikeDriverBucket(d)){
       Object.keys(d).forEach(function(childKey){ ingest(childKey, d[childKey], true); });
       return;
     }
     if(!fromCompanyScoped && d.companyId!=null && companyId && String(d.companyId)!==String(companyId)) return;
     if(/^\\d+$/.test(String(key)) && !d.name && !d.email && !d.firstName) return;
     var name=[d.firstName||d.first_name||'', d.lastName||d.last_name||d.surname||'', d.name||''].join(' ').trim() || d.email || d.dispatcherId || '';
-    var candidates=[d.dispatcherId, d.id, d.driverId, d.DriverId, key];
-    var canonId='';
-    for(var i=0;i<candidates.length;i++){
-      var c=candidates[i];
-      if(c!=null && String(c).trim()!=='' && adsIsLegacyDriverId(c)){ canonId=String(c).trim(); break; }
-    }
-    if(!canonId){
-      for(var j=0;j<candidates.length;j++){
-        var c2=candidates[j];
-        if(c2!=null && String(c2).trim()!==''){ canonId=String(c2).trim(); break; }
-      }
-    }
+    if(!name && !d.id && !d.driverId && !d.dispatcherId && !d.uid) return;
+    var canonId=adsPreferCanonId(d, key, canon);
     if(!canonId || adsIsCompanyKey(canonId, companyId)) return;
     setCanon(key, canonId, name||canonId);
     setCanon(d.uid, canonId, name||canonId);
+    setCanon(d.Uid, canonId, name||canonId);
     setCanon(d.id, canonId, name||canonId);
     setCanon(d.driverId, canonId, name||canonId);
+    setCanon(d.DriverId, canonId, name||canonId);
     setCanon(d.dispatcherId, canonId, name||canonId);
     setCanon(canonId, canonId, name||canonId);
   }
-  if(driversCid&&typeof driversCid==='object') Object.keys(driversCid).forEach(function(k){ ingest(k, driversCid[k], true); });
-  if(driversRoot&&typeof driversRoot==='object') Object.keys(driversRoot).forEach(function(k){ ingest(k, driversRoot[k], false); });
-  return {canon:canon, names:names};
+  if(driversCid && typeof driversCid==='object'){
+    Object.keys(driversCid).forEach(function(k){ ingest(k, driversCid[k], true); });
+  }
+  if(driversRoot && typeof driversRoot==='object'){
+    Object.keys(driversRoot).forEach(function(k){ ingest(k, driversRoot[k], false); });
+  }
+  return {canon:canon, names:names, valid:valid};
 }
+function adsResolveDriverId(rawId, canonMap, companyId){
+  if(rawId==null||rawId===''||rawId==='0') return null;
+  var id=String(rawId);
+  if(adsIsCompanyKey(id, companyId)) return null;
+  if(canonMap && canonMap[id]) return canonMap[id];
+  return id;
+}
+
+/** Mirror of buildAccountDriverSummaryRow / buildCompanyLedgerDriverRow. */
+function adsBuildDriverRow(opts){
+  opts=opts||{};
+  var jobs=opts.jobs||[];
+  var settlement=opts.settlement||null;
+  var ledgerJobs=[];
+  var gross=0, completedCount=0, cancelled=0, rejected=0, noShow=0, otherOut=0;
+  var vehicles={}, accountRefs={};
+  jobs.forEach(function(job){
+    var pm=adsJobPaymentMethod(job);
+    if(!adsIsAccountPayment(pm)) return;
+    ledgerJobs.push(job);
+    var outcome=adsNormalizeJobOutcome(job.jobstatus||job.JobStatus||job.status||job.Status||'');
+    if(outcome==='cancelled') cancelled+=1;
+    else if(outcome==='rejected') rejected+=1;
+    else if(outcome==='no_show') noShow+=1;
+    else if(outcome!=='completed') otherOut+=1;
+    var veh=String(job.vehicleId||job.VehicleId||job.taxiNumber||job.TaxiNumber||job.carNumber||'').trim();
+    if(veh) vehicles[veh]=(vehicles[veh]||0)+1;
+    var ref=String(job.accountNumber||job.AccountNumber||job.accountCode||job.AccountCode||
+      job.accountId||job.AccountId||job.accClientId||'').trim();
+    if(ref) accountRefs[ref]=(accountRefs[ref]||0)+1;
+    if(outcome!=='completed') return;
+    completedCount+=1;
+    gross+=adsJobFare(job);
+  });
+  gross=Math.round(gross*100)/100;
+  var locked=!!(settlement&&(settlement.locked||settlement.status==='paid'));
+  var status=locked?'paid':'open';
+  return {
+    kind:'account',
+    driverId:String(opts.driverId||''),
+    driverName:String(opts.driverName||opts.driverId||'Driver'),
+    jobs:ledgerJobs,
+    jobCount:ledgerJobs.length,
+    completedCount:completedCount,
+    cancelled:cancelled, rejected:rejected, noShow:noShow, otherOutcomes:otherOut,
+    gross:gross,
+    owedTotal:locked?0:gross,
+    owedBeforeLock:gross,
+    status:status, locked:locked, settlement:settlement,
+    vehicles:Object.keys(vehicles).sort(),
+    accountRefs:Object.keys(accountRefs).sort(),
+    bankName:opts.bankName||'', accountName:opts.accountName||'', accountNumber:opts.accountNumber||'',
+    formatAmount:adsFormatPayWithCount(locked?0:gross, completedCount)
+  };
+}
+
 function adsMergeJobSources(results){
   var merged={};
   function addNested(data){
@@ -401,6 +474,7 @@ function adsMergeJobSources(results){
   }
   return merged;
 }
+
 function adsOnModeChange(){
   var mode=document.getElementById('ads-mode').value;
   document.getElementById('ads-month-wrap').style.display=mode==='month'?'':'none';
@@ -447,7 +521,9 @@ function adsCurrentPeriod(){
     if(mv){
       var y=+mv.split('-')[0], m=+mv.split('-')[1];
       var last=new Date(y,m,0).getDate();
-      var tb2=tzBounds(mv+'-01', mv+'-'+String(last).padStart(2,'0'));
+      var fromYmd=mv+'-01';
+      var toYmd=mv+'-'+String(last).padStart(2,'0');
+      var tb2=tzBounds(fromYmd,toYmd);
       if(tb2){ p2.fromMs=tb2.fromMs; p2.toMs=tb2.toMs; }
     }
     return p2;
@@ -481,10 +557,12 @@ function adsLoad(){
     window.adminRead('allbookings/'+cid).catch(function(){return null;}),
     window.adminRead('accountDriverSettlements/'+cid+'/'+_adsPeriod.key).catch(function(){return null;})
   ]).then(function(res){
-    var built=adsBuildCanon(res[0], res[1], cid);
+    var driversRoot=res[0], driversCid=res[1];
+    var settlements=res[6]||{};
+    var built=adsBuildDriverCanon(driversRoot, driversCid, cid);
     var canon=built.canon||{};
     var names=built.names||{};
-    var settlements=res[6]||{};
+
     _adsDriversMeta={};
     function ingestDrivers(d){
       if(!d||typeof d!=='object') return;
@@ -494,7 +572,8 @@ function adsLoad(){
         if(/^\\d+$/.test(k) && !v.name && !v.email) return;
         var id=String(v.id||v.driverId||v.dispatcherId||k);
         var name=[v.firstName||'',v.lastName||'',v.name||''].join(' ').trim()||v.dispatcherId||id;
-        var meta={name:name,bankName:v.bankName||'',accountName:v.accountName||'',accountNumber:v.accountNumber||'',pushKey:k};
+        var meta={name:name,bankName:v.bankName||'',accountName:v.accountName||'',accountNumber:v.accountNumber||'',
+          pushKey:k, numericId:String(v.id||v.driverId||'')};
         _adsDriversMeta[id]=meta;
         if(v.dispatcherId) _adsDriversMeta[String(v.dispatcherId)]=meta;
         if(v.id) _adsDriversMeta[String(v.id)]=meta;
@@ -502,10 +581,10 @@ function adsLoad(){
         _adsDriversMeta[k]=meta;
       });
     }
-    ingestDrivers(res[0]); ingestDrivers(res[1]);
+    ingestDrivers(driversRoot); ingestDrivers(driversCid);
 
     var merged=adsMergeJobSources([res[2],res[3],res[4],res[5]]);
-    var byDriver={};
+    var allJobs=[];
     Object.keys(merged).forEach(function(bid){
       Object.keys(merged[bid]||{}).forEach(function(did){
         var j=merged[bid][did];
@@ -519,25 +598,37 @@ function adsLoad(){
         copy.driverId=canonDid;
         var ts=adsJobTs(copy);
         if(!ts||ts<_adsPeriod.fromMs||ts>_adsPeriod.toMs) return;
-        var pm=copy.PaymentType||copy.paymentType||copy.PaymentMethod||copy.paymentMethod||'';
-        if(!adsIsAccountPm(pm)) return;
-        if(!byDriver[canonDid]) byDriver[canonDid]=[];
-        byDriver[canonDid].push(copy);
+        if(!adsIsAccountPayment(adsJobPaymentMethod(copy))) return;
+        allJobs.push(copy);
       });
+    });
+
+    var byDriver={};
+    allJobs.forEach(function(j){
+      var did=String(j.driverId||'');
+      if(!did) return;
+      if(!byDriver[did]) byDriver[did]=[];
+      byDriver[did].push(j);
     });
 
     _adsRows=Object.keys(byDriver).map(function(did){
       var meta=_adsDriversMeta[did]||{};
       var settle=settlements[did]||null;
       if(!settle && meta.pushKey) settle=settlements[meta.pushKey]||null;
-      return adsBuildRow({
+      return adsBuildDriverRow({
         driverId:did,
         driverName:meta.name||names[did]||did,
         jobs:byDriver[did],
         settlement:settle,
         bankName:meta.bankName, accountName:meta.accountName, accountNumber:meta.accountNumber
       });
-    }).filter(function(r){ return r.jobCount>0; });
+    }).filter(function(r){
+      if(!(r.jobCount>0 || r.owedBeforeLock>0 || r.completedCount>0)) return false;
+      var meta=_adsDriversMeta[r.driverId];
+      var looksLikeBooking=/^869\\d{6,}$/.test(r.driverId) || (/^\\d{10,}$/.test(r.driverId) && !meta);
+      if(looksLikeBooking && !meta && r.completedCount===0 && r.owedBeforeLock===0) return false;
+      return true;
+    });
 
     var sel=document.getElementById('ads-driver-filter');
     var prev=sel.value;
@@ -581,63 +672,67 @@ function adsFiltered(){
 }
 function adsRender(){
   var rows=adsFiltered();
-  var unpaid=0, paidN=0, jobs=0;
+  var unpaid=0, paidN=0, completed=0;
   rows.forEach(function(r){
-    unpaid+=r.owedTotal; jobs+=r.completedCount;
+    unpaid+=r.owedTotal;
+    completed+=r.completedCount||0;
     if(r.status==='paid') paidN++;
   });
   document.getElementById('ads-stats').innerHTML=
     '<div class="ads-stat"><div class="v">'+rows.length+'</div><div class="l">Drivers</div></div>'+
-    '<div class="ads-stat"><div class="v owed">'+adsMoney(unpaid)+'</div><div class="l">Total unpaid</div></div>'+
+    '<div class="ads-stat"><div class="v owed">'+money(unpaid)+'</div><div class="l">Total unpaid</div></div>'+
     '<div class="ads-stat"><div class="v paid">'+paidN+'</div><div class="l">Paid / locked</div></div>'+
-    '<div class="ads-stat"><div class="v">'+jobs+'</div><div class="l">Completed Acc jobs</div></div>';
+    '<div class="ads-stat"><div class="v">'+completed+'</div><div class="l">Completed jobs</div></div>';
 
   document.getElementById('ads-tbody').innerHTML=rows.map(function(r){
     var bank=r.accountNumber
       ? '<span class="ads-bank" title="'+adsEsc((r.bankName||'')+' / '+(r.accountName||''))+'">'+adsEsc(r.accountNumber)+'</span>'
-      : '<span class="ads-zero">—</span>';
+      : '<span class="ads-zero">\\u2014</span>';
     var markBtn=r.locked
       ? '<button class="ads-btn" disabled title="Period locked">Paid</button>'
       : '<button class="ads-btn primary" onclick="adsMarkPaid(\\''+adsEsc(r.driverId)+'\\')">Mark Paid</button>';
     return '<tr>'+
       '<td><b>'+adsEsc(r.driverName)+'</b><div class="ads-sub">'+adsEsc(r.driverId)+'</div></td>'+
-      '<td class="ads-money">'+adsFormatPay(r.owedBeforeLock, r.completedCount)+'</td>'+
-      '<td>Done '+r.completedCount+' · Canc '+r.cancelled+' · Rej '+r.rejected+' · NS '+r.noShow+'<div class="ads-sub">Tot '+r.jobCount+'</div></td>'+
-      '<td>'+adsEsc(r.accountRefs.join(', ')||'—')+'</td>'+
-      '<td>'+adsEsc(r.vehicles.join(', ')||'—')+'</td>'+
-      '<td class="ads-money '+(r.owedTotal?'ads-owed':'ads-zero')+'">'+adsMoney(r.owedTotal)+
-        (r.locked?' <span class="ads-sub" style="color:#2E7D32">('+adsMoney(r.owedBeforeLock)+' locked)</span>':'')+'</td>'+
+      '<td>'+r.completedCount+'</td>'+
+      '<td class="ads-money '+(r.owedTotal?'ads-owed':'ads-zero')+'">'+adsFormatPayWithCount(r.locked?r.owedBeforeLock:r.owedTotal, r.completedCount)+
+        (r.locked?' <span class="ads-sub" style="color:#2E7D32">(locked)</span>':'')+'</td>'+
+      '<td>Canc '+r.cancelled+' · Rej '+r.rejected+' · NS '+r.noShow+'</td>'+
+      '<td>'+adsEsc(r.vehicles.join(', ')||'\\u2014')+'</td>'+
+      '<td>'+adsEsc(r.accountRefs.join(', ')||'\\u2014')+'</td>'+
       '<td><span class="ads-pill '+r.status+'">'+(r.status==='paid'?'Paid':'Unpaid')+'</span></td>'+
       '<td>'+bank+'</td>'+
       '<td style="white-space:nowrap"><button class="ads-btn" onclick="adsOpenDetail(\\''+adsEsc(r.driverId)+'\\')">Detail</button> '+markBtn+'</td>'+
     '</tr>';
   }).join('');
 }
+
 function adsOpenDetail(driverId){
   var r=_adsRows.find(function(x){return x.driverId===driverId;});
   if(!r) return;
   document.getElementById('ads-detail-title').textContent=r.driverName+' — '+(_adsPeriod&&_adsPeriod.label||'');
   var html='<div class="ads-kv">'+
-    '<div><div class="k">Company owes</div><div class="val" style="color:#E65100">'+adsMoney(r.owedTotal)+'</div></div>'+
+    '<div><div class="k">Account / ACC owed</div><div class="val" style="color:#E65100">'+money(r.owedTotal)+'</div></div>'+
     '<div><div class="k">Status</div><div class="val">'+(r.locked?'Paid & locked':'Open / unpaid')+'</div></div>'+
-    '<div><div class="k">Completed</div><div class="val">'+r.completedCount+' / '+r.jobCount+' Acc jobs</div></div>'+
-    '<div><div class="k">Account refs</div><div class="val">'+adsEsc(r.accountRefs.join(', ')||'—')+'</div></div>'+
-    '<div><div class="k">Vehicles</div><div class="val">'+adsEsc(r.vehicles.join(', ')||'—')+'</div></div>'+
-    '<div><div class="k">Bank</div><div class="val ads-bank">'+adsEsc([r.bankName,r.accountName,r.accountNumber].filter(Boolean).join(' · ')||'Not on file')+'</div></div>'+
+    '<div><div class="k">Completed</div><div class="val">'+r.completedCount+'</div></div>'+
+    '<div><div class="k">Canc / Rej / NS</div><div class="val">'+r.cancelled+' / '+r.rejected+' / '+r.noShow+'</div></div>'+
+    '<div><div class="k">Vehicles</div><div class="val">'+adsEsc(r.vehicles.join(', ')||'\\u2014')+'</div></div>'+
+    '<div><div class="k">Account refs</div><div class="val">'+adsEsc(r.accountRefs.join(', ')||'\\u2014')+'</div></div>'+
+    '<div style="grid-column:1/-1"><div class="k">Bank</div><div class="val ads-bank">'+adsEsc([r.bankName,r.accountName,r.accountNumber].filter(Boolean).join(' · ')||'Not on file — add on driver profile')+'</div></div>'+
   '</div>';
-  html+='<table class="ads-tbl" style="min-width:0"><thead><tr><th>When</th><th>Booking</th><th>Pay</th><th>Account</th><th>Fare</th><th>Status</th></tr></thead><tbody>';
+  html+='<table class="ads-tbl" style="min-width:0"><thead><tr><th>When</th><th>Booking</th><th>Pay</th><th>Fare</th><th>Status</th><th>Account ref</th></tr></thead><tbody>';
   var list=(r.jobs||[]).slice().sort(function(a,b){return adsJobTs(b)-adsJobTs(a);}).slice(0,80);
   list.forEach(function(j){
-    var fare=parseFloat(j.TotalFare||j.totalFare||j.Fare||j.fare||0);
-    var pm=j.PaymentType||j.paymentType||j.PaymentMethod||'';
-    var ref=j.accountNumber||j.AccountNumber||j.accountCode||j.AccountCode||'';
+    var fare=adsJobFare(j);
+    var pm=adsJobPaymentMethod(j);
     var ts=adsJobTs(j);
-    html+='<tr><td>'+(ts?new Date(ts).toLocaleString('en-NZ'):'—')+'</td>'+
-      '<td>'+adsEsc(j.bookingId||'')+'</td><td>'+adsEsc(pm||'—')+'</td><td>'+adsEsc(ref||'—')+'</td>'+
-      '<td class="ads-money">'+adsMoney(fare)+'</td><td>'+adsEsc(j.jobstatus||j.status||'')+'</td></tr>';
+    var ref=String(j.accountNumber||j.AccountNumber||j.accountCode||j.AccountCode||j.accountId||j.AccountId||j.accClientId||'').trim();
+    html+='<tr><td>'+(ts?new Date(ts).toLocaleString('en-NZ'):'\\u2014')+'</td>'+
+      '<td>'+adsEsc(j.bookingId||'')+'</td><td>'+adsEsc(pm||'\\u2014')+'</td>'+
+      '<td class="ads-money">'+money(fare)+'</td>'+
+      '<td>'+adsEsc(j.jobstatus||j.status||'')+'</td><td>'+adsEsc(ref||'\\u2014')+'</td></tr>';
   });
   html+='</tbody></table>';
-  if((r.jobs||[]).length>80) html+='<div class="ads-note">Showing latest 80 of '+r.jobs.length+' jobs.</div>';
+  if((r.jobs||[]).length>80) html+='<div class="ads-note">Showing latest 80 of '+r.jobs.length+' Account/ACC jobs.</div>';
   document.getElementById('ads-detail-body').innerHTML=html;
   document.getElementById('ads-detail-ov').classList.add('show');
 }
@@ -647,15 +742,16 @@ function adsMarkPaid(driverId){
   var r=_adsRows.find(function(x){return x.driverId===driverId;});
   if(!r||r.locked) return;
   var amt=r.owedBeforeLock;
-  if(!confirm('Mark '+r.driverName+' Account/ACC as PAID for '+(_adsPeriod&&_adsPeriod.label)+'?\\n\\nAmount: '+adsMoney(amt)+'\\nThis locks the Account ledger for this period (separate from BookaWaka Card/TM/Hoist).')) return;
+  if(!confirm('Mark '+r.driverName+' as PAID for Account/ACC '+(_adsPeriod&&_adsPeriod.label)+'?\\n\\nAmount: '+money(amt)+'\\nThis locks the Account/ACC period for this driver (separate from Card/TM).')) return;
   var cid=window.COMPANY_ID||'';
   var path='accountDriverSettlements/'+cid+'/'+_adsPeriod.key+'/'+driverId;
   var payload={
-    status:'paid', locked:true, amountPaid:amt, kind:'account',
+    status:'paid', locked:true, amountPaid:amt,
     periodKey:_adsPeriod.key, periodLabel:_adsPeriod.label,
     fromMs:_adsPeriod.fromMs, toMs:_adsPeriod.toMs,
     driverId:driverId, driverName:r.driverName,
-    completedCount:r.completedCount, gross:r.gross, accountRefs:r.accountRefs,
+    gross:r.gross, completedCount:r.completedCount,
+    ledgerKind:'account',
     paidAt:Date.now(), paidBy:(window.OWNER_EMAIL||window.ADMIN_EMAIL||'owner')
   };
   window.adminWrite(path,'PUT',payload).then(function(){
@@ -666,19 +762,22 @@ function adsMarkPaid(driverId){
 
 function adsExportCsv(){
   var rows=adsFiltered();
-  var headers=['Driver','DriverId','Period','Completed','Cancelled','Rejected','NoShow','JobTotal','Gross','Owed','Status','AccountRefs','Vehicles','BankName','AccountName','AccountNumber'];
+  var headers=['Driver','DriverId','Period','Completed','AccountGross','Canc','Rej','NoShow','Vehicles','AccountRefs','OwedTotal','Status','BankName','AccountName','AccountNumber'];
   var lines=[headers.join(',')];
   rows.forEach(function(r){
     function q(v){ v=String(v==null?'':v); if(/[",\\n]/.test(v)) return '"'+v.replace(/"/g,'""')+'"'; return v; }
     lines.push([
-      r.driverName,r.driverId,_adsPeriod&&_adsPeriod.label,r.completedCount,r.cancelled,r.rejected,r.noShow,r.jobCount,
-      r.owedBeforeLock.toFixed(2),r.owedTotal.toFixed(2),r.status,r.accountRefs.join(' '),r.vehicles.join(' '),
-      r.bankName,r.accountName,r.accountNumber
+      r.driverName,r.driverId,_adsPeriod&&_adsPeriod.label,
+      r.completedCount,r.owedBeforeLock.toFixed(2),
+      r.cancelled,r.rejected,r.noShow,
+      r.vehicles.join(' '),r.accountRefs.join(' '),
+      r.owedTotal.toFixed(2),r.status,r.bankName,r.accountName,r.accountNumber
     ].map(q).join(','));
   });
+  var blob=new Blob([lines.join('\\n')],{type:'text/csv;charset=utf-8'});
   var a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([lines.join('\\n')],{type:'text/csv;charset=utf-8'}));
-  a.download='account-settlements-'+(_adsPeriod&&_adsPeriod.key||'export')+'.csv';
+  a.href=URL.createObjectURL(blob);
+  a.download='account-driver-pay-'+(_adsPeriod&&_adsPeriod.key||'export')+'.csv';
   a.click();
 }
 
@@ -686,5 +785,5 @@ adsInitDates();
 adsLoad();
 </script>`;
 
-  return pageWrap(commonHead('Account / ACC Driver Settlements', css), body, commonScripts(js));
+  return pageWrap(commonHead('Account / ACC Driver Pay', css), body, commonScripts(js));
 };

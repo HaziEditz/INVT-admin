@@ -310,14 +310,23 @@ test('isTmJob detects economics flags even when PaymentType is Cash', async () =
   assert.equal(isTmJob({ isTotalMobility: true, PaymentType: 'Cash' }), true);
   assert.equal(isTmJob({ tmSubsidyFare: 12, PaymentType: 'Card' }), true);
   assert.equal(isTmJob({ PaymentType: 'Cash' }), false);
-  const lines = jobPaymentLines({
-    TotalFare: 40,
-    PaymentType: 'Card',
-    isTotalMobility: true,
-    tmSubsidyFare: 26,
-    tmSubsidyHoist: 10,
-    hoistUses: 1,
-  });
+  const lines = jobPaymentLines(
+    {
+      TotalFare: 40,
+      PaymentType: 'Card',
+      isTotalMobility: true,
+      tmSubsidyFare: 26,
+      tmPassengerPays: 14,
+      tmSubsidyHoist: 10,
+      hoistUses: 1,
+    },
+    { companyPercent: 5, driverPercent: 0 },
+  );
+  const card = lines.find((l) => l.bucket === 'card');
+  assert.ok(card, 'TM + Card remainder must emit a card main-line');
+  assert.equal(card.gross, 14);
+  assert.equal(card.owed, 13.3);
+  assert.equal(card.commission, 0.7);
   assert.equal(lines.some((l) => l.bucket === 'tm' && l.owed === 26), true);
   assert.equal(lines.some((l) => l.bucket === 'hoist' && l.owed === 10), true);
   assert.equal(formatPayWithCount(55, 5), '$55.00 ×5');
@@ -327,6 +336,35 @@ test('isTmJob detects economics flags even when PaymentType is Cash', async () =
   const range = periodBounds('range', Date.now(), '2026-08-01', '2026-08-10');
   assert.equal(range.mode, 'range');
   assert.match(range.key, /^R2026-08-01/);
+});
+
+test('TM Card remainder: passengerPays into card Mark Paid stream (not omitted, not full fare)', () => {
+  const job = {
+    jobstatus: 'Completed',
+    PaymentType: 'Card',
+    TotalFare: 40,
+    isTotalMobility: true,
+    tmSubsidyFare: 26,
+    tmPassengerPays: 14,
+  };
+  const cardSettings = { companyPercent: 10, driverPercent: 0 };
+  const lines = jobPaymentLines(job, cardSettings);
+  const card = lines.find((l) => l.bucket === 'card');
+  const tm = lines.find((l) => l.bucket === 'tm');
+  assert.ok(card);
+  assert.equal(card.gross, 14);
+  assert.equal(card.owed, 12.6);
+  assert.equal(card.commission, 1.4);
+  assert.notEqual(card.gross, 40);
+  assert.equal(tm.owed, 26);
+  const row = buildDriverSummaryRow({
+    driverId: 'D001',
+    jobs: [job],
+    cardSettings,
+  });
+  assert.equal(row.pay.card.gross, 14);
+  assert.equal(row.pay.card.owed, 12.6);
+  assert.equal(row.pay.tm.owed, 26);
 });
 
 test('TM subsidy owed: cash-remainder + hoist uses subsidy not hoist-only', () => {
