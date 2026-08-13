@@ -16311,9 +16311,15 @@ function tmTripsPage(companyId) {
 .st-approved{background:#F0FDF4;color:#16a34a;}
 .st-paid{background:#ECFDF5;color:#065f46;}
 .st-default{background:#F8FAFC;color:#64748b;}
-.tm-totals{background:#F0FDF4;border-top:2px solid #bbf7d0;padding:14px 16px;display:flex;gap:32px;flex-wrap:wrap;}
+.tm-totals{background:#F0FDF4;border-top:2px solid #bbf7d0;padding:14px 16px;display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;}
 .tm-total-item .label{font-size:11px;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;}
 .tm-total-item .value{font-size:18px;font-weight:700;color:#065f46;margin-top:2px;}
+.tm-total-item .hint{font-size:10px;font-weight:500;color:#64748b;margin-top:2px;text-transform:none;letter-spacing:0;max-width:160px;line-height:1.35;}
+.tm-total-item.tm-total-hoist .label{color:#1565C0;}
+.tm-total-item.tm-total-hoist .value{color:#1565C0;}
+.tm-total-item.tm-total-council .label{color:#0d9488;}
+.tm-total-item.tm-total-council .value{color:#0d9488;}
+.tm-totals-sep{width:1px;align-self:stretch;background:#bbf7d0;margin:0 4px;flex:0 0 1px;}
 .tm-approve-btn{font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid #bfdbfe;background:#EFF6FF;color:#1d4ed8;cursor:pointer;font-weight:600;transition:all .15s;white-space:nowrap;}
 .tm-approve-btn:hover{background:#1d4ed8;color:#fff;border-color:#1d4ed8;}
 .tm-approve-btn:disabled{opacity:.5;cursor:not-allowed;}
@@ -16789,12 +16795,20 @@ function renderTrips(trips) {
       '<td>' + approveBtn + '</td>' +
       '</tr>';
   }).join('');
+  var councilTotal = totalTm + totalHoist;
   totalsBar.style.display = 'flex';
+  // Mirror trip-detail / DOS Fare Breakdown: meter claim and hoist are separate lines; council total = both.
   totalsBar.innerHTML =
     '<div class="tm-total-item"><div class="label">Trip Count</div><div class="value">' + trips.length + '</div></div>' +
-    '<div class="tm-total-item"><div class="label">Total Fare</div><div class="value">' + fmtMoney(totalFare) + '</div></div>' +
-    '<div class="tm-total-item"><div class="label">Hoist $ / Uses</div><div class="value" style="color:#1565C0">' + fmtMoney(totalHoist) + ' / ' + totalUses + '</div></div>' +
-    '<div class="tm-total-item"><div class="label">Council claim (%/cap)</div><div class="value" style="color:#0d9488">' + fmtMoney(totalTm) + '</div></div>';
+    '<div class="tm-total-item"><div class="label">Total Fare</div><div class="value">' + fmtMoney(totalFare) + '</div>' +
+      '<div class="hint">Includes hoist portion of fare</div></div>' +
+    '<div class="tm-totals-sep" aria-hidden="true"></div>' +
+    '<div class="tm-total-item"><div class="label">Line 1 — Meter subsidy (%/cap)</div><div class="value" style="color:#0d9488">' + fmtMoney(totalTm) + '</div>' +
+      '<div class="hint">Excludes hoist · not fare × config %</div></div>' +
+    '<div class="tm-total-item tm-total-hoist"><div class="label">Line 2 — Hoist (separate)</div><div class="value">' + fmtMoney(totalHoist) + ' / ' + totalUses + ' use' + (totalUses === 1 ? '' : 's') + '</div>' +
+      '<div class="hint">Not included in Line 1</div></div>' +
+    '<div class="tm-total-item tm-total-council"><div class="label">Council total (meter + hoist)</div><div class="value">' + fmtMoney(councilTotal) + '</div>' +
+      '<div class="hint">Line 1 + Line 2</div></div>';
 }
 function tmSelectedPendingKeys() {
   return Array.prototype.map.call(document.querySelectorAll('.tm-row-check:checked'), function(el) {
