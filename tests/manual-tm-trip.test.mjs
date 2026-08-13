@@ -96,6 +96,16 @@ test('owner TM history page wires manual entry UI + markers', () => {
   assert.match(serverSrc, /manual_owner_created/);
 });
 
+test('manual TM driver dropdown uses canonical driverId not Firebase node key', () => {
+  const start = serverSrc.indexOf('function mtLoadLookups');
+  assert.ok(start >= 0);
+  const end = serverSrc.indexOf('function saveManualTmEntry', start);
+  const chunk = serverSrc.slice(start, end > start ? end : start + 2500);
+  assert.match(chunk, /d\.driverId \|\| d\.id/);
+  assert.match(chunk, /seenDriverIds/);
+  assert.doesNotMatch(chunk, /_mtDrivers\.push\(\{ id: k,/);
+});
+
 test('buildManualBookingId prefixes M', () => {
   assert.match(buildManualBookingId(123), /^M123$/);
 });

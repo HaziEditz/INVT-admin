@@ -17483,17 +17483,23 @@ function mtLoadLookups() {
     var vehicles = res[2] || {};
     var access = res[3] || {};
     _mtDrivers = [];
+    // Canonical fleet id (D001/D002), never Firebase push-key / uid node key — dual-index
+    // drivers/{cid}/-OtZW… and drivers/{cid}/{uid} both carry driverId:"D001".
+    var seenDriverIds = {};
     Object.keys(drivers).forEach(function(k) {
       var d = drivers[k];
       if (!d || typeof d !== 'object') return;
-      if (d.fullName || d.displayName || d.name || d.email || d.driverName) {
-        _mtDrivers.push({ id: k, name: mtDriverLabel(d, k), raw: d });
-      }
+      if (!(d.fullName || d.displayName || d.name || d.email || d.driverName)) return;
+      var canon = String(d.driverId || d.id || '').trim();
+      if (!canon) return; // skip nodes with no fleet id — do not fall back to push-key/uid
+      if (seenDriverIds[canon]) return;
+      seenDriverIds[canon] = true;
+      _mtDrivers.push({ id: canon, name: mtDriverLabel(d, canon), raw: d });
     });
     _mtDrivers.sort(function(a,b){ return a.name.localeCompare(b.name); });
     var dsel = document.getElementById('mt-driver');
     dsel.innerHTML = '<option value="">Select driver…</option>' + _mtDrivers.map(function(d){
-      return '<option value="' + String(d.id).replace(/"/g,'&quot;') + '">' + String(d.name).replace(/</g,'&lt;') + '</option>';
+      return '<option value="' + String(d.id).replace(/"/g,'&quot;') + '">' + String(d.name).replace(/</g,'&lt;') + ' (' + String(d.id).replace(/</g,'&lt;') + ')</option>';
     }).join('');
     _mtVehicles = [];
     Object.keys(vehicles).forEach(function(k) {
