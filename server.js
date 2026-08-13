@@ -17291,7 +17291,7 @@ function isOwnerTmCompletedJob(j) {
 function _tmJobRecordId(k, j) {
   return String((j && (j.bookingId || j.jobId || j.BookingId)) || k);
 }
-function mergeOwnerTmJobMap(completedJobs, closedJobs, statusData) {
+function mergeOwnerTmJobMap(completedJobs, closedJobs, statusData, allbookings) {
   var map = {};
   function absorb(data) {
     if (!data || typeof data !== 'object') return;
@@ -17319,6 +17319,35 @@ function mergeOwnerTmJobMap(completedJobs, closedJobs, statusData) {
       map[id]._key = id;
     });
   }
+  function _fillEmpty(t, key, val) {
+    if (val == null || val === '') return;
+    if (t[key] != null && t[key] !== '') return;
+    t[key] = val;
+  }
+  function _jobSparse(j) {
+    if (!j) return true;
+    var fare = j.TotalFare != null ? j.TotalFare : j.totalFare != null ? j.totalFare : j.fare;
+    return !(fare != null && Number(fare) > 0 && (j.driverId || j.DriverId) && (j.pickup || j.PickAddress || j.pickAddress));
+  }
+  function _fillFromAb(j, ab) {
+    if (!ab) return;
+    _fillEmpty(j, 'driverId', ab.driverId || ab.DriverId);
+    _fillEmpty(j, 'vehicleId', ab.vehicleId || ab.VehicleNo || ab.CallSign);
+    _fillEmpty(j, 'pickup', ab.pickup || ab.PickAddress || ab.pickAddress);
+    _fillEmpty(j, 'PickAddress', ab.PickAddress || ab.pickAddress || ab.pickup);
+    _fillEmpty(j, 'dropoff', ab.dropoff || ab.DropAddress || ab.dropAddress);
+    _fillEmpty(j, 'DropAddress', ab.DropAddress || ab.dropAddress || ab.dropoff);
+    _fillEmpty(j, 'TotalFare', ab.TotalFare != null ? ab.TotalFare : ab.totalFare != null ? ab.totalFare : ab.fare);
+    _fillEmpty(j, 'totalFare', ab.totalFare != null ? ab.totalFare : ab.TotalFare);
+    _fillEmpty(j, 'PaymentType', ab.PaymentType || ab.paymentType);
+    _fillEmpty(j, 'paymentType', ab.paymentType || ab.PaymentType);
+    _fillEmpty(j, 'tmPassengerPays', ab.tmPassengerPays != null ? ab.tmPassengerPays : ab.passengerPays);
+    _fillEmpty(j, 'tmCouncilPays', ab.tmCouncilPays != null ? ab.tmCouncilPays : ab.tmSubsidy);
+    _fillEmpty(j, 'tmSubsidyFare', ab.tmSubsidyFare != null ? ab.tmSubsidyFare : ab.tmCouncilPays);
+    _fillEmpty(j, 'tmCardNumber', ab.tmCardNumber || ab.tmVoucherNo);
+    _fillEmpty(j, 'passengerName', ab.passengerName || ab.PassengerName || ab.tmCardName);
+    if (ab.isTotalMobility || ab.tmUsed) { j.isTotalMobility = true; j.tmUsed = true; }
+  }
   absorb(completedJobs);
   absorb(closedJobs);
   Object.keys(statusData || {}).forEach(function(k) {
@@ -17333,6 +17362,19 @@ function mergeOwnerTmJobMap(completedJobs, closedJobs, statusData) {
     if (st.tmCardNumber && !map[k].tmCardNumber) map[k].tmCardNumber = st.tmCardNumber;
     if (st.submittedAt && map[k].completedAt == null) map[k].completedAt = st.submittedAt;
     map[k]._key = k;
+  });
+  var abRoot = allbookings || {};
+  Object.keys(map).forEach(function(k) {
+    if (!_jobSparse(map[k])) return;
+    _fillFromAb(map[k], abRoot[k] || abRoot[String((map[k] && map[k].bookingId) || '')]);
+    var st = statusData && statusData[k];
+    if (st) {
+      if (st.isTotalMobility) map[k].isTotalMobility = true;
+      _fillEmpty(map[k], 'tmCouncilPays', st.tmCouncilPays != null ? st.tmCouncilPays : st.tmSubsidy);
+      _fillEmpty(map[k], 'tmPassengerPays', st.tmPassengerPays);
+      _fillEmpty(map[k], 'tmSubsidyFare', st.tmSubsidyFare != null ? st.tmSubsidyFare : st.tmCouncilPays);
+      _fillEmpty(map[k], 'tmCardNumber', st.tmCardNumber);
+    }
   });
   return map;
 }
@@ -17356,19 +17398,21 @@ function loadTrips() {
   Promise.all([
     window.adminRead('completedJobs/' + cid),
     window.adminRead('closedJobs/' + cid).catch(function(){ return {}; }),
-    window.adminRead('tmTripStatus/' + cid)
+    window.adminRead('tmTripStatus/' + cid),
+    window.adminRead('allbookings/' + cid).catch(function(){ return {}; })
   ]).then(function(results) {
     var jobsData = results[0] || {};
     var closedData = results[1] || {};
     var statusData = results[2] || {};
+    var allbookingsData = results[3] || {};
     _tripStatuses = statusData;
-    var merged = mergeOwnerTmJobMap(jobsData, closedData, statusData);
+    var merged = mergeOwnerTmJobMap(jobsData, closedData, statusData, allbookingsData);
     var trips = extractTmTrips(merged);
     // If still empty and completedJobs root empty, try joback as a fallback
     if (!trips.length && !Object.keys(jobsData).length && !Object.keys(closedData).length) {
       return window.adminRead('joback',{limitToLast:500}).then(function(allJobs) {
         allJobs = allJobs || {};
-        var fallbackTrips = extractTmTrips(mergeOwnerTmJobMap(allJobs, {}, statusData));
+        var fallbackTrips = extractTmTrips(mergeOwnerTmJobMap(allJobs, {}, statusData, allbookingsData));
         if (fallbackTrips.length) {
           var note = document.getElementById('tm-source-note');
           note.textContent = 'ℹ Data loaded from legacy joback path — no completedJobs/' + cid + ' data found yet.';
