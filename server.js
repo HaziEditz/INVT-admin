@@ -17714,7 +17714,7 @@ function tmUsagePage(companyId) {
   const body = `<div class="page-content"><div class="tm-wrap">
   <div>
     <div class="tm-page-title"><i class="material-icons" style="color:#0d9488;font-size:24px">&#xE8E5;</i>TM Cardholder Usage</div>
-    <div class="tm-page-sub">Per-card / passenger usage with fare, council, passenger remainder, and payment type. Same Insights formulas as council Trips. Custom date range + day/month rollup.</div>
+    <div class="tm-page-sub">Per-card / passenger usage with fare, council, passenger remainder, and how the passenger paid their own share. Same Insights formulas as council Trips. Custom date range + day/month rollup.</div>
   </div>
   <div class="tm-toolbar">
     <label style="font-size:12px;color:#64748b">From <input type="date" id="tu-from" class="tm-select" onchange="tuRender()"/></label>
@@ -17738,8 +17738,7 @@ function tmUsagePage(companyId) {
     <div class="tm-card-hd" id="tu-period-hd">Usage by day</div>
     <div id="tu-period" class="tm-empty">Loading…</div>
   </div>
-</div></div>
-<script src="assets/js/tmUsageAggregate.client.js"></script>`;
+</div></div>`;
 
   const js = `<script>
 var _tuAll = [];
@@ -17772,22 +17771,83 @@ function mergeOwnerTmJobMap(completedJobs, closedJobs, statusData, allbookings) 
     Object.keys(data).forEach(function(k) {
       var j = data[k];
       if (!j || typeof j !== 'object') return;
+      var vals = Object.values(j);
+      var looksNested = vals.length > 0 && vals.every(function(v) {
+        return v !== null && typeof v === 'object' && !Array.isArray(v);
+      });
+      if (looksNested && !(j.paymentType || j.paymentMethod || j.isTotalMobility || j.tmUsed || j.fare != null || j.totalFare != null)) {
+        Object.keys(j).forEach(function(dk) {
+          var inner = j[dk];
+          if (!inner || typeof inner !== 'object') return;
+          var id = _tmJobRecordId(k, inner);
+          if (!map[id]) map[id] = { _key: id };
+          Object.assign(map[id], inner);
+          map[id]._key = id;
+        });
+        return;
+      }
       var id = _tmJobRecordId(k, j);
       if (!map[id]) map[id] = { _key: id };
       Object.assign(map[id], j);
       map[id]._key = id;
     });
   }
+  function _fillEmpty(t, key, val) {
+    if (val == null || val === '') return;
+    if (t[key] != null && t[key] !== '') return;
+    t[key] = val;
+  }
+  function _jobSparse(j) {
+    if (!j) return true;
+    var fare = j.TotalFare != null ? j.TotalFare : j.totalFare != null ? j.totalFare : j.fare;
+    return !(fare != null && Number(fare) > 0 && (j.driverId || j.DriverId) && (j.pickup || j.PickAddress || j.pickAddress));
+  }
+  function _fillFromAb(j, ab) {
+    if (!ab) return;
+    _fillEmpty(j, 'driverId', ab.driverId || ab.DriverId);
+    _fillEmpty(j, 'vehicleId', ab.vehicleId || ab.VehicleNo || ab.CallSign);
+    _fillEmpty(j, 'pickup', ab.pickup || ab.PickAddress || ab.pickAddress);
+    _fillEmpty(j, 'PickAddress', ab.PickAddress || ab.pickAddress || ab.pickup);
+    _fillEmpty(j, 'dropoff', ab.dropoff || ab.DropAddress || ab.dropAddress);
+    _fillEmpty(j, 'DropAddress', ab.DropAddress || ab.dropAddress || ab.dropoff);
+    _fillEmpty(j, 'TotalFare', ab.TotalFare != null ? ab.TotalFare : ab.totalFare != null ? ab.totalFare : ab.fare);
+    _fillEmpty(j, 'totalFare', ab.totalFare != null ? ab.totalFare : ab.TotalFare);
+    _fillEmpty(j, 'PaymentType', ab.PaymentType || ab.paymentType);
+    _fillEmpty(j, 'paymentType', ab.paymentType || ab.PaymentType);
+    _fillEmpty(j, 'tmPassengerPays', ab.tmPassengerPays != null ? ab.tmPassengerPays : ab.passengerPays);
+    _fillEmpty(j, 'tmCouncilPays', ab.tmCouncilPays != null ? ab.tmCouncilPays : ab.tmSubsidy);
+    _fillEmpty(j, 'tmSubsidyFare', ab.tmSubsidyFare != null ? ab.tmSubsidyFare : ab.tmCouncilPays);
+    _fillEmpty(j, 'tmCardNumber', ab.tmCardNumber || ab.tmVoucherNo);
+    _fillEmpty(j, 'passengerName', ab.passengerName || ab.PassengerName || ab.tmCardName);
+    if (ab.isTotalMobility || ab.tmUsed) { j.isTotalMobility = true; j.tmUsed = true; }
+  }
   absorb(completedJobs);
   absorb(closedJobs);
-  absorb(allbookings);
   Object.keys(statusData || {}).forEach(function(k) {
     var st = statusData[k];
     if (!st || typeof st !== 'object') return;
-    var id = _tmJobRecordId(k, st);
-    if (!map[id]) map[id] = { _key: id };
-    Object.assign(map[id], st);
-    map[id]._key = id;
+    if (!map[k]) map[k] = { _key: k };
+    if (st.status) map[k].tmStatus = st.status;
+    if (st.councilId && !map[k].councilId) map[k].councilId = st.councilId;
+    if (st.isTotalMobility) map[k].isTotalMobility = true;
+    if (st.tmCouncilPays != null && map[k].tmCouncilPays == null) map[k].tmCouncilPays = st.tmCouncilPays;
+    if (st.tmPassengerPays != null && map[k].tmPassengerPays == null) map[k].tmPassengerPays = st.tmPassengerPays;
+    if (st.tmCardNumber && !map[k].tmCardNumber) map[k].tmCardNumber = st.tmCardNumber;
+    if (st.submittedAt && map[k].completedAt == null) map[k].completedAt = st.submittedAt;
+    map[k]._key = k;
+  });
+  var abRoot = allbookings || {};
+  Object.keys(map).forEach(function(k) {
+    if (!_jobSparse(map[k])) return;
+    _fillFromAb(map[k], abRoot[k] || abRoot[String((map[k] && map[k].bookingId) || '')]);
+    var st = statusData && statusData[k];
+    if (st) {
+      if (st.isTotalMobility) map[k].isTotalMobility = true;
+      _fillEmpty(map[k], 'tmCouncilPays', st.tmCouncilPays != null ? st.tmCouncilPays : st.tmSubsidy);
+      _fillEmpty(map[k], 'tmPassengerPays', st.tmPassengerPays);
+      _fillEmpty(map[k], 'tmSubsidyFare', st.tmSubsidyFare != null ? st.tmSubsidyFare : st.tmCouncilPays);
+      _fillEmpty(map[k], 'tmCardNumber', st.tmCardNumber);
+    }
   });
   return map;
 }
@@ -17809,7 +17869,7 @@ function tuEsc(s) {
 function tuUsageTable(rows) {
   var U = window.TmUsageAggregate;
   if (!rows || !rows.length) return '<div class="tm-empty">No data for this selection.</div>';
-  return '<table class="tm-table"><thead><tr><th>Name</th><th>Trips</th><th>Fare $</th><th>Council $</th><th>Pax $</th><th>Pay type</th><th>Hoist $</th></tr></thead><tbody>' +
+  return '<table class="tm-table"><thead><tr><th>Name</th><th>Trips</th><th>Fare $</th><th>Council $</th><th>Pax $</th><th>Passenger paid via</th><th>Hoist $</th></tr></thead><tbody>' +
     rows.map(function(r) {
       return '<tr><td>' + tuEsc(r.label) + '</td><td>' + r.trips + '</td><td>$' + (r.meterFare||0).toFixed(2) +
         '</td><td>$' + (r.councilPays||0).toFixed(2) + '</td><td>$' + (r.passengerPays||0).toFixed(2) +
@@ -17820,7 +17880,7 @@ function tuUsageTable(rows) {
 function tuPeriodTable(rows) {
   var U = window.TmUsageAggregate;
   if (!rows || !rows.length) return '<div class="tm-empty">No data for this selection.</div>';
-  return '<table class="tm-table"><thead><tr><th>Period</th><th>Trips</th><th>Fare $</th><th>Council $</th><th>Pax $</th><th>Pay type</th><th>Hoist $</th><th>Hoist uses</th></tr></thead><tbody>' +
+  return '<table class="tm-table"><thead><tr><th>Period</th><th>Trips</th><th>Fare $</th><th>Council $</th><th>Pax $</th><th>Passenger paid via</th><th>Hoist $</th><th>Hoist uses</th></tr></thead><tbody>' +
     rows.map(function(r) {
       return '<tr><td>' + tuEsc(r.key) + '</td><td>' + r.trips + '</td><td>$' + (r.meterFare||0).toFixed(2) +
         '</td><td>$' + (r.councilPays||0).toFixed(2) + '</td><td>$' + (r.passengerPays||0).toFixed(2) +
@@ -17881,7 +17941,11 @@ function tuLoad() {
 window._fbOnLogin = function(){ tuLoad(); };
 if (window.COMPANY_ID) tuLoad();
 <\/script>`;
-  return pageWrap(commonHead('TM Cardholder Usage', css), body, commonScripts(js));
+  return pageWrap(
+    commonHead('TM Cardholder Usage', css),
+    body,
+    commonScripts('<script src="assets/js/tmUsageAggregate.client.js"></script>' + js),
+  );
 }
 
 function tmBatchesPage(companyId) {

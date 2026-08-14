@@ -25,7 +25,8 @@ test('owner usage page uses shared aggregate + day/month + fare columns', () => 
   assert.match(serverSrc, /aggregateTripUsage/);
   assert.match(serverSrc, /Fare \$/);
   assert.match(serverSrc, /Pax \$/);
-  assert.match(serverSrc, /Pay type/);
+  assert.match(serverSrc, /Passenger paid via/);
+  assert.doesNotMatch(serverSrc, />Pay type</);
   assert.ok(
     existsSync(join(root, 'taxitime.co.nz/owner/assets/js/tmUsageAggregate.client.js')),
   );
