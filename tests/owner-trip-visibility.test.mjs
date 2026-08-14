@@ -146,9 +146,17 @@ test('server.js wires TM merge sources + shared detection', () => {
   // Dashboard Total TM Trips uses same merge scope as Cardholder Usage
   assert.match(src, /Total TM Trips/);
   assert.match(src, /_dashMergeTm/);
+  assert.match(src, /_dashLoadTrees/);
+  assert.match(src, /DASH_TREE_TTL_MS/);
+  assert.match(src, /pJobStats/);
   assert.match(src, /completed \+ closed \+ status/);
   assert.match(src, /TM_Usage\.aspx/);
   assert.match(src, /function _dashIsTm/);
+  // Single shared tree fetch — no parallel double completedJobs in totals
+  assert.doesNotMatch(
+    src,
+    /var pCompleted = window\.adminRead\('completedJobs\/' \+ cid\)[\s\S]{0,800}var pTm = Promise\.all\(\[\s*window\.adminRead\('completedJobs/,
+  );
   // Total Mobility Jobs report uses economics markers + JobCompleteTime for _ts
   assert.match(src, /Same detection as TM Trip History/);
   assert.match(src, /JobCompleteTime\|\|j\.jobCompleteTime/);

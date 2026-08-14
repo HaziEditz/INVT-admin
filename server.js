@@ -3081,21 +3081,57 @@ function startListeners() {
     .finally(function(){ if (btn) { btn.disabled = false; btn.innerHTML = '<i class="material-icons" style="font-size:12px;vertical-align:middle">&#xE872;</i> Prune'; } });
   };
 
-  // 4. Today's completed jobs + revenue — reads completedJobs/{cid}, filters by today's NZ date
+  // ── Dashboard tree cache ───────────────────────────────────────────────────
+  // completedJobs / closedJobs / allbookings are multi-MB. Polling them every 60–120s
+  // burned ~GB/day per open tab. One shared fetch + TTL; timers only re-paint from cache.
+  var DASH_TREE_TTL_MS = 5 * 60 * 1000;
+  var _dashTreeCache = { at: 0, cid: '', completed: null, closed: null, status: null, allbookings: null, inflight: null };
+  function _dashLoadTrees() {
+    var cid = String(COMPANY_ID || '');
+    if (!cid) return Promise.resolve(_dashTreeCache);
+    if (
+      _dashTreeCache.cid === cid &&
+      _dashTreeCache.at &&
+      Date.now() - _dashTreeCache.at < DASH_TREE_TTL_MS &&
+      _dashTreeCache.completed
+    ) {
+      return Promise.resolve(_dashTreeCache);
+    }
+    if (_dashTreeCache.inflight && _dashTreeCache.cid === cid) return _dashTreeCache.inflight;
+    _dashTreeCache.cid = cid;
+    _dashTreeCache.inflight = Promise.all([
+      window.adminRead('completedJobs/' + cid),
+      window.adminRead('closedJobs/' + cid).catch(function(){ return {}; }),
+      window.adminRead('tmTripStatus/' + cid).catch(function(){ return {}; }),
+      window.adminRead('allbookings/' + cid).catch(function(){ return {}; })
+    ]).then(function(results) {
+      _dashTreeCache.at = Date.now();
+      _dashTreeCache.completed = results[0] || {};
+      _dashTreeCache.closed = results[1] || {};
+      _dashTreeCache.status = results[2] || {};
+      _dashTreeCache.allbookings = results[3] || {};
+      _dashTreeCache.inflight = null;
+      return _dashTreeCache;
+    }).catch(function(err) {
+      _dashTreeCache.inflight = null;
+      throw err;
+    });
+    return _dashTreeCache.inflight;
+  }
+
+  // 4. Today's completed jobs + revenue — uses shared tree cache (not a fresh full download)
   function _loadTodayStats() {
     var NZ_TZ = window.COMPANY_TZ || 'Pacific/Auckland';
-    // Today's date in company tz, as "YYYY-MM-DD"
     var todayStr;
     try {
       var fmt = new Intl.DateTimeFormat('en-CA', { timeZone: NZ_TZ, year:'numeric', month:'2-digit', day:'2-digit' });
-      todayStr = fmt.format(new Date()); // en-CA → "YYYY-MM-DD"
+      todayStr = fmt.format(new Date());
     } catch(e) { todayStr = new Date().toISOString().slice(0,10); }
 
     function _ts(j) {
       var v = j.completedAt || j.completedAt_ISO || j.CompletedAt || j.completedat || j.endTime || j.EndTime || j.timestamp;
       if (!v) return 0;
       if (typeof v === 'number') {
-        // Detect epoch seconds (10 digits, ~1970-2286 range) and promote to ms
         return v < 1e12 ? v * 1000 : v;
       }
       var t = Date.parse(v);
@@ -3112,17 +3148,11 @@ function startListeners() {
       var n = parseFloat(v);
       return isNaN(n) ? 0 : n;
     }
-    function _fmtTime(ms) {
-      if (!ms) return '—';
-      try {
-        return new Intl.DateTimeFormat('en-NZ', { timeZone: NZ_TZ, hour:'2-digit', minute:'2-digit', hour12:false }).format(new Date(ms));
-      } catch(e) { return ''; }
-    }
 
     window.loadCardSettings().then(function() {
-      return window.adminRead('completedJobs/' + COMPANY_ID);
-    }).then(function(data) {
-      data = data || {};
+      return _dashLoadTrees();
+    }).then(function(cache) {
+      var data = cache.completed || {};
       var today = [];
       Object.keys(data).forEach(function(bid) {
         var inner = data[bid];
@@ -3160,7 +3190,8 @@ function startListeners() {
     });
   }
   _loadTodayStats();
-  setInterval(_loadTodayStats, 60000); // refresh every minute
+  // UI may refresh often; network download only when DASH_TREE_TTL_MS expires.
+  setInterval(_loadTodayStats, 60000);
 
   // ── Upcoming bookings widget (today's scheduled rides) ───────────────────
   function _dashSrScheduledAt(job) {
@@ -3174,8 +3205,8 @@ function startListeners() {
   function _loadUpcomingBookings() {
     var cid = COMPANY_ID;
     if (!cid) return;
-    window.adminRead('allbookings/' + cid).then(function(data) {
-      data = data || {};
+    _dashLoadTrees().then(function(cache) {
+      var data = cache.allbookings || {};
       var todayStr;
       try {
         todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: NZ_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
@@ -3293,43 +3324,7 @@ function startListeners() {
       zones:      _shallowCount('zones/' + cid)
     };
 
-    // completedJobs — cancelled / channel / payment counts (completedJobs-only is intentional here)
-    var pCompleted = window.adminRead('completedJobs/' + cid).then(function(data) {
-      data = data || {};
-      var totals = { completed:0, cancelled:0, pasapp:0, website:0, cardpay:0 };
-      var seen = {};
-      Object.keys(data).forEach(function(bid) {
-        var inner = data[bid];
-        if (!inner || typeof inner !== 'object') return;
-        // Match _loadTodayStats: include lowercase + legacy field variants so mixed-shape nodes
-        // (scalar fields + nested driver subrecords) are correctly identified as flat and not double-counted.
-        var hasFlatId = (typeof inner.BookingId === 'string' || typeof inner.bookingId === 'string' ||
-                         typeof inner.bookingid === 'string' || typeof inner.DriverId === 'string' ||
-                         typeof inner.driverId === 'string' || typeof inner.driverid === 'string' ||
-                         typeof inner.completedAt !== 'undefined' || typeof inner.completedAt_ISO !== 'undefined' ||
-                         typeof inner.completedat !== 'undefined');
-        var entries = Object.values(inner);
-        var isFlat = hasFlatId || (entries.length > 0 && entries.every(function(v){ return v === null || typeof v !== 'object'; }));
-        var jobs = isFlat ? [inner] : entries.filter(function(v){ return v && typeof v === 'object'; });
-        jobs.forEach(function(j) {
-          // Hard-dedupe: a single bookingId+driverId+completedAt should only count once
-          var dedupeKey = bid + '|' + (j.DriverId || j.driverId || j.driverid || '') + '|' + (j.completedAt || j.completedAt_ISO || j.completedat || '');
-          if (seen[dedupeKey]) return;
-          seen[dedupeKey] = 1;
-          var status = String(j.status || j.Status || 'completed').toLowerCase();
-          if (status.indexOf('cancel') !== -1) { totals.cancelled++; return; }
-          totals.completed++;
-          var src = String(j.source || j.bookingSource || j.BookingSource || j.via || j.Via || '').toLowerCase();
-          if (src.indexOf('passenger') !== -1 || src.indexOf('app') !== -1) totals.pasapp++;
-          if (src.indexOf('web') !== -1 || src === 'website' || src.indexOf('website') !== -1) totals.website++;
-          var pm = String(j.paymentType || j.PaymentMethod || j.payment || '').toLowerCase();
-          if (pm.indexOf('card') !== -1 || pm.indexOf('stripe') !== -1) totals.cardpay++;
-        });
-      });
-      return totals;
-    }).catch(function(){ return { completed:0, cancelled:0, pasapp:0, website:0, cardpay:0 }; });
-
-    // Total TM Trips — same broader merge as Cardholder Usage (completed + closed + tmTripStatus + allbookings)
+    // Job/TM/channel counts from ONE shared tree cache (no double completedJobs download).
     function _dashIsTm(job) {
       if (!job || typeof job !== 'object') return false;
       if (job.isTotalMobility === true || job.tmUsed === true) return true;
@@ -3406,17 +3401,45 @@ function startListeners() {
       });
       return map;
     }
-    var pTm = Promise.all([
-      window.adminRead('completedJobs/' + cid),
-      window.adminRead('closedJobs/' + cid).catch(function(){ return {}; }),
-      window.adminRead('tmTripStatus/' + cid).catch(function(){ return {}; }),
-      window.adminRead('allbookings/' + cid).catch(function(){ return {}; })
-    ]).then(function(results) {
-      var map = _dashMergeTm(results[0] || {}, results[1] || {}, results[2] || {}, results[3] || {});
-      var n = 0;
-      Object.keys(map).forEach(function(k) { if (_dashIsTm(map[k])) n++; });
-      return n;
-    }).catch(function(){ return 0; });
+    function _dashCountCompletedChannels(data) {
+      var totals = { completed:0, cancelled:0, pasapp:0, website:0, cardpay:0 };
+      var seen = {};
+      Object.keys(data || {}).forEach(function(bid) {
+        var inner = data[bid];
+        if (!inner || typeof inner !== 'object') return;
+        var hasFlatId = (typeof inner.BookingId === 'string' || typeof inner.bookingId === 'string' ||
+                         typeof inner.bookingid === 'string' || typeof inner.DriverId === 'string' ||
+                         typeof inner.driverId === 'string' || typeof inner.driverid === 'string' ||
+                         typeof inner.completedAt !== 'undefined' || typeof inner.completedAt_ISO !== 'undefined' ||
+                         typeof inner.completedat !== 'undefined');
+        var entries = Object.values(inner);
+        var isFlat = hasFlatId || (entries.length > 0 && entries.every(function(v){ return v === null || typeof v !== 'object'; }));
+        var jobs = isFlat ? [inner] : entries.filter(function(v){ return v && typeof v === 'object'; });
+        jobs.forEach(function(j) {
+          var dedupeKey = bid + '|' + (j.DriverId || j.driverId || j.driverid || '') + '|' + (j.completedAt || j.completedAt_ISO || j.completedat || '');
+          if (seen[dedupeKey]) return;
+          seen[dedupeKey] = 1;
+          var status = String(j.status || j.Status || 'completed').toLowerCase();
+          if (status.indexOf('cancel') !== -1) { totals.cancelled++; return; }
+          totals.completed++;
+          var src = String(j.source || j.bookingSource || j.BookingSource || j.via || j.Via || '').toLowerCase();
+          if (src.indexOf('passenger') !== -1 || src.indexOf('app') !== -1) totals.pasapp++;
+          if (src.indexOf('web') !== -1 || src === 'website' || src.indexOf('website') !== -1) totals.website++;
+          var pm = String(j.paymentType || j.PaymentMethod || j.payment || '').toLowerCase();
+          if (pm.indexOf('card') !== -1 || pm.indexOf('stripe') !== -1) totals.cardpay++;
+        });
+      });
+      return totals;
+    }
+    var pJobStats = _dashLoadTrees().then(function(cache) {
+      var cj = _dashCountCompletedChannels(cache.completed);
+      var map = _dashMergeTm(cache.completed, cache.closed, cache.status, cache.allbookings);
+      var tm = 0;
+      Object.keys(map).forEach(function(k) { if (_dashIsTm(map[k])) tm++; });
+      return { cj: cj, tm: tm };
+    }).catch(function(){
+      return { cj: { completed:0, cancelled:0, pasapp:0, website:0, cardpay:0 }, tm: 0 };
+    });
 
     // Billing — companySettings plan (Dispatch reads this); fallback subscriptions/{cid}
     var pSubs = Promise.all([
@@ -3461,30 +3484,31 @@ function startListeners() {
 
     // Resolve everything and paint
     Promise.all([
-      pCompleted, pTm, pSubs, pAccHail,
+      pJobStats, pSubs, pAccHail,
       shallows.customers, shallows.baccounts, shallows.accclients,
       shallows.drivers, shallows.vehicles, shallows.food, shallows.freight, shallows.zones
     ]).then(function(r) {
-      var cj = r[0], tmCount = r[1], subs = r[2], accHail = r[3];
+      var jobStats = r[0], subs = r[1], accHail = r[2];
+      var cj = jobStats.cj || {};
       var counts = {
         completed: cj.completed,
         cancelled: cj.cancelled,
-        tm: tmCount,
+        tm: jobStats.tm,
         tmScope: 'completed + closed + status',
         acchail: accHail,
-        customers: r[4],
-        baccounts: r[5],
-        accclients: r[6],
+        customers: r[3],
+        baccounts: r[4],
+        accclients: r[5],
         nextBill: subs.nextBill,
         billPlan: subs.billPlan,
         pasapp: cj.pasapp,
         website: cj.website,
-        food: r[9],
-        freight: r[10],
-        drivers: r[7],
-        vehicles: r[8],
+        food: r[8],
+        freight: r[9],
+        drivers: r[6],
+        vehicles: r[7],
         cardpay: cj.cardpay,
-        zones: r[11]
+        zones: r[10]
       };
       function paint(target, defs) {
         var html = defs.map(function(d) {
@@ -3510,7 +3534,8 @@ function startListeners() {
     });
   }
   _loadTotals();
-  setInterval(_loadTotals, 120000); // refresh every 2 minutes
+  // Timers may fire often; DASH_TREE_TTL_MS (5 min) gates actual Firebase downloads.
+  setInterval(_loadTotals, 120000);
 
   // 5. Load driver profiles for name lookups (drivers/{companyId})
   fbDB.ref('drivers/' + COMPANY_ID).once('value').then(function(snap) {
