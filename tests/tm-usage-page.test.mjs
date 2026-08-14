@@ -30,4 +30,15 @@ test('owner usage page uses shared aggregate + day/month + fare columns', () => 
   assert.ok(
     existsSync(join(root, 'taxitime.co.nz/owner/assets/js/tmUsageAggregate.client.js')),
   );
+  const agg = readFileSync(
+    join(root, 'taxitime.co.nz/owner/assets/js/tmUsageAggregate.client.js'),
+    'utf8',
+  );
+  assert.match(agg, /function preferPassengerLabel/);
+  assert.match(agg, /tripPassengerIdentity/);
+  assert.match(agg, /row\.label = preferPassengerLabel/);
+});
+
+test('flattenJoback includes JobCompleteTime for report date filters', () => {
+  assert.match(serverSrc, /JobCompleteTime\|\|j\.jobCompleteTime\|\|j\.newcompelete/);
 });

@@ -113,7 +113,26 @@
   }
 
   function tripPassengerLabel(t) {
-    return String((t && (t.tmPassengerName || t.passengerName || t.tmCardName || t.cardholderName)) || '').trim() || '—';
+    return String((t && (t.tmCardName || t.tmPassengerName || t.passengerName || t.cardholderName)) || '').trim() || '—';
+  }
+
+  /** Prefer the more complete display name (more tokens, then longer). Blank never wins. */
+  function preferPassengerLabel(a, b) {
+    var aa = String(a || '').trim();
+    var bb = String(b || '').trim();
+    if (!aa || aa === '—') return bb || '—';
+    if (!bb || bb === '—') return aa;
+    var aParts = aa.split(/\s+/).filter(Boolean).length;
+    var bParts = bb.split(/\s+/).filter(Boolean).length;
+    if (bParts !== aParts) return bParts > aParts ? bb : aa;
+    return bb.length > aa.length ? bb : aa;
+  }
+
+  function tripPassengerIdentity(t) {
+    var label = tripPassengerLabel(t);
+    var card = tripCardKey(t);
+    if (card && card !== '—') return { key: 'card:' + String(card).toLowerCase(), label: label };
+    return { key: 'name:' + String(label).toLowerCase(), label: label };
   }
 
   function tripDriverKey(t) {
@@ -178,7 +197,7 @@
     row.passengerPays += amounts.passengerPays;
     row.hoistPays += amounts.hoistPays;
     bumpPayType(row.payByType, amounts.payMethod, amounts.passengerPays);
-    if (label) row.label = label;
+    if (label) row.label = preferPassengerLabel(row.label, label);
   }
 
   function sortBuckets(map, limit) {
@@ -223,7 +242,8 @@
       bumpUsage(cards, card, cardLabel, amounts);
       bumpUsage(drivers, tripDriverKey(t), tripDriverKey(t), amounts);
       bumpUsage(vehicles, tripVehicleKey(t), tripVehicleKey(t), amounts);
-      bumpUsage(passengers, paxLabel + '|' + card, paxLabel === '—' ? card : paxLabel, amounts);
+      var passenger = tripPassengerIdentity(t);
+      bumpUsage(passengers, passenger.key, passenger.label, amounts);
     });
     return {
       byCard: sortBuckets(cards, lim),
@@ -300,6 +320,7 @@
     passengerPaysOf: passengerPaysOf,
     normalizeTripPayMethod: normalizeTripPayMethod,
     formatPayByType: formatPayByType,
+    preferPassengerLabel: preferPassengerLabel,
     tripDayKey: tripDayKey,
     tripMonthKeyNz: tripMonthKeyNz,
     aggregateTripUsage: aggregateTripUsage,

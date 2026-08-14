@@ -3252,7 +3252,8 @@ function startListeners() {
     var jobDefs = [
       { key:'completed',  label:'Total Completed',  href:'ClosedJobsReports.aspx' },
       { key:'cancelled',  label:'Total Cancelled',  href:'ClosedJobsReports.aspx' },
-      { key:'tm',         label:'Total TM Trips',   href:'TMTrips.aspx' },
+      // Same merge scope as Cardholder Usage / TM Trip History (not completedJobs-only).
+      { key:'tm',         label:'Total TM Trips',   href:'TM_Usage.aspx', subKey:'tmScope' },
       { key:'acchail',    label:'ACC Hail Trips',   href:'ACCBilling.aspx' }
     ];
     var acctDefs = [
@@ -3292,10 +3293,10 @@ function startListeners() {
       zones:      _shallowCount('zones/' + cid)
     };
 
-    // completedJobs — need full read for cancelled/TM breakdown + channel + payment counts
+    // completedJobs — cancelled / channel / payment counts (completedJobs-only is intentional here)
     var pCompleted = window.adminRead('completedJobs/' + cid).then(function(data) {
       data = data || {};
-      var totals = { completed:0, cancelled:0, tm:0, pasapp:0, website:0, cardpay:0 };
+      var totals = { completed:0, cancelled:0, pasapp:0, website:0, cardpay:0 };
       var seen = {};
       Object.keys(data).forEach(function(bid) {
         var inner = data[bid];
@@ -3318,20 +3319,6 @@ function startListeners() {
           var status = String(j.status || j.Status || 'completed').toLowerCase();
           if (status.indexOf('cancel') !== -1) { totals.cancelled++; return; }
           totals.completed++;
-          // Align with TM Trip History / council: economics markers, not bookingType alone.
-          if ((function(job){
-            if (!job || typeof job !== 'object') return false;
-            if (job.isTotalMobility === true || job.tmUsed === true) return true;
-            var pt = String(job.paymentType || job.payment_type || job.PaymentType || job.paymentMethod || '')
-              .toLowerCase().replace(/[_\s-]/g, '');
-            if (pt === 'totalmobility' || pt === 'tm') return true;
-            if (job.tmPaymentType === 'total_mobility' || job.paymentCategory === 'total_mobility') return true;
-            if (job.tmCouncilPays != null || job.councilPays != null || job.tmSubsidyFare != null || job.tmSubsidy != null) return true;
-            if (job.tmCardNumber || job.tmVoucherNo) return true;
-            if (Array.isArray(job.tmHoists) && job.tmHoists.length > 0) return true;
-            var bt = String(job.bookingType || job.jobType || job.JobType || '').toLowerCase();
-            return bt.indexOf('tm') !== -1 || bt.indexOf('mobility') !== -1;
-          })(j)) totals.tm++;
           var src = String(j.source || j.bookingSource || j.BookingSource || j.via || j.Via || '').toLowerCase();
           if (src.indexOf('passenger') !== -1 || src.indexOf('app') !== -1) totals.pasapp++;
           if (src.indexOf('web') !== -1 || src === 'website' || src.indexOf('website') !== -1) totals.website++;
@@ -3340,7 +3327,96 @@ function startListeners() {
         });
       });
       return totals;
-    }).catch(function(){ return { completed:0, cancelled:0, tm:0, pasapp:0, website:0, cardpay:0 }; });
+    }).catch(function(){ return { completed:0, cancelled:0, pasapp:0, website:0, cardpay:0 }; });
+
+    // Total TM Trips — same broader merge as Cardholder Usage (completed + closed + tmTripStatus + allbookings)
+    function _dashIsTm(job) {
+      if (!job || typeof job !== 'object') return false;
+      if (job.isTotalMobility === true || job.tmUsed === true) return true;
+      var pt = String(job.paymentType || job.payment_type || job.PaymentType || job.paymentMethod || '')
+        .toLowerCase().replace(/[_\s-]/g, '');
+      if (pt === 'totalmobility' || pt === 'tm') return true;
+      if (job.tmPaymentType === 'total_mobility' || job.paymentCategory === 'total_mobility') return true;
+      if (job.tmCouncilPays != null || job.councilPays != null || job.tmSubsidyFare != null || job.tmSubsidy != null) return true;
+      if (job.tmCardNumber || job.tmVoucherNo) return true;
+      if (Array.isArray(job.tmHoists) && job.tmHoists.length > 0) return true;
+      var bt = String(job.bookingType || job.jobType || job.JobType || '').toLowerCase();
+      return bt.indexOf('tm') !== -1 || bt.indexOf('mobility') !== -1;
+    }
+    function _dashTmId(k, j) {
+      return String((j && (j.bookingId || j.jobId || j.BookingId)) || k);
+    }
+    function _dashMergeTm(completedJobs, closedJobs, statusData, allbookings) {
+      var map = {};
+      function absorb(data) {
+        if (!data || typeof data !== 'object') return;
+        Object.keys(data).forEach(function(k) {
+          var j = data[k];
+          if (!j || typeof j !== 'object') return;
+          var vals = Object.values(j);
+          var looksNested = vals.length > 0 && vals.every(function(v) {
+            return v !== null && typeof v === 'object' && !Array.isArray(v);
+          });
+          if (looksNested && !(j.paymentType || j.paymentMethod || j.isTotalMobility || j.tmUsed || j.fare != null || j.totalFare != null)) {
+            Object.keys(j).forEach(function(dk) {
+              var inner = j[dk];
+              if (!inner || typeof inner !== 'object') return;
+              var id = _dashTmId(k, inner);
+              if (!map[id]) map[id] = { _key: id };
+              Object.assign(map[id], inner);
+              map[id]._key = id;
+            });
+            return;
+          }
+          var id = _dashTmId(k, j);
+          if (!map[id]) map[id] = { _key: id };
+          Object.assign(map[id], j);
+          map[id]._key = id;
+        });
+      }
+      absorb(completedJobs);
+      absorb(closedJobs);
+      Object.keys(statusData || {}).forEach(function(k) {
+        var st = statusData[k];
+        if (!st || typeof st !== 'object') return;
+        if (!map[k]) map[k] = { _key: k };
+        if (st.isTotalMobility) map[k].isTotalMobility = true;
+        if (st.tmCardNumber && !map[k].tmCardNumber) map[k].tmCardNumber = st.tmCardNumber;
+        if (st.tmCouncilPays != null && map[k].tmCouncilPays == null) map[k].tmCouncilPays = st.tmCouncilPays;
+        if (st.tmSubsidyFare != null && map[k].tmSubsidyFare == null) map[k].tmSubsidyFare = st.tmSubsidyFare;
+        if (st.tmVoucherNo && !map[k].tmVoucherNo) map[k].tmVoucherNo = st.tmVoucherNo;
+        map[k]._key = k;
+      });
+      var abRoot = allbookings || {};
+      Object.keys(map).forEach(function(k) {
+        var j = map[k];
+        if (!j) return;
+        var fare = j.TotalFare != null ? j.TotalFare : j.totalFare != null ? j.totalFare : j.fare;
+        var sparse = !(fare != null && Number(fare) > 0 && (j.driverId || j.DriverId) && (j.pickup || j.PickAddress || j.pickAddress));
+        if (!sparse) return;
+        var ab = abRoot[k] || abRoot[String(j.bookingId || '')];
+        if (!ab) return;
+        if (ab.isTotalMobility || ab.tmUsed) { j.isTotalMobility = true; j.tmUsed = true; }
+        if (!j.tmCardNumber && (ab.tmCardNumber || ab.tmVoucherNo)) j.tmCardNumber = ab.tmCardNumber || ab.tmVoucherNo;
+        if (j.tmCouncilPays == null && (ab.tmCouncilPays != null || ab.tmSubsidy != null)) {
+          j.tmCouncilPays = ab.tmCouncilPays != null ? ab.tmCouncilPays : ab.tmSubsidy;
+        }
+        if (j.tmSubsidyFare == null && ab.tmSubsidyFare != null) j.tmSubsidyFare = ab.tmSubsidyFare;
+        if (!j.paymentType && (ab.paymentType || ab.PaymentType)) j.paymentType = ab.paymentType || ab.PaymentType;
+      });
+      return map;
+    }
+    var pTm = Promise.all([
+      window.adminRead('completedJobs/' + cid),
+      window.adminRead('closedJobs/' + cid).catch(function(){ return {}; }),
+      window.adminRead('tmTripStatus/' + cid).catch(function(){ return {}; }),
+      window.adminRead('allbookings/' + cid).catch(function(){ return {}; })
+    ]).then(function(results) {
+      var map = _dashMergeTm(results[0] || {}, results[1] || {}, results[2] || {}, results[3] || {});
+      var n = 0;
+      Object.keys(map).forEach(function(k) { if (_dashIsTm(map[k])) n++; });
+      return n;
+    }).catch(function(){ return 0; });
 
     // Billing — companySettings plan (Dispatch reads this); fallback subscriptions/{cid}
     var pSubs = Promise.all([
@@ -3385,29 +3461,30 @@ function startListeners() {
 
     // Resolve everything and paint
     Promise.all([
-      pCompleted, pSubs, pAccHail,
+      pCompleted, pTm, pSubs, pAccHail,
       shallows.customers, shallows.baccounts, shallows.accclients,
       shallows.drivers, shallows.vehicles, shallows.food, shallows.freight, shallows.zones
     ]).then(function(r) {
-      var cj = r[0], subs = r[1], accHail = r[2];
+      var cj = r[0], tmCount = r[1], subs = r[2], accHail = r[3];
       var counts = {
         completed: cj.completed,
         cancelled: cj.cancelled,
-        tm: cj.tm,
+        tm: tmCount,
+        tmScope: 'completed + closed + status',
         acchail: accHail,
-        customers: r[3],
-        baccounts: r[4],
-        accclients: r[5],
+        customers: r[4],
+        baccounts: r[5],
+        accclients: r[6],
         nextBill: subs.nextBill,
         billPlan: subs.billPlan,
         pasapp: cj.pasapp,
         website: cj.website,
-        food: r[8],
-        freight: r[9],
-        drivers: r[6],
-        vehicles: r[7],
+        food: r[9],
+        freight: r[10],
+        drivers: r[7],
+        vehicles: r[8],
         cardpay: cj.cardpay,
-        zones: r[10]
+        zones: r[11]
       };
       function paint(target, defs) {
         var html = defs.map(function(d) {
@@ -12647,7 +12724,11 @@ function flattenJoback(data){
       // (e.g. "2026-05-16T14:17:39.201Z") without the _ISO companion field, so the previous
       // typeof==='number' guard silently dropped them — today's dispatch jobs ended up with
       // ts=0 and showed up dateless / unsorted in the Closed Jobs report.
-      var rawTs=j.completedAt_ISO||j.CompletedAt_ISO||j.startedAt_ISO||j.StartedAt_ISO
+      // JobCompleteTime is a first-class completion stamp (closedJobs / offline sync).
+      // Omitting it left rows with only JobCompleteTime at _ts=0, so date filters dropped them.
+      var rawTs=j.completedAt_ISO||j.CompletedAt_ISO
+               ||j.JobCompleteTime||j.jobCompleteTime||j.newcompelete
+               ||j.startedAt_ISO||j.StartedAt_ISO
                ||j.ArrivedAt||j.arrivedAt||j.createdAt_ISO
                ||j.dateTimeISO||j.dateTime_ISO||j.dateTime||j.DateTime
                ||j.timestamp||j.Timestamp||j.createdAt
@@ -12687,7 +12768,7 @@ function flattenJoback(data){
         taxiNum:       ss(vInfo.taxiNumber,'—'),
         makeModel:     ([vInfo.make,vInfo.model].filter(Boolean).join(' '))||'—',
         phoneNo:       ss(j.PhoneNo||j.phoneNo||j.phone||j.Phone,'—'),
-        passengerName: ss(j.passengerName||j.PassengerName||j.customerName||j.CustomerName||j.passenger,'—'),
+        passengerName: ss(j.passengerName||j.PassengerName||j.tmCardName||j.tmPassengerName||j.customerName||j.CustomerName||j.passenger,'—'),
         pickup:        ss(j.pickup||j.Pickup||j.pickupAddress||j.PickupAddress||j.from||j.From||j.origin,'—'),
         destination:   ss(j.destination||j.Destination||j.dropAddress||j.DropAddress||j.dropoff||j.Dropoff||j.to||j.To||j.dest,'—'),
         distance:      distStr,
@@ -12709,8 +12790,8 @@ function flattenJoback(data){
         zone:          (function(){var raw=j.zoneId||j.ZoneId||j.zone||j.Zone;if(!raw)return'—';var k=String(raw).trim();return _zonesLookup[k]||_zonesLookup[k.toLowerCase()]||k;})(),
         serviceType:   ss(j.serviceType||j.ServiceType||j.jobType||j.JobType||j.bookingType||j.BookingType||j.service||j.jobservice||'—'),
         companyId:     ss(j.companyId,'—'),
-        jobstatus:     ss(j.jobstatus||j.jobStatus,'—'),
-        status:        ss(j.status,'—'),
+        jobstatus:     ss(j.jobstatus||j.jobStatus||j.Status||j.status,'—'),
+        status:        ss(j.status||j.Status||j.jobstatus||j.jobStatus,'—'),
         description:   ss(j.discription||j.description||j.Description,'—'),
         dateTime:      dtStr,
         _ts:           ts,

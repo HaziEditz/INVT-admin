@@ -143,12 +143,16 @@ test('server.js wires TM merge sources + shared detection', () => {
   assert.match(src, /function mergeOwnerTmJobMap/);
   assert.match(src, /adminRead\('closedJobs\/' \+ cid\)/);
   assert.match(src, /adminRead\('tmTripStatus\/' \+ cid\)/);
-  // Dashboard tile uses TM economics detection, not bookingType-only
-  assert.match(src, /Align with TM Trip History/);
-  assert.match(src, /job\.isTotalMobility === true/);
+  // Dashboard Total TM Trips uses same merge scope as Cardholder Usage
   assert.match(src, /Total TM Trips/);
-  // Total Mobility Jobs report uses economics markers
+  assert.match(src, /_dashMergeTm/);
+  assert.match(src, /completed \+ closed \+ status/);
+  assert.match(src, /TM_Usage\.aspx/);
+  assert.match(src, /function _dashIsTm/);
+  // Total Mobility Jobs report uses economics markers + JobCompleteTime for _ts
   assert.match(src, /Same detection as TM Trip History/);
+  assert.match(src, /JobCompleteTime\|\|j\.jobCompleteTime/);
+  assert.match(src, /tmCardName\|\|j\.tmPassengerName/);
 });
 
 test('owner TM Trip History has bulk pending submit (pending→submitted only)', () => {
