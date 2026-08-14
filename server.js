@@ -17142,6 +17142,10 @@ function openTripDetail(key) {
         (_tmHoistLines(t) ? '<div class="tmd-field" style="grid-column:1/-1"><label>Hoist detail</label><span style="font-size:12px;color:#64748b">' + _tmHoistLines(t) + '</span></div>' : '') +
         row('Council total (meter + hoist)', '<strong style="color:#0d9488">' + fmtMoney(_tmMeterClaim(t) + _tmHoistPays(t)) + '</strong>') +
         row('Passenger Pays', fmtMoney(t.tmPassengerPays || t.passengerPays || t.patientPays)) +
+        (parseFloat(t.transactionFee) > 0
+          ? row('Transaction fee (not in claim)', fmtMoney(t.transactionFee)) +
+            row('Collected from passenger', fmtMoney(t.passengerCollectedTotal != null ? t.passengerCollectedTotal : ((parseFloat(t.tmPassengerPays || t.passengerPays || 0) || 0) + (parseFloat(t.transactionFee) || 0))))
+          : '') +
         row('Payment Type', t.paymentType || t.payment_type) +
       '</div>' +
     '</div>';
