@@ -2661,12 +2661,26 @@ function _loadBillingWidget() {
     var pkg = pkgId && packages[pkgId] ? packages[pkgId] : null;
     var typeLabel = (plan.name || (pkg && pkg.name)) ||
       (plan.type === 'per_car' ? 'Per Car / Month' : (plan.type === 'flat' ? 'Flat Monthly' : (plan.type === 'free' ? 'Free / Trial' : String(plan.type || '—'))));
-    var status = String(plan.status || billing.status || 'active');
+    var status = String(plan.status || billing.status || 'active').toLowerCase();
     var nextBillRaw = billing.nextDueDate || plan.nextDueDate || plan.nextBillDate || '';
+    var nextBillMs = nextBillRaw ? (function(d) {
+      if (typeof d === 'number') return d < 1e12 ? d * 1000 : d;
+      var ms = Date.parse(d);
+      return isNaN(ms) ? null : ms;
+    })(nextBillRaw) : null;
     var nextBill = nextBillRaw ? (function(d) {
-      try { return new Date(d).toLocaleDateString('en-NZ', { day:'2-digit', month:'short', year:'numeric' }); }
-      catch(e) { return d; }
+      try {
+        var ms = nextBillMs != null ? nextBillMs : Date.parse(d);
+        if (isNaN(ms)) return String(d);
+        return new Date(ms).toLocaleDateString('en-NZ', { day:'2-digit', month:'short', year:'numeric' });
+      } catch(e) { return d; }
     })(nextBillRaw) : '—';
+    // Past nextDueDate with status still "active" is overdue — never show Active + past due together.
+    if (nextBillMs != null && nextBillMs < Date.now() && (status === 'active' || status === 'trial' || !status)) {
+      status = 'overdue';
+      var daysOver = Math.round((Date.now() - nextBillMs) / 86400000);
+      if (daysOver > 0) nextBill += ' (' + daysOver + 'd overdue)';
+    }
     var trialEnd = Number(plan.trialEnd || 0) || null;
     var now = Date.now();
     var graceDays = Number(billing.gracePeriodDays || billing.graceDays || 7);
@@ -2677,9 +2691,9 @@ function _loadBillingWidget() {
       if (now < trialEnd) daysLabel = Math.max(0, Math.ceil((trialEnd - now) / 86400000)) + ' (trial)';
       else if (now < accessUntil) daysLabel = Math.max(0, Math.ceil((accessUntil - now) / 86400000)) + ' (grace)';
       else daysLabel = 'Expired';
-    } else if (nextBillRaw) {
-      var nbMs = Date.parse(nextBillRaw);
-      if (!isNaN(nbMs)) daysLabel = Math.max(0, Math.ceil((nbMs - now) / 86400000)) + ' until bill';
+    } else if (nextBillMs != null) {
+      if (nextBillMs < now) daysLabel = Math.max(0, Math.round((now - nextBillMs) / 86400000)) + 'd overdue';
+      else daysLabel = Math.max(0, Math.ceil((nextBillMs - now) / 86400000)) + ' until bill';
     }
     var pel = document.getElementById('dash-billing-plan');
     var del = document.getElementById('dash-billing-days');
@@ -2687,8 +2701,15 @@ function _loadBillingWidget() {
     var sel = document.getElementById('dash-billing-status');
     if (pel) pel.textContent = typeLabel;
     if (del) del.textContent = daysLabel;
-    if (nel) nel.textContent = nextBill;
-    if (sel) sel.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    if (nel) {
+      nel.textContent = nextBill;
+      if (status === 'overdue') nel.style.color = '#C62828';
+    }
+    if (sel) {
+      sel.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+      if (status === 'overdue') sel.style.color = '#C62828';
+      else if (status === 'active') sel.style.color = '#2E7D32';
+    }
   }).catch(function() {});
 }
 
@@ -3269,6 +3290,32 @@ function startListeners() {
       .then(function(d) { return d && typeof d === 'object' ? Object.keys(d).length : 0; })
       .catch(function() { return 0; });
   }
+  /** Distinct roster people under drivers/{cid} — push-key + UID dupes of the same email/uid count once. */
+  function _driverRosterCount(cid) {
+    return window.adminRead('drivers/' + cid).then(function(bucket) {
+      if (!bucket || typeof bucket !== 'object') return 0;
+      var seen = {};
+      var n = 0;
+      Object.keys(bucket).forEach(function(k) {
+        var d = bucket[k];
+        if (!d || typeof d !== 'object') return;
+        if (!(d.email || d.uid || d.dispatcherId || d.firstName || d.lastName || d.name || d.phone || d.mobileNumber || d.mobile)) return;
+        var ids = [];
+        var uid = String(d.uid || d.dispatcherId || d.id || '').trim().toLowerCase();
+        if (uid) ids.push('uid:' + uid);
+        else if (k && k.charAt(0) !== '-') ids.push('uid:' + String(k).trim().toLowerCase());
+        var email = String(d.email || '').trim().toLowerCase();
+        if (email) ids.push('email:' + email);
+        var phone = String(d.phone || d.mobileNumber || d.mobile || '').replace(/\D/g, '');
+        if (phone.length >= 7) ids.push('phone:' + phone);
+        if (!ids.length) ids.push('key:' + k);
+        if (ids.some(function(id) { return seen[id]; })) return;
+        ids.forEach(function(id) { seen[id] = 1; });
+        n++;
+      });
+      return n;
+    }).catch(function() { return 0; });
+  }
   function _loadTotals() {
     var cid = COMPANY_ID;
     // Placeholders first so the layout settles instantly
@@ -3317,7 +3364,7 @@ function startListeners() {
       customers:  _shallowCount('customers/' + cid),
       baccounts:  _shallowCount('businessAccounts/' + cid),
       accclients: _shallowCount('accClients/' + cid),
-      drivers:    _shallowCount('drivers/' + cid),
+      drivers:    _driverRosterCount(cid),
       vehicles:   _shallowCount('vehicles/' + cid),
       food:       _shallowCount('foodOrders/' + cid),
       freight:    _shallowCount('freightOrders/' + cid),
@@ -3332,7 +3379,8 @@ function startListeners() {
         .toLowerCase().replace(/[_\s-]/g, '');
       if (pt === 'totalmobility' || pt === 'tm') return true;
       if (job.tmPaymentType === 'total_mobility' || job.paymentCategory === 'total_mobility') return true;
-      if (job.tmCouncilPays != null || job.councilPays != null || job.tmSubsidyFare != null || job.tmSubsidy != null) return true;
+      if (job.tmCouncilPays != null || job.councilPays != null || job.tmSubsidy != null) return true;
+      if (job.tmSubsidyFare != null && Number(job.tmSubsidyFare) > 0) return true;
       if (job.tmCardNumber || job.tmVoucherNo) return true;
       if (Array.isArray(job.tmHoists) && job.tmHoists.length > 0) return true;
       var bt = String(job.bookingType || job.jobType || job.JobType || '').toLowerCase();
@@ -3451,6 +3499,7 @@ function startListeners() {
       if (!plan || typeof plan !== 'object') plan = {};
       var dRaw = billing.nextDueDate || plan.nextDueDate || plan.nextBillDate || plan.nextBillingDate;
       var dateStr = 'Not Set';
+      var overdue = false;
       if (dRaw) {
         var ms = (typeof dRaw === 'number') ? (dRaw < 1e12 ? dRaw * 1000 : dRaw) : Date.parse(dRaw);
         if (!isNaN(ms) && ms > 0) {
@@ -3458,7 +3507,7 @@ function startListeners() {
           try {
             dateStr = new Intl.DateTimeFormat('en-NZ', { timeZone: NZ_TZ, day:'2-digit', month:'short', year:'numeric' }).format(new Date(ms));
             var daysOut = Math.round((ms - Date.now()) / 86400000);
-            if (daysOut < 0) dateStr += ' (' + Math.abs(daysOut) + 'd overdue)';
+            if (daysOut < 0) { overdue = true; dateStr += ' (' + Math.abs(daysOut) + 'd overdue)'; }
             else if (daysOut === 0) dateStr += ' (today)';
             else dateStr += ' (in ' + daysOut + 'd)';
           } catch(e){}
@@ -3468,8 +3517,9 @@ function startListeners() {
       if (plan.type === 'per_car' && plan.rate) planParts.push('$' + plan.rate + '/car');
       else if (plan.type === 'flat' && plan.rate) planParts.push('$' + plan.rate + '/mo');
       else if (plan.type === 'free') planParts.push('Free / Trial');
-      var st = plan.status || billing.status;
-      if (st) planParts.push(String(st));
+      var st = String(plan.status || billing.status || 'active').toLowerCase();
+      if (overdue && (st === 'active' || st === 'trial' || !st)) st = 'overdue';
+      if (st) planParts.push(st);
       return { nextBill: dateStr, billPlan: planParts.join(' · ') || 'No plan configured' };
     }).catch(function(){ return { nextBill:'Not Set', billPlan:'No plan configured' }; });
 
@@ -17020,20 +17070,25 @@ function approveTrip(key) {
     return Promise.resolve(false);
   }
   var councilId = st0.councilId || t.councilId || t.tmCouncilId || '';
+  if (!String(councilId || '').trim()) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+    alert('Cannot submit to council — this trip has no councilId. Assign a TM council/card before approving.');
+    return Promise.resolve(false);
+  }
   var now = Date.now();
   var update = {
     status: 'submitted',
     approvedAt: now,
     approvedBy: cid,
     submittedAt: now,
-    submittedBy: cid
+    submittedBy: cid,
+    councilId: String(councilId).trim()
   };
-  if (councilId) update.councilId = councilId;
   return window.adminWrite('tmTripStatus/' + cid + '/' + key, 'PATCH', update).then(function() {
     if (!_tripStatuses[key]) _tripStatuses[key] = {};
     _tripStatuses[key].status = 'submitted';
     _tripStatuses[key].submittedAt = now;
-    if (councilId) _tripStatuses[key].councilId = councilId;
+    _tripStatuses[key].councilId = String(councilId).trim();
     var stCell = document.getElementById('st-' + key);
     if (stCell) stCell.innerHTML = statusBadge('submitted');
     if (btn) { btn.style.display = 'none'; }
@@ -17395,7 +17450,9 @@ function isOwnerTmCompletedJob(j) {
     .toLowerCase().replace(/[_\s-]/g, '');
   if (pt === 'totalmobility' || pt === 'tm') return true;
   if (j.tmPaymentType === 'total_mobility' || j.paymentCategory === 'total_mobility') return true;
-  if (j.tmCouncilPays != null || j.councilPays != null || j.tmSubsidyFare != null || j.tmSubsidy != null) return true;
+  // Real TM economics — ignore bare tmSubsidyFare:0 (cash jobs wrongly tagged).
+  if (j.tmCouncilPays != null || j.councilPays != null || j.tmSubsidy != null) return true;
+  if (j.tmSubsidyFare != null && Number(j.tmSubsidyFare) > 0) return true;
   if (j.tmCardNumber || j.tmVoucherNo) return true;
   if (Array.isArray(j.tmHoists) && j.tmHoists.length > 0) return true;
   return false;
@@ -17866,7 +17923,8 @@ function isOwnerTmCompletedJob(j) {
     .toLowerCase().replace(/[_\\s-]/g, '');
   if (pt === 'totalmobility' || pt === 'tm') return true;
   if (j.tmPaymentType === 'total_mobility' || j.paymentCategory === 'total_mobility') return true;
-  if (j.tmCouncilPays != null || j.councilPays != null || j.tmSubsidyFare != null || j.tmSubsidy != null) return true;
+  if (j.tmCouncilPays != null || j.councilPays != null || j.tmSubsidy != null) return true;
+  if (j.tmSubsidyFare != null && Number(j.tmSubsidyFare) > 0) return true;
   if (j.tmCardNumber || j.tmVoucherNo) return true;
   if (Array.isArray(j.tmHoists) && j.tmHoists.length > 0) return true;
   return false;
