@@ -234,6 +234,7 @@ const PAGE_META = {
   // tm_tariffs.aspx removed from nav — legacy unused (route kept as notice page)
   'tm_councils.aspx':            { title: 'TM Council Access',       icon: '&#xE8E5;',  section: 'Total Mobility' },
   'tm_trips.aspx':               { title: 'TM Trip History',         icon: '&#xE8E5;',  section: 'Total Mobility' },
+  'tm_usage.aspx':               { title: 'TM Cardholder Usage',     icon: '&#xE8E5;',  section: 'Total Mobility' },
   'tm_batches.aspx':             { title: 'TM Claim Batches',        icon: '&#xE8E5;',  section: 'Total Mobility' },
   'drivercompliance.aspx':       { title: 'Driver Compliance',       icon: '&#xE8D5;',  section: 'Reports' },
   'driveropssummary.aspx':       { title: 'Driver Ops & Payments',   icon: '&#xE227;',  section: 'Reports' },
@@ -1779,6 +1780,7 @@ function sidebarHTML() {
       <ul>
         <li><a href="TM_Councils.aspx">Council Access</a></li>
         <li><a href="TM_Trips.aspx">Trip History</a></li>
+        <li><a href="TM_Usage.aspx">Cardholder Usage</a></li>
         <li><a href="TM_Batches.aspx">Claim Batches</a></li>
       </ul>
     </li>
@@ -17688,6 +17690,200 @@ function saveManualTmEntry() {
   return pageWrap(commonHead('TM Trip History', css), body, commonScripts(js));
 }
 
+function tmUsagePage(companyId) {
+  const css = `<style>
+.tm-wrap{padding:24px;max-width:1200px;margin:0 auto;}
+.tm-page-title{font-size:20px;font-weight:700;color:#1e293b;margin:0 0 4px;display:flex;align-items:center;gap:10px;}
+.tm-page-sub{font-size:13px;color:#94a3b8;margin:0 0 20px;}
+.tm-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+.tm-select{padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;background:#fff;}
+.tm-card{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.10);overflow:hidden;margin-bottom:16px;}
+.tm-card-hd{padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0d9488;}
+.tm-table{width:100%;border-collapse:collapse;font-size:13px;}
+.tm-table th{background:#F8FAFC;padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid #e2e8f0;}
+.tm-table td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+.tm-btn{padding:7px 12px;border-radius:6px;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:12px;font-weight:600;cursor:pointer;}
+.tm-btn.on{background:#0d9488;color:#fff;border-color:#0d9488;}
+.tm-empty{text-align:center;padding:32px;color:#94a3b8;}
+.tm-stats{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
+.tm-stat{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:12px 16px;min-width:120px;}
+.tm-stat .v{font-size:18px;font-weight:700;color:#0f766e;}
+.tm-stat .l{font-size:11px;color:#94a3b8;margin-top:2px;}
+</style>`;
+
+  const body = `<div class="page-content"><div class="tm-wrap">
+  <div>
+    <div class="tm-page-title"><i class="material-icons" style="color:#0d9488;font-size:24px">&#xE8E5;</i>TM Cardholder Usage</div>
+    <div class="tm-page-sub">Per-card / passenger usage with fare, council, passenger remainder, and payment type. Same Insights formulas as council Trips. Custom date range + day/month rollup.</div>
+  </div>
+  <div class="tm-toolbar">
+    <label style="font-size:12px;color:#64748b">From <input type="date" id="tu-from" class="tm-select" onchange="tuRender()"/></label>
+    <label style="font-size:12px;color:#64748b">To <input type="date" id="tu-to" class="tm-select" onchange="tuRender()"/></label>
+    <button type="button" class="tm-btn on" id="tu-period-day" onclick="tuSetPeriod('day')">Day</button>
+    <button type="button" class="tm-btn" id="tu-period-month" onclick="tuSetPeriod('month')">Month</button>
+    <span id="tu-count" style="font-size:13px;color:#94a3b8"></span>
+    <div style="flex:1"></div>
+    <a href="TM_Trips.aspx" class="tm-btn">Trip History</a>
+  </div>
+  <div class="tm-stats" id="tu-stats"></div>
+  <div class="tm-card">
+    <div class="tm-card-hd">By card</div>
+    <div id="tu-by-card" class="tm-empty">Loading…</div>
+  </div>
+  <div class="tm-card">
+    <div class="tm-card-hd">By passenger</div>
+    <div id="tu-by-passenger" class="tm-empty">Loading…</div>
+  </div>
+  <div class="tm-card">
+    <div class="tm-card-hd" id="tu-period-hd">Usage by day</div>
+    <div id="tu-period" class="tm-empty">Loading…</div>
+  </div>
+</div></div>
+<script src="assets/js/tmUsageAggregate.client.js"></script>`;
+
+  const js = `<script>
+var _tuAll = [];
+var _tuPeriod = 'day';
+function _tuTs(t) {
+  if (t.timestamp && !isNaN(Number(t.timestamp))) return Number(t.timestamp);
+  var iso = t.completedAt_ISO || t.completedAt || t.startedAt_ISO || t.startedAt;
+  if (iso) { var d = new Date(iso); if (!isNaN(d)) return d.getTime(); }
+  return 0;
+}
+function isOwnerTmCompletedJob(j) {
+  if (!j || typeof j !== 'object') return false;
+  if (j.isTotalMobility === true || j.tmUsed === true) return true;
+  var pt = (j.paymentType || j.payment_type || j.PaymentType || j.paymentMethod || '')
+    .toLowerCase().replace(/[_\\s-]/g, '');
+  if (pt === 'totalmobility' || pt === 'tm') return true;
+  if (j.tmPaymentType === 'total_mobility' || j.paymentCategory === 'total_mobility') return true;
+  if (j.tmCouncilPays != null || j.councilPays != null || j.tmSubsidyFare != null || j.tmSubsidy != null) return true;
+  if (j.tmCardNumber || j.tmVoucherNo) return true;
+  if (Array.isArray(j.tmHoists) && j.tmHoists.length > 0) return true;
+  return false;
+}
+function _tmJobRecordId(k, j) {
+  return String((j && (j.bookingId || j.jobId || j.BookingId)) || k);
+}
+function mergeOwnerTmJobMap(completedJobs, closedJobs, statusData, allbookings) {
+  var map = {};
+  function absorb(data) {
+    if (!data || typeof data !== 'object') return;
+    Object.keys(data).forEach(function(k) {
+      var j = data[k];
+      if (!j || typeof j !== 'object') return;
+      var id = _tmJobRecordId(k, j);
+      if (!map[id]) map[id] = { _key: id };
+      Object.assign(map[id], j);
+      map[id]._key = id;
+    });
+  }
+  absorb(completedJobs);
+  absorb(closedJobs);
+  absorb(allbookings);
+  Object.keys(statusData || {}).forEach(function(k) {
+    var st = statusData[k];
+    if (!st || typeof st !== 'object') return;
+    var id = _tmJobRecordId(k, st);
+    if (!map[id]) map[id] = { _key: id };
+    Object.assign(map[id], st);
+    map[id]._key = id;
+  });
+  return map;
+}
+function extractTmTrips(jobsData) {
+  var trips = [];
+  Object.keys(jobsData || {}).forEach(function(k) {
+    var j = jobsData[k];
+    if (!j) return;
+    if (!isOwnerTmCompletedJob(j)) return;
+    j._key = j._key || k;
+    trips.push(j);
+  });
+  return trips;
+}
+function tuEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function tuUsageTable(rows) {
+  var U = window.TmUsageAggregate;
+  if (!rows || !rows.length) return '<div class="tm-empty">No data for this selection.</div>';
+  return '<table class="tm-table"><thead><tr><th>Name</th><th>Trips</th><th>Fare $</th><th>Council $</th><th>Pax $</th><th>Pay type</th><th>Hoist $</th></tr></thead><tbody>' +
+    rows.map(function(r) {
+      return '<tr><td>' + tuEsc(r.label) + '</td><td>' + r.trips + '</td><td>$' + (r.meterFare||0).toFixed(2) +
+        '</td><td>$' + (r.councilPays||0).toFixed(2) + '</td><td>$' + (r.passengerPays||0).toFixed(2) +
+        '</td><td style="font-size:11px">' + tuEsc(U.formatPayByType(r.payByType)) +
+        '</td><td>$' + (r.hoistPays||0).toFixed(2) + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+function tuPeriodTable(rows) {
+  var U = window.TmUsageAggregate;
+  if (!rows || !rows.length) return '<div class="tm-empty">No data for this selection.</div>';
+  return '<table class="tm-table"><thead><tr><th>Period</th><th>Trips</th><th>Fare $</th><th>Council $</th><th>Pax $</th><th>Pay type</th><th>Hoist $</th><th>Hoist uses</th></tr></thead><tbody>' +
+    rows.map(function(r) {
+      return '<tr><td>' + tuEsc(r.key) + '</td><td>' + r.trips + '</td><td>$' + (r.meterFare||0).toFixed(2) +
+        '</td><td>$' + (r.councilPays||0).toFixed(2) + '</td><td>$' + (r.passengerPays||0).toFixed(2) +
+        '</td><td style="font-size:11px">' + tuEsc(U.formatPayByType(r.payByType)) +
+        '</td><td>$' + (r.hoistPays||0).toFixed(2) + '</td><td>' + r.hoistUses + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+function tuSetPeriod(p) {
+  _tuPeriod = p === 'month' ? 'month' : 'day';
+  document.getElementById('tu-period-day').className = 'tm-btn' + (_tuPeriod === 'day' ? ' on' : '');
+  document.getElementById('tu-period-month').className = 'tm-btn' + (_tuPeriod === 'month' ? ' on' : '');
+  document.getElementById('tu-period-hd').textContent = _tuPeriod === 'day' ? 'Usage by day' : 'Usage by month';
+  tuRender();
+}
+function tuRender() {
+  var U = window.TmUsageAggregate;
+  if (!U) {
+    document.getElementById('tu-by-card').innerHTML = '<div class="tm-empty" style="color:#dc2626">Usage helper failed to load.</div>';
+    return;
+  }
+  var from = (document.getElementById('tu-from').value || '').trim();
+  var to = (document.getElementById('tu-to').value || '').trim();
+  var trips = U.filterByDateRange(_tuAll, from, to);
+  document.getElementById('tu-count').textContent = trips.length + ' trip(s)';
+  var usage = U.aggregateTripUsage(trips);
+  var period = _tuPeriod === 'month' ? U.aggregateUsageByMonth(trips) : U.aggregateUsageByDay(trips);
+  var fare = 0, council = 0, pax = 0;
+  trips.forEach(function(t) {
+    fare += U.meterFareOf(t);
+    council += U.subsidyOf(t);
+    pax += U.passengerPaysOf(t);
+  });
+  document.getElementById('tu-stats').innerHTML =
+    '<div class="tm-stat"><div class="v">' + trips.length + '</div><div class="l">Trips</div></div>' +
+    '<div class="tm-stat"><div class="v">$' + fare.toFixed(2) + '</div><div class="l">Meter fare</div></div>' +
+    '<div class="tm-stat"><div class="v">$' + council.toFixed(2) + '</div><div class="l">Council claim</div></div>' +
+    '<div class="tm-stat"><div class="v">$' + pax.toFixed(2) + '</div><div class="l">Passenger pays</div></div>';
+  document.getElementById('tu-by-card').innerHTML = tuUsageTable(usage.byCard);
+  document.getElementById('tu-by-passenger').innerHTML = tuUsageTable(usage.byPassenger);
+  document.getElementById('tu-period').innerHTML = tuPeriodTable(period);
+}
+function tuLoad() {
+  var cid = window.COMPANY_ID;
+  if (!cid) { setTimeout(tuLoad, 400); return; }
+  Promise.all([
+    window.adminRead('completedJobs/' + cid),
+    window.adminRead('closedJobs/' + cid).catch(function(){ return {}; }),
+    window.adminRead('tmTripStatus/' + cid),
+    window.adminRead('allbookings/' + cid).catch(function(){ return {}; })
+  ]).then(function(results) {
+    var merged = mergeOwnerTmJobMap(results[0] || {}, results[1] || {}, results[2] || {}, results[3] || {});
+    _tuAll = extractTmTrips(merged).sort(function(a,b){ return _tuTs(b) - _tuTs(a); });
+    tuSetPeriod('day');
+  }).catch(function(e) {
+    document.getElementById('tu-by-card').innerHTML = '<div class="tm-empty" style="color:#dc2626">Failed: ' + tuEsc(e && e.message ? e.message : e) + '</div>';
+  });
+}
+window._fbOnLogin = function(){ tuLoad(); };
+if (window.COMPANY_ID) tuLoad();
+<\/script>`;
+  return pageWrap(commonHead('TM Cardholder Usage', css), body, commonScripts(js));
+}
+
 function tmBatchesPage(companyId) {
   const css = `<style>
 .tm-wrap{padding:24px;max-width:1000px;margin:0 auto;}
@@ -23441,6 +23637,10 @@ const server = http.createServer((req, res) => {
     if (lname === 'tm_trips.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
       res.end(withSa(withCid(tmTripsPage(cid), cid), isSA)); return;
+    }
+    if (lname === 'tm_usage.aspx') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
+      res.end(withSa(withCid(tmUsagePage(cid), cid), isSA)); return;
     }
     if (lname === 'tm_batches.aspx') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache' });
