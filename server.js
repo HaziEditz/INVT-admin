@@ -24514,46 +24514,69 @@ function _watchdogTick() {
 // Scans allbookings/{companyId} every 5 min for bookings stuck at "Waiting" or
 // "Searching" longer than PASSENGER_WAITING_CANCEL_MS and marks them Cancelled.
 // Also updates Passengerjobs/{passengerId}/{jobId} so the passenger app reflects it.
+//
+// Download hygiene (2026-08): never pull allbookings ROOT. Load-test tenants
+// (bwtest / bwtesttariff) hold multi-MB harness spam — exclude them. Discover
+// company keys via shallow REST, then Admin-SDK per-cid reads for real tenants.
 const PASSENGER_WAITING_CANCEL_MS = 30 * 60 * 1000; // 30 min
 
-function _cleanStuckPassengerBookings() {
-  if (!firebaseAdmin) return; // needs admin SDK
-  const db = firebaseAdmin.database();
-  db.ref('allbookings').once('value').then(snap => {
-    const allCompanies = snap.val() || {};
+function _isSyntheticLoadTestCompanyId(cid) {
+  const c = String(cid || '').trim().toLowerCase();
+  if (!c) return false;
+  if (c === 'bwtest' || c === 'bwtesttariff') return true;
+  if (c.indexOf('bwtest') === 0) return true;
+  return false;
+}
+
+function _scanStuckPassengerBookingsForCid(db, companyId) {
+  return db.ref('allbookings/' + companyId).once('value').then(snap => {
+    const bookings = snap.val() || {};
+    if (!bookings || typeof bookings !== 'object') return;
     const toCancel = [];
-    Object.entries(allCompanies).forEach(([companyId, bookings]) => {
-      if (!bookings || typeof bookings !== 'object') return;
-      Object.entries(bookings).forEach(([jobId, job]) => {
-        if (!job || typeof job !== 'object') return;
-        const st = String(job.status || job.Status || '').toLowerCase();
-        if (st !== 'waiting' && st !== 'searching') return;
-        // Use createdAt timestamp to determine age
-        const createdAt = job.createdAt || job.CreatedAt;
-        if (!createdAt) return;
-        const ageMs = Date.now() - Number(createdAt);
-        if (ageMs < PASSENGER_WAITING_CANCEL_MS) return;
-        toCancel.push({
-          companyId, jobId, ageMs,
-          passengerId: job.passengerId || job.PassengerId || null
-        });
+    Object.entries(bookings).forEach(([jobId, job]) => {
+      if (!job || typeof job !== 'object') return;
+      const st = String(job.status || job.Status || '').toLowerCase();
+      if (st !== 'waiting' && st !== 'searching') return;
+      const createdAt = job.createdAt || job.CreatedAt;
+      if (!createdAt) return;
+      const ageMs = Date.now() - Number(createdAt);
+      if (ageMs < PASSENGER_WAITING_CANCEL_MS) return;
+      toCancel.push({
+        companyId, jobId, ageMs,
+        passengerId: job.passengerId || job.PassengerId || null
       });
     });
     if (!toCancel.length) return;
-    console.log('[Watchdog-Pax] ' + toCancel.length + ' stuck passenger booking(s) to cancel');
+    console.log('[Watchdog-Pax] ' + toCancel.length + ' stuck passenger booking(s) to cancel (cid=' + companyId + ')');
     const nowISO = new Date().toISOString();
-    toCancel.forEach(({ companyId, jobId, passengerId, ageMs }) => {
+    toCancel.forEach(({ jobId, passengerId, ageMs }) => {
       const patch = { status: 'Cancelled', cancelledAt: nowISO, cancelReason: 'No driver available — auto-cancelled after ' + Math.round(ageMs / 60000) + ' min' };
-      // Update allbookings record
       db.ref('allbookings/' + companyId + '/' + jobId).update(patch)
         .then(() => console.log('[Watchdog-Pax] Cancelled #' + jobId + ' (age ' + Math.round(ageMs / 60000) + 'min, company ' + companyId + ')'))
         .catch(e => console.warn('[Watchdog-Pax] Cancel failed #' + jobId + ':', e.message));
-      // Best-effort: also update the passenger's own copy
       if (passengerId) {
         db.ref('Passengerjobs/' + passengerId + '/' + jobId).update(patch).catch(() => {});
       }
     });
-  }).catch(e => console.warn('[Watchdog-Pax] Scan error:', e.message));
+  }).catch(e => console.warn('[Watchdog-Pax] Scan error cid=' + companyId + ':', e.message));
+}
+
+function _cleanStuckPassengerBookings() {
+  if (!firebaseAdmin) return; // needs admin SDK
+  const db = firebaseAdmin.database();
+  // Shallow keys only (~bytes), not the multi-MB root payload.
+  proxyFirebaseRead('allbookings', (err, shallow) => {
+    if (err) {
+      console.warn('[Watchdog-Pax] shallow allbookings list failed:', err);
+      return;
+    }
+    const cids = Object.keys(shallow && typeof shallow === 'object' ? shallow : {})
+      .filter(function(cid) { return !_isSyntheticLoadTestCompanyId(cid); });
+    if (!cids.length) return;
+    cids.forEach(function(companyId) {
+      _scanStuckPassengerBookingsForCid(db, companyId);
+    });
+  }, 'shallow=true');
 }
 
 // Start ONE listener — populates cache live, zero repeat reads
