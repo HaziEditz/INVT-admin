@@ -10380,6 +10380,21 @@ function tariffsPage() {
       <div class="tw-pane active" id="tw-pane-1">
         <div class="tw-field"><label>Tariff Name</label><input id="tw-name" type="text" placeholder="e.g. Standard, Night Rate, Airport"/></div>
         <div class="tw-grid2">
+          <div class="tw-field"><label>Purpose</label>
+            <select id="tw-purpose">
+              <option value="Standard">Standard (1–4 passengers)</option>
+              <option value="Van">Van (5+ / van vehicles)</option>
+              <option value="Total Mobility">Total Mobility</option>
+            </select>
+            <p class="tw-note">Fare calculation matches Purpose + schedule window.</p>
+          </div>
+          <div class="tw-field" style="display:flex;align-items:flex-end;padding-bottom:8px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:500;color:#334155">
+              <input type="checkbox" id="tw-is-default" style="width:16px;height:16px;accent-color:#0d9488"/> Default for this Purpose
+            </label>
+          </div>
+        </div>
+        <div class="tw-grid2">
           <div class="tw-field"><label>Flag Fall / Base Fare ($)</label><input id="tw-base" type="number" min="0" step="0.01" placeholder="0.00"/></div>
           <div class="tw-field"><label>Distance Rate ($ per km)</label><input id="tw-perkm" type="number" min="0" step="0.01" placeholder="0.00"/><p class="tw-note">e.g. $4.60 = $4.60 charged per 1000 metres</p></div>
           <div class="tw-field"><label>Waiting Rate ($ per minute)</label><input id="tw-waiting" type="number" min="0" step="0.01" placeholder="0.00"/><p class="tw-note">e.g. $1.00 = $1 charged every 60 seconds when stopped</p></div>
@@ -10539,7 +10554,17 @@ function twNormalizeTariff(key, t) {
     specificDates: t.specificDates || t.specialRateDates || [],
     useNzHolidays: t.useNzHolidays !== false,
     speedThreshold: t.speedThreshold != null ? t.speedThreshold : 1,
-    waitingInterval: t.waitingInterval != null ? t.waitingInterval : 60
+    waitingInterval: t.waitingInterval != null ? t.waitingInterval : 60,
+    Purpose: (function() {
+      if (t.Purpose) return t.Purpose;
+      if (t.purpose) return t.purpose;
+      if (t.isTM === true || t.IsTM === true) return 'Total Mobility';
+      var n = String(t.TariffName || t.name || '').toLowerCase();
+      if (n.indexOf('van') !== -1 || n.indexOf('wav') !== -1) return 'Van';
+      return 'Standard';
+    })(),
+    isDefault: t.isDefault === true || t.IsDefault === true || t.defaultForPurpose === true,
+    isTM: t.isTM === true || t.IsTM === true || String(t.Purpose || t.purpose || '') === 'Total Mobility'
   });
 }
 
@@ -10611,6 +10636,7 @@ function renderTariffs() {
       '<span class="tw-badge ' + (active ? 'on' : 'off') + '">' + (active ? 'Active now' : 'Inactive') + '</span></div>' +
       '<p class="tw-card-rates">Flag Fall: ' + twFmt(t.flagFall != null ? t.flagFall : t.baseFare) + ' | ' + twFmt(t.pricePerKm) + '/km | ' + twFmt(t.waitingRatePerMinute) + '/min waiting</p>' +
       '<dl class="tw-card-grid">' +
+      '<dt>Purpose</dt><dd>' + twEsc(t.Purpose || 'Standard') + (t.isDefault ? ' (default)' : '') + '</dd>' +
       '<dt>Min Fare</dt><dd>' + twFmt(t.minimumFare) + '</dd>' +
       '<dt>When Active</dt><dd>' + twEsc(twWhenLabel(t)) + '</dd>' +
       '<dt>Zones</dt><dd>' + twEsc(twZonesLabel(t)) + '</dd>' +
@@ -10632,6 +10658,8 @@ function twOpenWizard(id) {
   document.getElementById('tw-err').style.display = 'none';
   document.getElementById('tw-modal-title').textContent = id ? 'Edit Tariff' : 'Add Tariff';
   document.getElementById('tw-name').value = '';
+  document.getElementById('tw-purpose').value = 'Standard';
+  document.getElementById('tw-is-default').checked = false;
   document.getElementById('tw-base').value = '';
   document.getElementById('tw-perkm').value = '';
   document.getElementById('tw-waiting').value = '';
@@ -10648,6 +10676,8 @@ function twOpenWizard(id) {
   if (id && allTariffs[id]) {
     var t = allTariffs[id];
     document.getElementById('tw-name').value = t.TariffName || t.name || '';
+    document.getElementById('tw-purpose').value = t.Purpose || 'Standard';
+    document.getElementById('tw-is-default').checked = !!t.isDefault;
     document.getElementById('tw-base').value = t.baseFare != null ? t.baseFare : '';
     document.getElementById('tw-perkm').value = t.pricePerKm != null ? t.pricePerKm : '';
     document.getElementById('tw-waiting').value = t.waitingRatePerMinute != null ? t.waitingRatePerMinute : '';
@@ -10794,6 +10824,9 @@ function twReadForm() {
   if (when === 'weekends') days = [0,6];
   return {
     name: document.getElementById('tw-name').value.trim(),
+    Purpose: document.getElementById('tw-purpose').value || 'Standard',
+    isDefault: document.getElementById('tw-is-default').checked,
+    isTM: (document.getElementById('tw-purpose').value || '') === 'Total Mobility',
     baseFare: parseFloat(document.getElementById('tw-base').value) || 0,
     pricePerKm: parseFloat(document.getElementById('tw-perkm').value) || 0,
     waitingRatePerMinute: parseFloat(document.getElementById('tw-waiting').value) || 0,
@@ -10818,6 +10851,7 @@ function twBuildSummary() {
   var zones = f.zoneMode === 'all' ? 'All zones' : (f.zoneIds.length ? f.zoneIds.length + ' selected zone(s)' : 'No zones configured');
   document.getElementById('tw-summary').innerHTML =
     '<strong>' + twEsc(f.name) + '</strong><br><br>' +
+    'Purpose: <strong>' + twEsc(f.Purpose) + '</strong>' + (f.isDefault ? ' (default)' : '') + '<br>' +
     'Flag Fall: <strong>' + twFmt(f.baseFare) + '</strong> | <strong>' + twFmt(f.pricePerKm) + '/km</strong> | <strong>' + twFmt(f.waitingRatePerMinute) + '/min waiting</strong><br>' +
     'Min fare: <strong>' + twFmt(f.minimumFare) + '</strong><br><br>' +
     'When active: <strong>' + twEsc(twWhenLabel(f)) + '</strong><br>' +
@@ -10843,6 +10877,9 @@ function buildDriverTariffPayload(t, numericId) {
     zoneIds: t.zoneIds || [],
     useNzHolidays: t.useNzHolidays,
     specificDates: t.specificDates || [],
+    Purpose: t.Purpose || t.purpose || 'Standard',
+    isDefault: !!t.isDefault,
+    isTM: t.isTM === true || t.Purpose === 'Total Mobility',
     updatedAt: Date.now()
   };
 }
