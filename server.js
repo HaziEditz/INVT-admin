@@ -24587,10 +24587,29 @@ function _scanStuckPassengerBookingsForCid(db, companyId) {
     console.log('[Watchdog-Pax] ' + toCancel.length + ' stuck passenger booking(s) to cancel (cid=' + companyId + ')');
     const nowISO = new Date().toISOString();
     toCancel.forEach(({ jobId, passengerId, ageMs }) => {
-      const patch = { status: 'Cancelled', cancelledAt: nowISO, cancelReason: 'No driver available — auto-cancelled after ' + Math.round(ageMs / 60000) + ' min' };
+      const reason = 'No driver available — auto-cancelled after ' + Math.round(ageMs / 60000) + ' min';
+      const nowISO = new Date().toISOString();
+      // Stamp ALL status fields — lowercase-only left Status:Waiting ghosts that
+      // dispatch could not cancel (job never entered jobStore; pendingjobs stayed Waiting).
+      const patch = {
+        status: 'Cancelled',
+        Status: 'Cancelled',
+        BookingStatus: 'Cancelled',
+        cancelledAt: nowISO,
+        CancelledAt: nowISO,
+        cancelReason: reason,
+        CancelReason: reason,
+      };
       db.ref('allbookings/' + companyId + '/' + jobId).update(patch)
         .then(() => console.log('[Watchdog-Pax] Cancelled #' + jobId + ' (age ' + Math.round(ageMs / 60000) + 'min, company ' + companyId + ')'))
         .catch(e => console.warn('[Watchdog-Pax] Cancel failed #' + jobId + ':', e.message));
+      // Clear pendingjobs pool card — otherwise UA keeps showing Waiting forever.
+      db.ref('pendingjobs/' + companyId + '/' + jobId).update(patch)
+        .then(function() {
+          return db.ref('pendingjobs/' + companyId + '/' + jobId).remove();
+        })
+        .then(() => console.log('[Watchdog-Pax] pendingjobs #' + jobId + ' cleared'))
+        .catch(e => console.warn('[Watchdog-Pax] pendingjobs clear #' + jobId + ':', e.message));
       if (passengerId) {
         db.ref('Passengerjobs/' + passengerId + '/' + jobId).update(patch).catch(() => {});
       }
